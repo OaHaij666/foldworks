@@ -1,0 +1,108 @@
+package com.pockethomestead.block;
+
+import com.pockethomestead.blockentity.BaseChestBlockEntity;
+import com.pockethomestead.registry.ChestRegistryManager;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.MenuProvider;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.BaseEntityBlock;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.RenderShape;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityTicker;
+import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.StateDefinition;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.DirectionProperty;
+import net.minecraft.world.phys.BlockHitResult;
+import org.jetbrains.annotations.Nullable;
+
+/**
+ * 口袋家园方块基类 - 提取4个方块类的共同逻辑：
+ * - 渲染形状为 MODEL
+ * - 右键打开菜单
+ * - 支持红石比较器输出
+ * - 水平朝向（facing属性）
+ *
+ * 子类只需实现 codec() 和 newBlockEntity()
+ */
+public abstract class AbstractHomesteadBlock extends BaseEntityBlock {
+    public static final DirectionProperty FACING = BlockStateProperties.HORIZONTAL_FACING;
+
+    protected AbstractHomesteadBlock(Properties properties) {
+        super(properties);
+        this.registerDefaultState(this.stateDefinition.any().setValue(FACING, Direction.NORTH));
+    }
+
+    @Override
+    protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
+        builder.add(FACING);
+    }
+
+    @Override
+    public BlockState getStateForPlacement(BlockPlaceContext context) {
+        return this.defaultBlockState().setValue(FACING, context.getHorizontalDirection().getOpposite());
+    }
+
+    @Override
+    protected RenderShape getRenderShape(BlockState state) {
+        return RenderShape.MODEL;
+    }
+
+    @Override
+    protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
+        if (!level.isClientSide) {
+            BlockEntity be = level.getBlockEntity(pos);
+            if (be instanceof MenuProvider) {
+                player.openMenu((MenuProvider) be, pos);
+            }
+        }
+        return InteractionResult.SUCCESS;
+    }
+
+    @Override
+    protected boolean hasAnalogOutputSignal(BlockState state) {
+        return true;
+    }
+
+    @Override
+    protected int getAnalogOutputSignal(BlockState state, Level level, BlockPos pos) {
+        return AbstractContainerMenu.getRedstoneSignalFromBlockEntity(level.getBlockEntity(pos));
+    }
+
+    /**
+     * 放置时自动设置所有者UUID并生成默认箱子ID
+     */
+    @Override
+    public void setPlacedBy(Level level, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack stack) {
+        if (placer instanceof Player player && !level.isClientSide) {
+            BlockEntity be = level.getBlockEntity(pos);
+            if (be instanceof BaseChestBlockEntity chest) {
+                chest.setOwnerUUID(player.getUUID());
+                ChestRegistryManager.ChestType type = chest.getChestType();
+                String autoId = ChestRegistryManager.getInstance().generateNextChestId(player.getUUID(), type);
+                chest.setChestId(autoId);
+            }
+        }
+        super.setPlacedBy(level, pos, state, placer, stack);
+    }
+
+    /**
+     * 为箱子BlockEntity提供ticker，驱动物品传输逻辑
+     */
+    @SuppressWarnings("unchecked")
+    @Override
+    @Nullable
+    public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) {
+        if (level.isClientSide) return null;
+        return (BlockEntityTicker<T>) (BlockEntityTicker<BaseChestBlockEntity>) BaseChestBlockEntity::serverTick;
+    }
+}

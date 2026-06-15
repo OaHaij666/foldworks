@@ -1,0 +1,41 @@
+modLoader = "javafml"
+loaderVersion = "[2,)"
+license = "${mod_license}"
+issueTrackerURL="https://github.com/TeamGalacticraft/DynamicDimensions/issues/"
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+displayURL="https://galacticraft.dev/"
+logoFile="${mod_id}.png"
+credits="Team Galacticraft"
+authors="Team Galacticraft"
+description='''
+${mod_description}
+'''
+
+[[mixins]]
+config="${mod_id}.mixins.json"
+[[mixins]]
+config = "${mod_id}.sable.mixins.json"
+
+[[dependencies.${mod_id}]]
+modId = "badpackets"
+type="required"
+versionRange = "[0.8,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.${mod_id}]]
+modId = "neoforge"
+type="required"
+versionRange = "[${min_neoforge},)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.${mod_id}]]
+modId = "minecraft"
+type="required"
+versionRange = "[${min_minecraft},)"
+ordering = "NONE"
+side = "BOTH"

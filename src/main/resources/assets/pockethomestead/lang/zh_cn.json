@@ -1,0 +1,110 @@
+{
+  "itemGroup.pockethomestead": "口袋家园",
+
+  "item.pockethomestead.homestead_tablet": "尘歌玉盘",
+  "item.pockethomestead.supply_chest": "供货箱",
+  "item.pockethomestead.pickup_chest": "取货箱",
+  "item.pockethomestead.portal_block": "入口方块",
+  "item.pockethomestead.export_block": "出口方块",
+
+  "block.pockethomestead.supply_chest": "供货箱",
+  "block.pockethomestead.pickup_chest": "取货箱",
+  "block.pockethomestead.portal_block": "入口方块",
+  "block.pockethomestead.export_block": "出口方块",
+
+  "container.pockethomestead.supply_chest": "供货箱",
+  "container.pockethomestead.pickup_chest": "取货箱",
+  "container.pockethomestead.portal": "入口方块",
+  "container.pockethomestead.export": "出口方块",
+
+  "pockethomestead.ui.title": "口袋家园",
+  "pockethomestead.ui.nav.create": "创建",
+  "pockethomestead.ui.nav.manage": "管理",
+  "pockethomestead.ui.zoom_in": "放大 (Ctrl +)",
+  "pockethomestead.ui.zoom_out": "缩小 (Ctrl −)",
+  "pockethomestead.ui.close": "关闭",
+
+  "pockethomestead.space.create.title": "创建口袋家园",
+  "pockethomestead.space.create.subtitle": "选择地形、尺寸和小世界规则",
+
+  "pockethomestead.space.terrain": "地形",
+  "pockethomestead.space.terrain.superflat": "平坦",
+  "pockethomestead.space.terrain.natural": "自然",
+
+  "pockethomestead.space.amplitude_enable": "启用地势起伏调整（谨慎使用）",
+  "pockethomestead.space.amplitude.warning": "该功能会改变自然地形效果，可能不稳定；默认关闭。",
+  "pockethomestead.space.amplitude": "地势起伏（平缓 ←→ 陡峭）",
+
+  "pockethomestead.space.size": "尺寸",
+  "pockethomestead.space.size.width": "X 宽度",
+  "pockethomestead.space.size.depth": "Z 长度",
+  "pockethomestead.space.size.placeholder": "按配置限制",
+  "pockethomestead.space.size.invalid": "尺寸超出配置允许范围",
+
+  "pockethomestead.space.dimension": "继承维度",
+  "pockethomestead.space.dimension.random": "随机",
+
+  "pockethomestead.space.biome": "群系",
+  "pockethomestead.space.biome.random": "随机",
+  "pockethomestead.space.biome.inherited": "（无限世界继承所选维度群系）",
+  "pockethomestead.space.biome.pick_dim_first": "请先选择继承维度",
+
+  "pockethomestead.space.infinite": "无限世界（克隆所选维度）",
+  "pockethomestead.space.infinite_tag": "无限",
+
+  "pockethomestead.space.mob_spawning": "生物生成",
+  "pockethomestead.space.structures": "建筑结构",
+
+  "pockethomestead.space.create_and_enter": "创建并进入",
+  "pockethomestead.space.creating": "创建中...",
+  "pockethomestead.space.cancel": "取消",
+
+  "pockethomestead.space.delete.confirm_title": "确认删除",
+  "pockethomestead.space.delete.confirm_body": "删除「%s」？此操作不可恢复",
+  "pockethomestead.space.delete.confirm_ok": "删除",
+
+  "pockethomestead.permission.title": "权限设置",
+  "pockethomestead.permission.private": "私有",
+  "pockethomestead.permission.public": "公开",
+  "pockethomestead.permission.whitelist": "白名单",
+  "pockethomestead.permission.blacklist": "黑名单",
+  "pockethomestead.permission.add": "添加",
+  "pockethomestead.permission.empty": "名单为空",
+  "pockethomestead.permission.name_hint": "玩家名",
+  "pockethomestead.permission.no_list_hint": "该模式无需名单",
+  "pockethomestead.permission.player_not_found": "找不到玩家：%s",
+
+  "pockethomestead.space.list.title": "口袋家园列表",
+  "pockethomestead.space.list.in_space": "你正在访问一个小世界",
+  "pockethomestead.space.list.choose": "选择一个舒适的地方去访问",
+  "pockethomestead.space.list.no_homesteads": "还没有家园",
+  "pockethomestead.space.list.create_first": "创建一个并把它变成你的",
+  "pockethomestead.space.list.current": "当前位置",
+  "pockethomestead.space.list.enter": "进入",
+  "pockethomestead.space.list.new": "新建",
+  "pockethomestead.space.list.new_homestead": "新建家园",
+  "pockethomestead.space.list.exit": "退出",
+  "pockethomestead.space.list.close": "关闭",
+
+  "commands.pockethomestead.requires_player": "该命令只能由玩家执行",
+  "commands.pockethomestead.create.invalid_terrain": "terrain 必须是 superflat、flat 或 natural",
+  "commands.pockethomestead.create.success": "已创建空间 %s (%s)，正在准备进入",
+  "commands.pockethomestead.list.empty": "没有可访问的空间",
+  "commands.pockethomestead.list.entry": "%s %s %s %s %s",
+  "commands.pockethomestead.enter.not_found": "找不到可访问的空间",
+  "commands.pockethomestead.enter.success": "已进入空间 %s",
+  "commands.pockethomestead.exit.success": "已离开口袋空间",
+  "commands.pockethomestead.delete.not_found": "找不到空间",
+  "commands.pockethomestead.delete.success": "已删除空间 %s",
+  "commands.pockethomestead.delete.not_owner": "只有所有者可以删除空间",
+
+  "pockethomestead.chest.id_label": "ID:",
+  "pockethomestead.chest.id_hint": "箱子ID",
+  "pockethomestead.chest.bind_label": "→",
+  "pockethomestead.chest.bind_none": "(无)",
+  "pockethomestead.chest.rate_label": "速率:",
+  "pockethomestead.chest.transfer_on": "传输:开",
+  "pockethomestead.chest.transfer_off": "传输:关",
+  "pockethomestead.chest.void_on": "虚空:开",
+  "pockethomestead.chest.void_off": "虚空:关"
+}
