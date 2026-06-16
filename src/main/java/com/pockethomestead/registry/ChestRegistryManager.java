@@ -154,6 +154,25 @@ public class ChestRegistryManager {
     }
 
     /**
+     * 获取玩家所有箱子ID（指定类型），不论是否已绑定，不依赖区块加载状态。
+     * 用于 UI 绑定下拉栏提供所有可选对端。
+     */
+    public Set<String> getAllChestIdsOfType(UUID ownerUUID, ChestType type) {
+        Set<String> ids = new HashSet<>();
+        Map<String, List<ChestLocation>> chests = playerChests.get(ownerUUID);
+        if (chests == null) return ids;
+        for (Map.Entry<String, List<ChestLocation>> entry : chests.entrySet()) {
+            for (ChestLocation loc : entry.getValue()) {
+                if (loc.type == type) {
+                    ids.add(entry.getKey());
+                    break;
+                }
+            }
+        }
+        return ids;
+    }
+
+    /**
      * 获取玩家所有未绑定的箱子ID（某种类型）
      * @param ownerUUID 玩家UUID
      * @param type 箱子类型

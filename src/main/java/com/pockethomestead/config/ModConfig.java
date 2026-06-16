@@ -51,6 +51,14 @@ public class ModConfig {
             .comment("物品传输间隔（tick），20=每秒一次，值越小传输越频繁但服务器开销越大")
             .defineInRange("transferTickInterval", 20, 1, 1200);
 
+    public static final ModConfigSpec.IntValue SYNC_INTERVAL_SECONDS = BUILDER
+            .comment("同步时间（秒）：供货箱每隔该时长将物品传输到绑定的取货箱一次。默认30秒。")
+            .defineInRange("syncIntervalSeconds", 30, 1, 3600);
+
+    public static final ModConfigSpec.BooleanValue VOID_ENABLED = BUILDER
+            .comment("是否启用虚空产出（关闭时箱子UI中的虚空按钮置灰不可用，传输只在实际目标箱子存在时进行）")
+            .define("voidEnabled", false);
+
     public static final ModConfigSpec.IntValue DEFAULT_TRANSFER_RATE = BUILDER
             .comment("默认每传输周期的最大物品传输量（0=无限制）")
             .defineInRange("defaultTransferRate", 0, 0, 10000);

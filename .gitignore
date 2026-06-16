@@ -45,6 +45,12 @@ repo/
 .claude/
 .trae/
 
+### Research & Reference ###
+referance/
+myblock/
+net/
+docs/
+
 ### Logs ###
 *.log
 logs/

@@ -90,6 +90,8 @@ public abstract class AbstractHomesteadBlock extends BaseEntityBlock {
                 ChestRegistryManager.ChestType type = chest.getChestType();
                 String autoId = ChestRegistryManager.getInstance().generateNextChestId(player.getUUID(), type);
                 chest.setChestId(autoId);
+                // onLoad 早于 setPlacedBy，此时 owner/id 才就绪，需在此补注册
+                chest.registerIfReady();
             }
         }
         super.setPlacedBy(level, pos, state, placer, stack);

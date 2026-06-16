@@ -22,7 +22,7 @@ import java.util.*;
 
 /**
  * 箱子基类 - 实现容量系统（而非固定格子）
- * 支持最多1000方块的总容量，物品种类不限
+ * 支持最多 MAX_CHEST_CAPACITY 方块的总容量（默认4096），物品种类不限
  */
 public abstract class BaseChestBlockEntity extends BlockEntity implements MenuProvider {
 
@@ -50,6 +50,10 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     // 传输速率限制（物品/tick，0=无限制）
     protected int transferRateLimit = 0;
 
+    // 同步间隔（秒）：供货箱每隔该时长向绑定的取货箱传输一次。
+    // 属于绑定对的属性，绑定时双方保持一致。
+    protected int syncIntervalSeconds = 30;
+
     // TODO: 信任度机制 - 占位，后续实现反作弊/可信度评估
     protected double trustScore = 1.0;
 
@@ -74,11 +78,20 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     @Override
     public void onLoad() {
         super.onLoad();
-        // 服务端加载时注册到全局管理器（防重复注册）
-        if (!level.isClientSide && ownerUUID != null && !chestId.isEmpty() && !registered) {
-            ChestRegistryManager.getInstance().registerChest(ownerUUID, chestId, level, worldPosition, getChestType());
-            registered = true;
-        }
+        registerIfReady();
+    }
+
+    /**
+     * 确保箱子在拥有有效 owner+id 时注册到全局管理器（幂等）。
+     * 新放置的箱子：onLoad 先于 setPlacedBy 执行，此时 owner/id 尚未就绪，
+     * 因此需在 setPlacedBy 与 doTick 中再次尝试注册。
+     */
+    public void registerIfReady() {
+        if (level == null || level.isClientSide) return;
+        if (registered) return;
+        if (ownerUUID == null || chestId.isEmpty()) return;
+        ChestRegistryManager.getInstance().registerChest(ownerUUID, chestId, level, worldPosition, getChestType());
+        registered = true;
     }
 
     @Override
@@ -188,6 +201,23 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     public int getTransferRateLimit() { return transferRateLimit; }
     public void setTransferRateLimit(int limit) { this.transferRateLimit = limit; setChanged(); }
 
+    public int getSyncIntervalSeconds() { return syncIntervalSeconds; }
+    public void setSyncIntervalSeconds(int seconds) {
+        this.syncIntervalSeconds = Math.max(1, seconds);
+        this.tickCounter = 0; // 重置计数，立即按新间隔重新计时
+        setChanged();
+    }
+
+    /** 计算距离下一次传输还有多少秒（用于UI倒计时） */
+    public int getNextTransferSeconds() {
+        if (!transferEnabled || boundTargetId.isEmpty()) return 0;
+        int interval = Math.max(1, syncIntervalSeconds * 20);
+        int offset = Math.abs(worldPosition.hashCode()) % interval;
+        int elapsed = (tickCounter + offset) % interval;
+        int remaining = interval - elapsed;
+        return Math.max(1, (remaining + 19) / 20); // 向上取整到秒
+    }
+
     public double getTrustScore() { return trustScore; }
     public void setTrustScore(double score) { this.trustScore = score; setChanged(); }
 
@@ -207,34 +237,33 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
      */
     protected void doTick() {
         if (level == null || level.isClientSide) return;
+        // 兜底：确保箱子已注册（新放置时 onLoad 早于 setPlacedBy）
+        registerIfReady();
         if (ownerUUID == null) return;
         if (!transferEnabled || boundTargetId.isEmpty()) return;
 
-        // 使用位置hash + 配置偏移分散负载
+        // 同步间隔：默认每 30 秒传输一次（绑定对属性 syncIntervalSeconds）
         tickCounter++;
-        int interval = ModConfig.TRANSFER_TICK_INTERVAL.get();
-        int offset = Math.abs(worldPosition.hashCode()) % Math.max(1, ModConfig.TICK_OFFSET.get());
+        int interval = Math.max(1, syncIntervalSeconds * 20);
+        int offset = Math.abs(worldPosition.hashCode()) % interval;
         if ((tickCounter + offset) % interval != 0) return;
 
         doTransferTick();
     }
 
     /**
-     * 执行一次传输周期
+     * 执行一次传输周期（仅供货箱发起：SUPPLY → PICKUP 单向传输）
      */
     protected void doTransferTick() {
+        // 只有供货箱发送物品，取货箱只接收不发送
+        if (getChestType() != ChestRegistryManager.ChestType.SUPPLY) return;
         if (!(level instanceof ServerLevel serverLevel)) return;
         if (itemStorage.isEmpty()) return;
 
-        ChestRegistryManager.ChestType myType = getChestType();
-        ChestRegistryManager.ChestType targetType = (myType == ChestRegistryManager.ChestType.SUPPLY)
-            ? ChestRegistryManager.ChestType.PICKUP
-            : ChestRegistryManager.ChestType.SUPPLY;
-
         BaseChestBlockEntity target = ChestRegistryManager.getInstance()
-            .findBoundChest(ownerUUID, boundTargetId, targetType, serverLevel);
+            .findBoundChest(ownerUUID, boundTargetId, ChestRegistryManager.ChestType.PICKUP, serverLevel);
 
-        boolean canVoid = voidModeEnabled || ModConfig.GLOBAL_VOID_MODE.get();
+        boolean canVoid = ModConfig.VOID_ENABLED.get() && (voidModeEnabled || ModConfig.GLOBAL_VOID_MODE.get());
 
         if (target != null && !target.isRemoved()) {
             // 正常传输：向目标箱子推送物品
@@ -247,14 +276,11 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     }
 
     /**
-     * 向目标箱子传输物品
+     * 向目标箱子传输物品（尽最大可能传输，无速率限制）
      * @param target 目标箱子
      * @param canVoid 当目标满时是否虚空多余物品
      */
     private void transferItemsTo(BaseChestBlockEntity target, boolean canVoid) {
-        int rateLimit = transferRateLimit > 0 ? transferRateLimit : ModConfig.DEFAULT_TRANSFER_RATE.get();
-        int transferred = 0;
-
         // 快照物品列表避免并发修改
         List<Map.Entry<Item, Integer>> entries = new ArrayList<>(itemStorage.entrySet());
 
@@ -266,29 +292,18 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
             // 筛选器检查
             if (!allowedItems.isEmpty() && !allowedItems.contains(item)) continue;
 
-            // 速率限制检查
-            int toTransfer = count;
-            if (rateLimit > 0) {
-                int remaining = rateLimit - transferred;
-                if (remaining <= 0) break;
-                toTransfer = Math.min(toTransfer, remaining);
-            }
-
-            // 目标容量检查
-            toTransfer = Math.min(toTransfer, target.getRemainingCapacity());
+            // 目标容量检查 — 尽最大可能传输
+            int toTransfer = Math.min(count, target.getRemainingCapacity());
 
             if (toTransfer > 0) {
                 removeItem(item, toTransfer);
                 target.addItem(item, toTransfer);
-                transferred += toTransfer;
 
                 if (target.getRemainingCapacity() <= 0) {
                     // 目标已满
                     if (canVoid) voidRemainingFilteredItems(entries, entries.indexOf(entry) + 1);
                     break;
                 }
-
-                if (rateLimit > 0 && transferred >= rateLimit) break;
             }
         }
     }
@@ -348,6 +363,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         tag.putBoolean("TransferEnabled", transferEnabled);
         tag.putBoolean("VoidModeEnabled", voidModeEnabled);
         tag.putInt("TransferRateLimit", transferRateLimit);
+        tag.putInt("SyncIntervalSeconds", syncIntervalSeconds);
         tag.putDouble("TrustScore", trustScore);
 
         // 保存筛选器
@@ -389,6 +405,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         transferEnabled = tag.getBoolean("TransferEnabled");
         voidModeEnabled = tag.getBoolean("VoidModeEnabled");
         transferRateLimit = tag.getInt("TransferRateLimit");
+        syncIntervalSeconds = Math.max(1, tag.getInt("SyncIntervalSeconds"));
         trustScore = tag.getDouble("TrustScore");
 
         // 加载筛选器
