@@ -33,6 +33,7 @@ public abstract class BaseChestMenu extends AbstractContainerMenu {
     public static final int SCROLLBAR_WIDTH = 6;
     public static final int SCROLLBAR_GAP = 2;
     public static final int BOX_PAD = 4; // 存货区内边距
+    public static final int FLUID_SECTION_HEIGHT = 22; // 内容页流体信息区高度
 
     public static int calculatePanelWidth() {
         return CHEST_COLS * SLOT_SIZE + 2 * PANEL_PADDING + SCROLLBAR_WIDTH + SCROLLBAR_GAP;
@@ -49,7 +50,12 @@ public abstract class BaseChestMenu extends AbstractContainerMenu {
     }
 
     public static int calculatePlayerLabelY() {
-        return calculateChestSlotStartY() + CHEST_VISIBLE_ROWS * SLOT_SIZE + SECTION_GAP;
+        int fluidSpace = isCreateLoaded() ? FLUID_SECTION_HEIGHT : 0;
+        return calculateChestSlotStartY() + CHEST_VISIBLE_ROWS * SLOT_SIZE + SECTION_GAP + fluidSpace;
+    }
+
+    public static boolean isCreateLoaded() {
+        return net.neoforged.fml.ModList.get().isLoaded("create");
     }
 
     public static int calculatePlayerInvStartY() {

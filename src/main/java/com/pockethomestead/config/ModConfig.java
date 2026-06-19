@@ -43,6 +43,10 @@ public class ModConfig {
             .comment("箱子最大容量（总方块数，所有物品合计）")
             .defineInRange("maxChestCapacity", 4096, 27, 100000);
 
+    public static final ModConfigSpec.IntValue MAX_CHEST_FLUID_CAPACITY_MB = BUILDER
+            .comment("箱子最大流体容量（mB，1000mB=1桶）")
+            .defineInRange("maxChestFluidCapacityMb", 16000, 1000, 1000000);
+
     public static final ModConfigSpec.BooleanValue GLOBAL_VOID_MODE = BUILDER
             .comment("全局虚空模式开关（服务器默认值，玩家可在箱子UI中单独开关）")
             .define("globalVoidMode", false);

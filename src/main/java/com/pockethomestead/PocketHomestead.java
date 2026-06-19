@@ -4,6 +4,13 @@ import com.pockethomestead.config.ModConfig;
 import com.pockethomestead.dimension.SpaceDimensionService;
 import com.pockethomestead.network.ChestConfigPacket;
 import com.pockethomestead.network.ChestSyncPacket;
+import com.pockethomestead.network.ProductionStatsSyncPacket;
+import com.pockethomestead.network.RequestProductionStatsPacket;
+import com.pockethomestead.network.RequestTransferGraphPacket;
+import com.pockethomestead.network.SaveTransferGraphPacket;
+import com.pockethomestead.network.TransferGraphSyncPacket;
+import com.pockethomestead.network.TransferGraphValidationPacket;
+import com.pockethomestead.network.UpdateProductionStatsPacket;
 import com.pockethomestead.registration.*;
 import com.pockethomestead.space.SpaceData;
 import com.pockethomestead.space.SpaceManager;
@@ -68,6 +75,41 @@ public class PocketHomestead {
             ChestSyncPacket.TYPE,
             ChestSyncPacket.STREAM_CODEC,
             ChestSyncPacket::handle
+        );
+        registrar.playToServer(
+            RequestTransferGraphPacket.TYPE,
+            RequestTransferGraphPacket.STREAM_CODEC,
+            RequestTransferGraphPacket::handle
+        );
+        registrar.playToServer(
+            SaveTransferGraphPacket.TYPE,
+            SaveTransferGraphPacket.STREAM_CODEC,
+            SaveTransferGraphPacket::handle
+        );
+        registrar.playToClient(
+            TransferGraphSyncPacket.TYPE,
+            TransferGraphSyncPacket.STREAM_CODEC,
+            TransferGraphSyncPacket::handle
+        );
+        registrar.playToClient(
+            TransferGraphValidationPacket.TYPE,
+            TransferGraphValidationPacket.STREAM_CODEC,
+            TransferGraphValidationPacket::handle
+        );
+        registrar.playToServer(
+            RequestProductionStatsPacket.TYPE,
+            RequestProductionStatsPacket.STREAM_CODEC,
+            RequestProductionStatsPacket::handle
+        );
+        registrar.playToServer(
+            UpdateProductionStatsPacket.TYPE,
+            UpdateProductionStatsPacket.STREAM_CODEC,
+            UpdateProductionStatsPacket::handle
+        );
+        registrar.playToClient(
+            ProductionStatsSyncPacket.TYPE,
+            ProductionStatsSyncPacket.STREAM_CODEC,
+            ProductionStatsSyncPacket::handle
         );
     }
 

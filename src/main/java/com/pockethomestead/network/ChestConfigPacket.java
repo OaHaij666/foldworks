@@ -2,6 +2,7 @@ package com.pockethomestead.network;
 
 import com.pockethomestead.blockentity.BaseChestBlockEntity;
 import com.pockethomestead.menu.BaseChestMenu;
+import com.pockethomestead.production.ProductionStatsStorage;
 import com.pockethomestead.registry.ChestRegistryManager;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -293,6 +294,18 @@ public record ChestConfigPacket(int action, String value) implements CustomPacke
             items.put(key.toString(), e.getValue());
         }
 
+        // 构建流体快照（fluidId → amountMb）
+        Map<String, Integer> fluids = new LinkedHashMap<>();
+        for (Map.Entry<net.minecraft.world.level.material.Fluid, Integer> e : be.getAllFluids().entrySet()) {
+            ResourceLocation key = BuiltInRegistries.FLUID.getKey(e.getKey());
+            fluids.put(key.toString(), e.getValue());
+        }
+
+        ProductionStatsStorage productionStats = ProductionStatsStorage.get(serverLevel.getServer());
+        String productionKey = be.productionChestKey();
+        boolean productionStatsEnabled = be.getOwnerUUID() != null && productionStats.isChestEnabled(be.getOwnerUUID(), productionKey);
+        String productionGroupId = be.getOwnerUUID() == null ? "" : productionStats.chestGroup(be.getOwnerUUID(), productionKey);
+
         ChestSyncPacket sync = new ChestSyncPacket(
             be.getChestId(),
             be.getBoundTargetId(),
@@ -302,8 +315,12 @@ public record ChestConfigPacket(int action, String value) implements CustomPacke
             be.getSyncIntervalSeconds(),
             be.getNextTransferSeconds(),
             com.pockethomestead.config.ModConfig.MAX_CHEST_CAPACITY.get(),
+            com.pockethomestead.config.ModConfig.MAX_CHEST_FLUID_CAPACITY_MB.get(),
+            productionStatsEnabled,
+            productionGroupId,
             bindings,
-            items
+            items,
+            fluids
         );
         net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(player, sync);
     }

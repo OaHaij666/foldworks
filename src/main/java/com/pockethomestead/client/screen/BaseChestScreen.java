@@ -1,17 +1,16 @@
 package com.pockethomestead.client.screen;
 
+import com.pockethomestead.client.ClientProductionStatsCache;
 import com.pockethomestead.client.ui.Theme;
 import com.pockethomestead.client.ui.widget.UiButton;
-import com.pockethomestead.client.ui.widget.UiDropdown;
-import com.pockethomestead.client.ui.widget.UiToggle;
-import com.pockethomestead.config.ModConfig;
 import com.pockethomestead.menu.BaseChestMenu;
 import com.pockethomestead.network.ChestConfigPacket;
 import com.pockethomestead.network.ChestSyncPacket;
+import com.pockethomestead.network.RequestProductionStatsPacket;
+import com.pockethomestead.network.UpdateProductionStatsPacket;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -21,6 +20,9 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.material.Fluid;
+import net.minecraft.world.level.material.Fluids;
+import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.ArrayList;
@@ -32,7 +34,7 @@ import java.util.Map;
  * 箱子Screen — 蓝白主题，两页布局。
  *
  * 第0页（内容）：箱子区（1物品=1格，纯渲染）+ 玩家背包。
- * 第1页（配置）：箱子ID、绑定目标、传输开关、虚空开关。
+ * 第1页（节点）：可视化节点编辑入口。
  *
  * 箱子区无真实槽位，存取全部通过网络包；服务端 itemStorage 为唯一权威，
  * 客户端通过 ChestSyncPacket 接收物品快照 cacheItems。
@@ -44,38 +46,27 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
 
     private int localScrollRow = 0;
 
-    private String cacheChestId = "";
-    private String cacheBoundTargetId = "";
-    private boolean cacheTransferEnabled = false;
-    private boolean cacheVoidModeEnabled = false;
-    private int cacheSyncIntervalSeconds = 30;
-    private int cacheNextTransferSeconds = 0;
     private int cacheMaxCapacity = 4096;
-    private List<String> cacheAvailableBindings = List.of();
-
-    // 倒计时本地递减：记录最后一次同步时的值与时间戳
-    private long lastCountdownSyncMillis = 0L;
-    private int lastCountdownValue = 0;
-
-    // 无绑定在下拉中的固定标签与索引
-    private static final String NONE_BINDING_LABEL = "无绑定";
+    private int cacheMaxFluidCapacityMb = 16000;
+    private String cacheChestId = "";
+    private boolean cacheProductionStatsEnabled;
+    private String cacheProductionGroupId = "";
 
     // 客户端物品快照（按数量从多到少排序）
     private final List<Map.Entry<Item, Integer>> cacheItems = new ArrayList<>();
+    private final List<Map.Entry<Fluid, Integer>> cacheFluids = new ArrayList<>();
 
-    private EditBox idEditBox;
-    private EditBox intervalEditBox;
-    private UiDropdown bindDropdown;
-    private UiToggle transferToggle;
-    private UiToggle voidToggle;
     private UiButton pageButton;
-
-    private String lastSentChestId = "";
-    private int lastSentInterval = 30;
+    private UiButton graphButton;
+    private UiButton statsToggleButton;
+    private UiButton statsGroupButton;
+    private UiButton statsNewGroupButton;
 
     // 悬停目标
     private Item hoveredChestItem = null;
     private int hoveredChestCount = 0;
+    private Fluid hoveredFluid = null;
+    private int hoveredFluidAmount = 0;
     private Slot hoveredPlayerSlot = null;
 
     // 动态布局值
@@ -124,18 +115,11 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
     // ── 配置同步 ──
 
     public void cacheConfig(ChestSyncPacket p) {
-        this.cacheChestId = p.chestId();
-        this.cacheBoundTargetId = p.boundTargetId();
-        this.cacheTransferEnabled = p.transferEnabled();
-        this.cacheVoidModeEnabled = p.voidModeEnabled();
-        this.cacheSyncIntervalSeconds = p.syncIntervalSeconds();
-        this.cacheNextTransferSeconds = p.nextTransferSeconds();
         this.cacheMaxCapacity = p.maxCapacity();
-        this.cacheAvailableBindings = p.availableBindings();
-        this.lastSentChestId = p.chestId();
-        // 记录倒计时基准
-        this.lastCountdownValue = p.nextTransferSeconds();
-        this.lastCountdownSyncMillis = System.currentTimeMillis();
+        this.cacheMaxFluidCapacityMb = p.maxFluidCapacityMb();
+        this.cacheChestId = p.chestId();
+        this.cacheProductionStatsEnabled = p.productionStatsEnabled();
+        this.cacheProductionGroupId = p.productionGroupId();
 
         // 解析物品快照（按数量从多到少排序）
         cacheItems.clear();
@@ -148,10 +132,20 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         }
         cacheItems.sort(Comparator.<Map.Entry<Item, Integer>>comparingInt(Map.Entry::getValue).reversed());
 
+        cacheFluids.clear();
+        for (Map.Entry<String, Integer> e : p.fluids().entrySet()) {
+            ResourceLocation loc = ResourceLocation.tryParse(e.getKey());
+            if (loc != null) {
+                Fluid fluid = BuiltInRegistries.FLUID.get(loc);
+                if (fluid != Fluids.EMPTY) cacheFluids.add(Map.entry(fluid, e.getValue()));
+            }
+        }
+        cacheFluids.sort(Comparator.<Map.Entry<Fluid, Integer>>comparingInt(Map.Entry::getValue).reversed());
+
         int maxRow = Math.max(0, totalRows() - BaseChestMenu.CHEST_VISIBLE_ROWS);
         if (localScrollRow > maxRow) localScrollRow = maxRow;
+        updateConfigButtonLabels();
 
-        refreshWidgets();
     }
 
     private void send(int action, String value) {
@@ -173,27 +167,22 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
                 .bounds(gl + pageButtonX, gt + 2, pageButtonW, 14)
                 .onClick(this::switchPage);
 
+        PacketDistributor.sendToServer(new RequestProductionStatsPacket());
         rebuildPageWidgets();
     }
 
-    /** 切换页面：离开配置页时先提交未保存的输入 */
+    /** 切换页面 */
     private void switchPage() {
-        if (currentPage == 1) {
-            commitId();
-            commitInterval();
-        }
         currentPage = (currentPage == 0) ? 1 : 0;
         rebuildPageWidgets();
     }
 
     /** 根据当前页重建控件（配置页才创建配置控件） */
     private void rebuildPageWidgets() {
-        // 清理旧的可渲染控件
-        if (idEditBox != null) { removeWidget(idEditBox); idEditBox = null; }
-        if (intervalEditBox != null) { removeWidget(intervalEditBox); intervalEditBox = null; }
-        bindDropdown = null;
-        transferToggle = null;
-        voidToggle = null;
+        graphButton = null;
+        statsToggleButton = null;
+        statsGroupButton = null;
+        statsNewGroupButton = null;
 
         if (pageButton != null) {
             pageButton.label(currentPage == 0 ? "配置 ▶" : "◀ 内容");
@@ -207,103 +196,63 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
     /** 构建配置页控件 */
     private void buildConfigWidgets(int gl, int gt) {
         int availW = panelW - 2 * BaseChestMenu.PANEL_PADDING;
-        int cy = gt + BaseChestMenu.HEADER_HEIGHT + BaseChestMenu.SECTION_GAP;
-
-        // ── 第一行：ID + 绑定 ──
-        int idLabelW = font.width("ID:");
-        int bindLabelW = font.width("绑定:");
-        int row1Gap = 6;
-        int row1Available = availW - idLabelW - bindLabelW - row1Gap - 8;
-        int idBoxW = Math.max(48, row1Available * 40 / 100);
-        int bindW = Math.max(56, row1Available - idBoxW);
-
-        int idBoxX = gl + BaseChestMenu.PANEL_PADDING + idLabelW + 4;
-        idEditBox = new EditBox(font, idBoxX, cy, idBoxW, 14, Component.literal("ID"));
-        idEditBox.setMaxLength(32);
-        idEditBox.setValue(cacheChestId.isEmpty() ? "" : cacheChestId);
-        idEditBox.setHint(Component.literal("ID"));
-        this.addRenderableWidget(idEditBox);
-
-        // 绑定下拉：第一项固定“无绑定”，其后为可绑定的对端箱子
-        List<String> bindOptions = buildBindOptions();
-        int selectedIdx = bindSelectionIndex();
-
-        int bindX = idBoxX + idBoxW + row1Gap + bindLabelW + 4;
-        bindDropdown = new UiDropdown(bindOptions, selectedIdx)
-                .bounds(bindX, cy - 1, bindW, 16)
-                .onSelect(idx -> {
-                    // idx 0 = 无绑定（解绑）；idx i>0 = 绑定第 i-1 个可选项
-                    if (idx == 0) {
-                        send(3, "");
-                    } else {
-                        int real = idx - 1;
-                        if (real >= 0 && real < cacheAvailableBindings.size()) {
-                            send(3, cacheAvailableBindings.get(real));
-                        }
-                    }
+        int graphW = Math.min(142, availW);
+        int graphX = gl + BaseChestMenu.PANEL_PADDING + (availW - graphW) / 2;
+        int graphY = gt + BaseChestMenu.HEADER_HEIGHT + 28;
+        graphButton = new UiButton("打开可视化节点", UiButton.Variant.PRIMARY)
+                .bounds(graphX, graphY, graphW, 18)
+                .onClick(() -> {
+                    Minecraft.getInstance().setScreen(new TransferGraphScreen());
                 });
-
-        // ── 第二行：传输 + 虚空 ──
-        int row2Y = cy + 22;
-        int row2Gap = 4;
-        int toggleW = Math.max(40, (availW - row2Gap) / 2);
-        boolean voidEnabledGlobally = ModConfig.VOID_ENABLED.get();
-
-        int t1X = gl + BaseChestMenu.PANEL_PADDING;
-        transferToggle = new UiToggle("传输", cacheTransferEnabled)
-                .bounds(t1X, row2Y, toggleW, 16)
-                .onChange(v -> send(0, ""));
-
-        int t2X = t1X + toggleW + row2Gap;
-        voidToggle = new UiToggle("虚空", cacheVoidModeEnabled)
-                .bounds(t2X, row2Y, toggleW, 16)
-                .onChange(v -> send(1, ""));
-        voidToggle.setDisabled(!voidEnabledGlobally);
-
-        // ── 第三行：同步间隔输入 ──
-        int row3Y = row2Y + 22;
-        int intervalLabelW = font.width("同步(秒):");
-        int intervalBoxX = gl + BaseChestMenu.PANEL_PADDING + intervalLabelW + 4;
-        intervalEditBox = new EditBox(font, intervalBoxX, row3Y, 40, 14, Component.literal("间隔"));
-        intervalEditBox.setMaxLength(4);
-        intervalEditBox.setValue(String.valueOf(cacheSyncIntervalSeconds));
-        intervalEditBox.setHint(Component.literal("秒"));
-        this.addRenderableWidget(intervalEditBox);
-
-        refreshWidgets();
+        statsToggleButton = new UiButton("加入产率统计", UiButton.Variant.SECONDARY)
+                .bounds(gl + BaseChestMenu.PANEL_PADDING, graphY + 52, 92, 18)
+                .onClick(this::toggleProductionStats);
+        statsGroupButton = new UiButton("默认", UiButton.Variant.SECONDARY)
+                .bounds(gl + BaseChestMenu.PANEL_PADDING + 98, graphY + 52, Math.max(70, availW - 98), 18)
+                .onClick(this::cycleProductionGroup);
+        statsNewGroupButton = new UiButton("+ 新原子组", UiButton.Variant.SECONDARY)
+                .bounds(gl + BaseChestMenu.PANEL_PADDING, graphY + 76, Math.min(92, availW), 18)
+                .onClick(this::createProductionGroup);
+        updateConfigButtonLabels();
     }
 
-    /** 绑定下拉选项：[无绑定, ...可绑定对端] */
-    private List<String> buildBindOptions() {
-        List<String> opts = new ArrayList<>();
-        opts.add(NONE_BINDING_LABEL);
-        opts.addAll(cacheAvailableBindings);
-        return opts;
+    private void updateConfigButtonLabels() {
+        if (statsToggleButton != null) statsToggleButton.label(cacheProductionStatsEnabled ? "关闭产率统计" : "加入产率统计");
+        if (statsGroupButton != null) {
+            String groupId = selectedProductionGroupId();
+            var group = ClientProductionStatsCache.group(groupId);
+            String label = group == null ? "默认" : group.name();
+            statsGroupButton.label(cacheProductionStatsEnabled ? label : "未加入");
+        }
     }
 
-    /** 当前绑定在下拉中的索引（无绑定=0） */
-    private int bindSelectionIndex() {
-        if (cacheBoundTargetId.isEmpty()) return 0;
-        int i = cacheAvailableBindings.indexOf(cacheBoundTargetId);
-        return i < 0 ? 0 : i + 1;
+    private String selectedProductionGroupId() {
+        return cacheProductionGroupId == null || cacheProductionGroupId.isBlank()
+                ? ClientProductionStatsCache.defaultGroupId()
+                : cacheProductionGroupId;
     }
 
-    private void refreshWidgets() {
-        if (idEditBox != null && !idEditBox.isFocused()) {
-            idEditBox.setValue(cacheChestId.isEmpty() ? "" : cacheChestId);
+    private void toggleProductionStats() {
+        String groupId = cacheProductionStatsEnabled ? "" : selectedProductionGroupId();
+        PacketDistributor.sendToServer(new UpdateProductionStatsPacket("SET_CURRENT_CHEST_GROUP", List.of(groupId)));
+    }
+
+    private void cycleProductionGroup() {
+        List<com.pockethomestead.network.ProductionStatsSyncPacket.GroupData> groups = ClientProductionStatsCache.atomicGroups();
+        if (groups.isEmpty()) {
+            PacketDistributor.sendToServer(new RequestProductionStatsPacket());
+            return;
         }
-        if (intervalEditBox != null && !intervalEditBox.isFocused()) {
-            intervalEditBox.setValue(String.valueOf(cacheSyncIntervalSeconds));
-        }
-        if (bindDropdown != null) {
-            bindDropdown.setLabels(buildBindOptions());
-            bindDropdown.setSelected(bindSelectionIndex());
-        }
-        if (transferToggle != null) transferToggle.setValue(cacheTransferEnabled);
-        if (voidToggle != null) {
-            voidToggle.setValue(cacheVoidModeEnabled);
-            voidToggle.setDisabled(!ModConfig.VOID_ENABLED.get());
-        }
+        String current = selectedProductionGroupId();
+        int index = -1;
+        for (int i = 0; i < groups.size(); i++) if (groups.get(i).id().equals(current)) index = i;
+        String next = groups.get((index + 1 + groups.size()) % groups.size()).id();
+        PacketDistributor.sendToServer(new UpdateProductionStatsPacket("SET_CURRENT_CHEST_GROUP", List.of(next)));
+    }
+
+    private void createProductionGroup() {
+        String suffix = cacheChestId == null || cacheChestId.isBlank() ? "" : " " + cacheChestId;
+        PacketDistributor.sendToServer(new UpdateProductionStatsPacket("CREATE_GROUP", List.of("新分组" + suffix, "false", "assign_current")));
     }
 
     // ── 渲染 ──
@@ -321,6 +270,10 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         if (currentPage == 0) {
             // 存货区背景
             Theme.fillRound(g, x + chestAreaX, y + chestAreaY, chestAreaW, chestAreaH, Theme.RADIUS, Theme.SURFACE_SUNK);
+            if (BaseChestMenu.isCreateLoaded()) {
+                int fluidY = y + BaseChestMenu.calculateChestSlotStartY() + BaseChestMenu.CHEST_VISIBLE_ROWS * BaseChestMenu.SLOT_SIZE + 4;
+                Theme.fillRound(g, x + BaseChestMenu.PANEL_PADDING, fluidY, panelW - 2 * BaseChestMenu.PANEL_PADDING, 16, 4, Theme.SURFACE_SUNK);
+            }
             Theme.hLine(g, x + 1, y + playerLabelY - 2, panelW - 2, Theme.DIVIDER);
         }
     }
@@ -333,6 +286,8 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         if (currentPage == 0) {
             renderChestSlots(g, mx, my);
             renderScrollbar(g);
+            if (BaseChestMenu.isCreateLoaded()) renderFluidSection(g, mx, my);
+            else { hoveredFluid = null; hoveredFluidAmount = 0; }
             renderPlayerInventorySlots(g, mx, my);
         } else {
             renderConfigPage(g, mx, my, partialTick);
@@ -342,9 +297,6 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         if (pageButton != null) pageButton.render(g, mx, my, partialTick);
         renderDraggedItem(g, mx, my);
         renderHoverTooltip(g, mx, my);
-
-        // 下拉弹层最顶层
-        if (currentPage == 1 && bindDropdown != null) bindDropdown.renderPopup(g, mx, my);
     }
 
     /** 渲染玩家背包槽位（真正的 Slot，索引 0..35） */
@@ -433,6 +385,45 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         g.pose().popPose();
     }
 
+    /** 流体区域：显示当前储存的流体与 mB 数量 */
+    private void renderFluidSection(GuiGraphics g, int mx, int my) {
+        hoveredFluid = null;
+        hoveredFluidAmount = 0;
+
+        int x = leftPos + BaseChestMenu.PANEL_PADDING + 4;
+        int y = topPos + BaseChestMenu.calculateChestSlotStartY() + BaseChestMenu.CHEST_VISIBLE_ROWS * BaseChestMenu.SLOT_SIZE + 7;
+        Theme.text(g, font, "流体:", x, y, Theme.TEXT_MUTED);
+
+        int cursorX = x + font.width("流体:") + 6;
+        if (cacheFluids.isEmpty()) {
+            Theme.text(g, font, "空", cursorX, y, Theme.TEXT_FAINT);
+            return;
+        }
+
+        int maxCards = Math.min(3, cacheFluids.size());
+        for (int i = 0; i < maxCards; i++) {
+            Map.Entry<Fluid, Integer> entry = cacheFluids.get(i);
+            Fluid fluid = entry.getKey();
+            int amount = entry.getValue();
+            int cardW = 42;
+            boolean hovered = mx >= cursorX && mx < cursorX + cardW && my >= y - 2 && my < y + 12;
+            int color = 0xFF000000 | (BuiltInRegistries.FLUID.getKey(fluid).toString().hashCode() & 0x00FFFFFF);
+            g.fill(cursorX, y - 1, cursorX + 8, y + 9, color);
+            g.fill(cursorX, y - 1, cursorX + 8, y, 0xCCFFFFFF);
+            String label = BaseChestMenu.formatCount(amount) + "mB";
+            Theme.text(g, font, label, cursorX + 11, y, hovered ? Theme.TEXT : Theme.TEXT_MUTED);
+            if (hovered) {
+                hoveredFluid = fluid;
+                hoveredFluidAmount = amount;
+            }
+            cursorX += cardW;
+        }
+
+        if (cacheFluids.size() > maxCards) {
+            Theme.text(g, font, "+" + (cacheFluids.size() - maxCards), cursorX, y, Theme.TEXT_FAINT);
+        }
+    }
+
     /** 滚动条：仅当行数超过可视行时显示 */
     private void renderScrollbar(GuiGraphics g) {
         int total = totalRows();
@@ -456,58 +447,16 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
     /** 配置页渲染 */
     private void renderConfigPage(GuiGraphics g, int mx, int my, float partialTick) {
         int gl = leftPos;
-        int cy = topPos + BaseChestMenu.HEADER_HEIGHT + BaseChestMenu.SECTION_GAP;
-        int availW = panelW - 2 * BaseChestMenu.PANEL_PADDING;
-
-        // 第一行标签
-        Theme.text(g, font, "ID:", gl + BaseChestMenu.PANEL_PADDING, cy + 4, Theme.TEXT);
-        if (idEditBox != null) idEditBox.render(g, mx, my, partialTick);
-
-        int idLabelW = font.width("ID:");
-        int bindLabelW = font.width("绑定:");
-        int row1Gap = 6;
-        int idBoxW = Math.max(48, (availW - idLabelW - bindLabelW - row1Gap - 8) * 40 / 100);
-        int bindLabelX = gl + BaseChestMenu.PANEL_PADDING + idLabelW + 4 + idBoxW + row1Gap;
-        Theme.text(g, font, "绑定:", bindLabelX, cy + 4, Theme.TEXT);
-        if (bindDropdown != null) bindDropdown.render(g, mx, my);
-
-        // 第二行
-        if (transferToggle != null) transferToggle.render(g, mx, my, partialTick);
-        if (voidToggle != null) voidToggle.render(g, mx, my, partialTick);
-
-        // 第三行：同步间隔输入
-        int row2Y = cy + 22;
-        int row3Y = row2Y + 22;
-        Theme.text(g, font, "同步(秒):", gl + BaseChestMenu.PANEL_PADDING, row3Y + 4, Theme.TEXT);
-        if (intervalEditBox != null) intervalEditBox.render(g, mx, my, partialTick);
-
-        // 倒计时小字 + 状态信息
-        int infoY = row3Y + 20;
-        String bindInfo = cacheBoundTargetId.isEmpty()
-            ? "未绑定目标箱子" : "已绑定: " + cacheBoundTargetId;
-        Theme.text(g, font, bindInfo, gl + BaseChestMenu.PANEL_PADDING, infoY, Theme.TEXT_MUTED);
-
-        String countdownInfo;
-        if (cacheBoundTargetId.isEmpty()) {
-            countdownInfo = "传输未启用（未绑定）";
-        } else if (!cacheTransferEnabled) {
-            countdownInfo = "传输已关闭";
-        } else {
-            countdownInfo = "下次传输: " + liveCountdownSeconds() + " 秒后";
-        }
-        Theme.text(g, font, countdownInfo, gl + BaseChestMenu.PANEL_PADDING, infoY + 12, Theme.TEXT_MUTED);
-
-        if (!ModConfig.VOID_ENABLED.get()) {
-            Theme.text(g, font, "虚空产出已禁用", gl + BaseChestMenu.PANEL_PADDING, infoY + 24, Theme.TEXT_FAINT);
-        }
-    }
-
-    /** 本地递减的倒计时秒数（基于最后一次同步值 - 已过秒数） */
-    private int liveCountdownSeconds() {
-        if (lastCountdownValue <= 0) return 0;
-        long elapsed = (System.currentTimeMillis() - lastCountdownSyncMillis) / 1000L;
-        int v = lastCountdownValue - (int) elapsed;
-        return Math.max(0, v);
+        int y = topPos + BaseChestMenu.HEADER_HEIGHT + 16;
+        Theme.text(g, font, "节点编辑", gl + BaseChestMenu.PANEL_PADDING, y, Theme.TEXT);
+        if (graphButton != null) graphButton.render(g, mx, my, partialTick);
+        int statsY = y + 46;
+        Theme.text(g, font, "产率统计", gl + BaseChestMenu.PANEL_PADDING, statsY, Theme.TEXT);
+        Theme.text(g, font, "入=生产  出=消耗", gl + BaseChestMenu.PANEL_PADDING, statsY + 14, Theme.TEXT_MUTED);
+        updateConfigButtonLabels();
+        if (statsToggleButton != null) statsToggleButton.render(g, mx, my, partialTick);
+        if (statsGroupButton != null) statsGroupButton.render(g, mx, my, partialTick);
+        if (statsNewGroupButton != null) statsNewGroupButton.render(g, mx, my, partialTick);
     }
 
     /** 标题与分区标签 */
@@ -550,6 +499,12 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             lines.add(Component.literal("数量: " + hoveredChestCount).withStyle(ChatFormatting.GRAY));
             lines.add(Component.literal("左键取一组 · 右键取一个 · Shift入背包").withStyle(ChatFormatting.DARK_GRAY));
             g.renderComponentTooltip(font, lines, mx, my);
+        } else if (hoveredFluid != null) {
+            FluidStack stack = new FluidStack(hoveredFluid, hoveredFluidAmount);
+            List<Component> lines = new ArrayList<>();
+            lines.add(stack.getHoverName());
+            lines.add(Component.literal(hoveredFluidAmount + " / " + cacheMaxFluidCapacityMb + " mB").withStyle(ChatFormatting.GRAY));
+            g.renderComponentTooltip(font, lines, mx, my);
         }
     }
 
@@ -557,10 +512,6 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
 
     @Override
     public boolean mouseScrolled(double mx, double my, double sx, double sy) {
-        // 配置页：下拉弹层滚动
-        if (currentPage == 1 && bindDropdown != null && bindDropdown.popupMouseScrolled(mx, my, sy)) {
-            return true;
-        }
         // 内容页：存货区滚动（纯客户端）
         if (currentPage == 0) {
             int total = totalRows();
@@ -598,23 +549,16 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
 
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
-        // 下拉弹层打开时优先处理（修复点击选项无法切换的 bug）
-        if (currentPage == 1 && bindDropdown != null && bindDropdown.isOpen()
-                && bindDropdown.popupMouseClicked(mx, my, button)) {
-            return true;
-        }
-
         // 翻页按钮
         if (pageButton != null && pageButton.mouseClicked(mx, my, button)) return true;
 
         if (currentPage == 1) {
-            // 配置页控件
-            if (bindDropdown != null && bindDropdown.mouseClicked(mx, my, button)) return true;
-            handleEditBoxFocus(idEditBox, mx, my, button);
-            handleEditBoxFocus(intervalEditBox, mx, my, button);
-            if (transferToggle != null && transferToggle.mouseClicked(mx, my, button)) return true;
-            if (voidToggle != null && voidToggle.mouseClicked(mx, my, button)) return true;
-            return true; // 配置页消费点击，不触达（未渲染的）背包槽
+            // 节点页只保留可视化入口
+            if (graphButton != null && graphButton.mouseClicked(mx, my, button)) return true;
+            if (statsToggleButton != null && statsToggleButton.mouseClicked(mx, my, button)) return true;
+            if (statsGroupButton != null && statsGroupButton.mouseClicked(mx, my, button)) return true;
+            if (statsNewGroupButton != null && statsNewGroupButton.mouseClicked(mx, my, button)) return true;
+            return true;
         }
 
         // 内容页：控件（无）→ 存货区交互
@@ -639,75 +583,6 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         }
 
         return super.mouseClicked(mx, my, button);
-    }
-
-    /** 根据点击命中处理 EditBox 的聚焦/失焦 */
-    private void handleEditBoxFocus(EditBox box, double mx, double my, int button) {
-        if (box == null) return;
-        boolean hit = mx >= box.getX() && mx < box.getX() + box.getWidth()
-                && my >= box.getY() && my < box.getY() + box.getHeight();
-        box.setFocused(hit);
-        if (hit) box.mouseClicked(mx, my, button);
-    }
-
-    @Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (idEditBox != null && idEditBox.isFocused()) {
-            if (keyCode == 257 || keyCode == 335) { commitId(); return true; }
-            if (idEditBox.keyPressed(keyCode, scanCode, modifiers)) return true;
-        }
-        if (intervalEditBox != null && intervalEditBox.isFocused()) {
-            if (keyCode == 257 || keyCode == 335) { commitInterval(); return true; }
-            if (intervalEditBox.keyPressed(keyCode, scanCode, modifiers)) return true;
-        }
-        return super.keyPressed(keyCode, scanCode, modifiers);
-    }
-
-    @Override
-    public boolean charTyped(char c, int modifiers) {
-        if (idEditBox != null && idEditBox.isFocused() && idEditBox.charTyped(c, modifiers)) return true;
-        if (intervalEditBox != null && intervalEditBox.isFocused()) {
-            // 间隔输入仅允许数字
-            if (Character.isDigit(c) && intervalEditBox.charTyped(c, modifiers)) return true;
-            return true; // 拒绝非数字字符但消费事件
-        }
-        return super.charTyped(c, modifiers);
-    }
-
-    private void commitId() {
-        if (idEditBox == null) return;
-        String v = idEditBox.getValue().trim();
-        if (!v.isEmpty() && !v.equals(lastSentChestId)) {
-            send(2, v);
-            lastSentChestId = v;
-        }
-        idEditBox.setFocused(false);
-    }
-
-    private void commitInterval() {
-        if (intervalEditBox == null) return;
-        String v = intervalEditBox.getValue().trim();
-        if (v.isEmpty()) {
-            intervalEditBox.setValue(String.valueOf(cacheSyncIntervalSeconds));
-            return;
-        }
-        try {
-            int seconds = Math.max(1, Math.min(3600, Integer.parseInt(v)));
-            if (seconds != lastSentInterval) {
-                send(13, String.valueOf(seconds));
-                lastSentInterval = seconds;
-            }
-        } catch (NumberFormatException ignored) {
-            intervalEditBox.setValue(String.valueOf(cacheSyncIntervalSeconds));
-        }
-        intervalEditBox.setFocused(false);
-    }
-
-    @Override
-    public void removed() {
-        commitId();
-        commitInterval();
-        super.removed();
     }
 
     @Override

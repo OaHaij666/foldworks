@@ -24,8 +24,8 @@ public final class Theme {
     // 抗锯齿圆角纹理（运行时生成）
     // ---------------------------------------------------------------------
 
-    /** 纹理中圆角半径（像素），纹理为 4x 该值 */
-    private static final int TEX_RADIUS = 10;
+    /** 纹理中圆角半径（像素），更高分辨率用于降低圆角/按钮边缘锯齿。 */
+    private static final int TEX_RADIUS = 24;
     private static final int TEX_SIZE = TEX_RADIUS * 4;
     private static int roundTexId = -1;
 
@@ -55,7 +55,7 @@ public final class Theme {
         image.close();
     }
 
-    /** 计算纹理中某像素的圆角 alpha 值（0=透明, 1=不透明），含 1px 抗锯齿过渡带 */
+    /** 计算纹理中某像素的圆角 alpha 值（0=透明, 1=不透明），含约 2px 抗锯齿过渡带 */
     private static float roundedAlpha(int px, int py) {
         int w = TEX_SIZE, h = TEX_SIZE, r = TEX_RADIUS;
         int cx = -1, cy = -1;
@@ -68,9 +68,11 @@ public final class Theme {
         float dx = px + 0.5f - cx;
         float dy = py + 0.5f - cy;
         float dist = (float) Math.sqrt(dx * dx + dy * dy);
-        if (dist <= r - 0.5f) return 1f;
-        if (dist >= r + 0.5f) return 0f;
-        return r + 0.5f - dist;
+        float feather = 1.35f;
+        if (dist <= r - feather) return 1f;
+        if (dist >= r + feather) return 0f;
+        float t = (r + feather - dist) / (feather * 2f);
+        return t * t * (3f - 2f * t);
     }
 
     // ---------------------------------------------------------------------

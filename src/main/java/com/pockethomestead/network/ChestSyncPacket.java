@@ -29,8 +29,12 @@ public record ChestSyncPacket(
     int syncIntervalSeconds,
     int nextTransferSeconds,
     int maxCapacity,
+    int maxFluidCapacityMb,
+    boolean productionStatsEnabled,
+    String productionGroupId,
     List<String> availableBindings,
-    Map<String, Integer> items
+    Map<String, Integer> items,
+    Map<String, Integer> fluids
 ) implements CustomPacketPayload {
     public static final Type<ChestSyncPacket> TYPE = new Type<>(
         ResourceLocation.fromNamespaceAndPath("pockethomestead", "chest_sync"));
@@ -46,6 +50,9 @@ public record ChestSyncPacket(
             int syncIntervalSeconds = ByteBufCodecs.VAR_INT.decode(buf);
             int nextTransferSeconds = ByteBufCodecs.VAR_INT.decode(buf);
             int maxCapacity = ByteBufCodecs.VAR_INT.decode(buf);
+            int maxFluidCapacityMb = ByteBufCodecs.VAR_INT.decode(buf);
+            boolean productionStatsEnabled = buf.readBoolean();
+            String productionGroupId = ByteBufCodecs.STRING_UTF8.decode(buf);
 
             int bindCount = ByteBufCodecs.VAR_INT.decode(buf);
             List<String> bindings = new ArrayList<>();
@@ -61,9 +68,18 @@ public record ChestSyncPacket(
                 items.put(id, count);
             }
 
+            int fluidCount = ByteBufCodecs.VAR_INT.decode(buf);
+            Map<String, Integer> fluids = new LinkedHashMap<>();
+            for (int i = 0; i < fluidCount; i++) {
+                String id = ByteBufCodecs.STRING_UTF8.decode(buf);
+                int amount = ByteBufCodecs.VAR_INT.decode(buf);
+                fluids.put(id, amount);
+            }
+
             return new ChestSyncPacket(chestId, boundTargetId, transferEnabled, voidModeEnabled,
-                transferRateLimit, syncIntervalSeconds, nextTransferSeconds, maxCapacity,
-                Collections.unmodifiableList(bindings), Collections.unmodifiableMap(items));
+                transferRateLimit, syncIntervalSeconds, nextTransferSeconds, maxCapacity, maxFluidCapacityMb,
+                productionStatsEnabled, productionGroupId,
+                Collections.unmodifiableList(bindings), Collections.unmodifiableMap(items), Collections.unmodifiableMap(fluids));
         }
 
         @Override
@@ -76,6 +92,9 @@ public record ChestSyncPacket(
             ByteBufCodecs.VAR_INT.encode(buf, pkt.syncIntervalSeconds);
             ByteBufCodecs.VAR_INT.encode(buf, pkt.nextTransferSeconds);
             ByteBufCodecs.VAR_INT.encode(buf, pkt.maxCapacity);
+            ByteBufCodecs.VAR_INT.encode(buf, pkt.maxFluidCapacityMb);
+            buf.writeBoolean(pkt.productionStatsEnabled);
+            ByteBufCodecs.STRING_UTF8.encode(buf, pkt.productionGroupId);
 
             ByteBufCodecs.VAR_INT.encode(buf, pkt.availableBindings.size());
             for (String binding : pkt.availableBindings) {
@@ -84,6 +103,12 @@ public record ChestSyncPacket(
 
             ByteBufCodecs.VAR_INT.encode(buf, pkt.items.size());
             for (Map.Entry<String, Integer> e : pkt.items.entrySet()) {
+                ByteBufCodecs.STRING_UTF8.encode(buf, e.getKey());
+                ByteBufCodecs.VAR_INT.encode(buf, e.getValue());
+            }
+
+            ByteBufCodecs.VAR_INT.encode(buf, pkt.fluids.size());
+            for (Map.Entry<String, Integer> e : pkt.fluids.entrySet()) {
                 ByteBufCodecs.STRING_UTF8.encode(buf, e.getKey());
                 ByteBufCodecs.VAR_INT.encode(buf, e.getValue());
             }

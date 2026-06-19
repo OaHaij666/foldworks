@@ -1,0 +1,193 @@
+package com.pockethomestead.transfer;
+
+import com.pockethomestead.registry.ChestRegistryManager;
+import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+public class TransferGraph {
+    public static final String DEFAULT_PAGE_ID = "default";
+
+    private final UUID owner;
+    private final Map<String, TransferGraphPage> pages = new LinkedHashMap<>();
+    private final Map<String, TransferNode> nodes = new LinkedHashMap<>();
+    private final Map<String, TransferEdge> edges = new LinkedHashMap<>();
+
+    public TransferGraph(UUID owner) {
+        this.owner = owner;
+        ensureDefaultPage();
+    }
+
+    public UUID getOwner() { return owner; }
+    public Collection<TransferGraphPage> getPages() { return pages.values().stream().sorted(Comparator.comparingInt(TransferGraphPage::getOrder)).toList(); }
+    public Collection<TransferNode> getNodes() { return nodes.values(); }
+    public Collection<TransferEdge> getEdges() { return edges.values(); }
+    public TransferGraphPage getPage(String id) { return pages.get(id); }
+    public TransferNode getNode(String id) { return nodes.get(id); }
+    public TransferEdge getEdge(String id) { return edges.get(id); }
+
+    public void putPage(TransferGraphPage page) { pages.put(page.getId(), page); }
+    public void putNode(TransferNode node) { nodes.put(node.getId(), node); }
+    public void putEdge(TransferEdge edge) { edges.put(edge.getId(), edge); }
+    public void clearAll() { pages.clear(); nodes.clear(); edges.clear(); }
+
+    public TransferGraphPage ensureDefaultPage() {
+        return pages.computeIfAbsent(DEFAULT_PAGE_ID, id -> new TransferGraphPage(id, "默认页", true, 0));
+    }
+
+    public TransferGraphPage addPage(String name) {
+        int order = pages.size();
+        TransferGraphPage page = new TransferGraphPage(UUID.randomUUID().toString(), name, true, order);
+        pages.put(page.getId(), page);
+        return page;
+    }
+
+    public void removePage(String pageId) {
+        pages.remove(pageId);
+        nodes.values().removeIf(node -> node.getPageId().equals(pageId));
+        edges.values().removeIf(edge -> edge.getPageId().equals(pageId));
+        if (pages.isEmpty()) ensureDefaultPage();
+    }
+
+    public TransferNode findNode(String chestId, String dimensionKey, BlockPos pos, ChestRegistryManager.ChestType type) {
+        for (TransferNode node : nodes.values()) if (node.matches(chestId, dimensionKey, pos, type)) return node;
+        return null;
+    }
+
+    public TransferNode addNode(String pageId, ChestRegistryManager.ChestType type, String chestId, String dimensionKey, BlockPos pos, int x, int y) {
+        if (!pages.containsKey(pageId)) pageId = ensureDefaultPage().getId();
+        TransferNode existing = findNode(chestId, dimensionKey, pos, type);
+        if (existing != null) {
+            existing.setPageId(pageId);
+            existing.setPosition(x, y);
+            return existing;
+        }
+        TransferNode node = new TransferNode(UUID.randomUUID().toString(), pageId, type, chestId, dimensionKey, pos, x, y, false, true, List.of());
+        nodes.put(node.getId(), node);
+        return node;
+    }
+
+    public TransferNode addNode(ChestRegistryManager.ChestType type, String chestId, String dimensionKey, BlockPos pos, int x, int y) {
+        return addNode(DEFAULT_PAGE_ID, type, chestId, dimensionKey, pos, x, y);
+    }
+
+    public TransferNode addRerouteNode(String pageId, int x, int y) {
+        if (!pages.containsKey(pageId)) pageId = ensureDefaultPage().getId();
+        TransferNode node = new TransferNode(UUID.randomUUID().toString(), pageId, TransferNode.NodeType.REROUTE, "", "", BlockPos.ZERO, x, y, false, true, List.of());
+        nodes.put(node.getId(), node);
+        return node;
+    }
+
+    public TransferNode addTrashNode(String pageId, int x, int y) {
+        if (!pages.containsKey(pageId)) pageId = ensureDefaultPage().getId();
+        TransferNode node = new TransferNode(UUID.randomUUID().toString(), pageId, TransferNode.NodeType.TRASH, "", "", BlockPos.ZERO, x, y, false, true, List.of());
+        nodes.put(node.getId(), node);
+        return node;
+    }
+
+    public void removeNode(String nodeId) {
+        nodes.remove(nodeId);
+        edges.values().removeIf(edge -> edge.getFromNodeId().equals(nodeId) || edge.getToNodeId().equals(nodeId));
+    }
+
+    public TransferEdge addEdge(String pageId, String fromNodeId, String fromPortKey, String toNodeId, String toPortKey,
+                                boolean rateLimitEnabled, int rateLimitSeconds, int rateLimitItems) {
+        TransferNode from = nodes.get(fromNodeId);
+        TransferNode to = nodes.get(toNodeId);
+        if (from == null || to == null) return null;
+        if (!from.getPageId().equals(to.getPageId())) return null;
+        pageId = from.getPageId();
+        for (TransferEdge edge : edges.values()) {
+            if (edge.getFromNodeId().equals(fromNodeId) && edge.getToNodeId().equals(toNodeId)
+                    && edge.getFromPortKey().equals(fromPortKey) && edge.getToPortKey().equals(toPortKey)) {
+                edge.setRateLimit(rateLimitEnabled, rateLimitSeconds, rateLimitItems);
+                edge.setEnabled(true);
+                return edge;
+            }
+        }
+        TransferEdge edge = new TransferEdge(UUID.randomUUID().toString(), pageId, fromNodeId, toNodeId, fromPortKey, toPortKey,
+                rateLimitEnabled, rateLimitSeconds, rateLimitItems, true);
+        edges.put(edge.getId(), edge);
+        return edge;
+    }
+
+    public void removeEdge(String edgeId) { edges.remove(edgeId); }
+
+    public void removeFilterItem(String nodeId, String itemId) {
+        TransferNode node = nodes.get(nodeId);
+        if (node == null) return;
+        node.removeFilterItem(itemId);
+        String port = TransferEdge.itemPort(itemId);
+        edges.values().removeIf(edge -> edge.getFromNodeId().equals(nodeId) && edge.getFromPortKey().equals(port));
+    }
+
+    public List<TransferEdge> outgoing(String nodeId) {
+        List<TransferEdge> out = new ArrayList<>();
+        for (TransferEdge edge : edges.values()) if (edge.getFromNodeId().equals(nodeId)) out.add(edge);
+        return out;
+    }
+
+    public boolean hasExecutableOutgoing(String nodeId) {
+        TransferNode node = nodes.get(nodeId);
+        if (node == null || !node.isEnabled()) return false;
+        TransferGraphPage page = pages.get(node.getPageId());
+        if (page == null || !page.isEnabled()) return false;
+        for (TransferEdge edge : edges.values()) {
+            if (!edge.getFromNodeId().equals(nodeId) || !edge.isEnabled()) continue;
+            TransferNode target = nodes.get(edge.getToNodeId());
+            if (target != null && target.isEnabled()) return true;
+        }
+        return false;
+    }
+
+    public boolean hasOutgoing(String nodeId) { return hasExecutableOutgoing(nodeId); }
+
+    public CompoundTag save() {
+        CompoundTag tag = new CompoundTag();
+        tag.putUUID("Owner", owner);
+        ListTag pageList = new ListTag();
+        for (TransferGraphPage page : pages.values()) pageList.add(page.save());
+        tag.put("Pages", pageList);
+        ListTag nodeList = new ListTag();
+        for (TransferNode node : nodes.values()) nodeList.add(node.save());
+        tag.put("Nodes", nodeList);
+        ListTag edgeList = new ListTag();
+        for (TransferEdge edge : edges.values()) edgeList.add(edge.save());
+        tag.put("Edges", edgeList);
+        return tag;
+    }
+
+    public static TransferGraph load(CompoundTag tag) {
+        TransferGraph graph = new TransferGraph(tag.getUUID("Owner"));
+        graph.pages.clear();
+        ListTag pageList = tag.getList("Pages", Tag.TAG_COMPOUND);
+        if (pageList.isEmpty()) graph.ensureDefaultPage();
+        for (int i = 0; i < pageList.size(); i++) {
+            TransferGraphPage page = TransferGraphPage.load(pageList.getCompound(i));
+            graph.pages.put(page.getId(), page);
+        }
+        String defaultPage = graph.pages.isEmpty()
+                ? graph.ensureDefaultPage().getId()
+                : graph.pages.values().iterator().next().getId();
+        ListTag nodeList = tag.getList("Nodes", Tag.TAG_COMPOUND);
+        for (int i = 0; i < nodeList.size(); i++) {
+            TransferNode node = TransferNode.load(nodeList.getCompound(i), defaultPage);
+            graph.nodes.put(node.getId(), node);
+        }
+        ListTag edgeList = tag.getList("Edges", Tag.TAG_COMPOUND);
+        for (int i = 0; i < edgeList.size(); i++) {
+            TransferEdge edge = TransferEdge.load(edgeList.getCompound(i), defaultPage);
+            graph.edges.put(edge.getId(), edge);
+        }
+        return graph;
+    }
+}

@@ -2,6 +2,7 @@ package com.pockethomestead.client;
 
 import com.pockethomestead.client.page.CreatePage;
 import com.pockethomestead.client.page.ManagePage;
+import com.pockethomestead.client.page.ProductionStatsPage;
 import com.pockethomestead.client.ui.Page;
 import com.pockethomestead.client.ui.Router;
 import com.pockethomestead.client.ui.Theme;
@@ -16,12 +17,18 @@ import org.lwjgl.glfw.GLFW;
  */
 public class HomesteadScreen extends Screen {
 
-    // 跨开启持久化的状态
-    private static float uiScale = 1.0f;
-    private static String lastPageId = "manage";
     private static final float MIN_SCALE = 0.6f;
     private static final float MAX_SCALE = 1.6f;
     private static final float STEP = 0.1f;
+    private static final int NAV_WIDTH_MIN = 46;
+    private static final int NAV_WIDTH_MAX = 56;
+    private static final int NAV_ITEM_SIZE = 34;
+    private static final int NAV_ITEM_GAP = 6;
+    private static final int NAV_TOP_PAD = 10;
+
+    // 跨开启持久化的状态
+    private static float uiScale = MAX_SCALE;
+    private static String lastPageId = "manage";
 
     private final Router router = new Router();
 
@@ -40,6 +47,7 @@ public class HomesteadScreen extends Screen {
         super(Component.translatable("pockethomestead.ui.title"));
         router.register(new CreatePage());
         router.register(new ManagePage());
+        router.register(new ProductionStatsPage());
         router.selectInitial(initialPageId != null ? initialPageId : lastPageId);
     }
 
@@ -61,7 +69,7 @@ public class HomesteadScreen extends Screen {
         panelY = (height - panelH) / 2;
 
         headerH = 34;
-        sidebarW = clamp(Math.round(panelW * 0.26f), 92, 150);
+        sidebarW = clamp(Math.round(panelW * 0.045f), NAV_WIDTH_MIN, NAV_WIDTH_MAX);
 
         contentX = panelX + sidebarW + 1;
         contentY = panelY + headerH + 1;
@@ -150,26 +158,62 @@ public class HomesteadScreen extends Screen {
         // 分隔线
         Theme.vLine(g, panelX + sidebarW, panelY + headerH + 1, panelH - headerH - 2, Theme.DIVIDER);
 
-        int itemH = 30;
-        int top = panelY + headerH + 10;
+        int itemSize = navItemSize();
+        int top = panelY + headerH + NAV_TOP_PAD;
         for (int i = 0; i < router.pages().size(); i++) {
             Page p = router.pages().get(i);
-            int iy = top + i * (itemH + 4);
-            int ix = panelX + 8;
-            int iw = sidebarW - 16;
+            int iy = top + i * (itemSize + NAV_ITEM_GAP);
+            int ix = panelX + (sidebarW - itemSize) / 2;
             boolean active = router.currentIndex() == i;
-            boolean hover = Theme.inside(mouseX, mouseY, ix, iy, iw, itemH);
+            boolean hover = Theme.inside(mouseX, mouseY, ix, iy, itemSize, itemSize);
 
             if (active) {
-                Theme.fillRound(g, ix, iy, iw, itemH, Theme.RADIUS, Theme.PRIMARY_SOFT);
-                Theme.fillRound(g, ix, iy + 5, 3, itemH - 10, 1, Theme.PRIMARY); // 左侧高亮条
+                Theme.fillRound(g, ix, iy, itemSize, itemSize, Theme.RADIUS + 1, Theme.PRIMARY_SOFT);
+                Theme.fillRound(g, ix + 5, iy + itemSize - 4, itemSize - 10, 2, 1, Theme.PRIMARY);
             } else if (hover) {
-                Theme.fillRound(g, ix, iy, iw, itemH, Theme.RADIUS, Theme.SURFACE_ALT);
+                Theme.fillRound(g, ix, iy, itemSize, itemSize, Theme.RADIUS + 1, Theme.SURFACE_ALT);
             }
             int col = active ? Theme.PRIMARY_PRESS : (hover ? Theme.TEXT : Theme.TEXT_MUTED);
-            g.drawString(font, Theme.styled(p.navIcon()), ix + 10, iy + (itemH - font.lineHeight) / 2 + 1, col, false);
-            g.drawString(font, Theme.styled(Theme.ellipsize(font, p.navTitle(), iw - 30)),
-                    ix + 26, iy + (itemH - font.lineHeight) / 2 + 1, col, false);
+            drawNavIcon(g, p, ix, iy, itemSize, col);
+            if (hover) pendingTooltip = p.navTitle();
+        }
+    }
+
+    private void drawNavIcon(GuiGraphics g, Page page, int x, int y, int size, int color) {
+        int cx = x + size / 2;
+        int cy = y + size / 2;
+        switch (page.id()) {
+            case "create" -> {
+                int len = 16;
+                int thick = 3;
+                Theme.fillRound(g, cx - len / 2, cy - thick / 2, len, thick, 1, color);
+                Theme.fillRound(g, cx - thick / 2, cy - len / 2, thick, len, 1, color);
+            }
+            case "manage" -> {
+                int dot = 5;
+                int gap = 5;
+                int startX = cx - dot - gap / 2;
+                int startY = cy - dot - gap / 2;
+                Theme.fillRound(g, startX, startY, dot, dot, 2, color);
+                Theme.fillRound(g, startX + dot + gap, startY, dot, dot, 2, color);
+                Theme.fillRound(g, startX, startY + dot + gap, dot, dot, 2, color);
+                Theme.fillRound(g, startX + dot + gap, startY + dot + gap, dot, dot, 2, color);
+            }
+            case "production" -> {
+                int cell = 4;
+                int gap = 3;
+                int startX = cx - (cell * 3 + gap * 2) / 2;
+                int startY = cy - (cell * 3 + gap * 2) / 2;
+                for (int row = 0; row < 3; row++) {
+                    for (int col = 0; col < 3; col++) {
+                        Theme.fillRound(g, startX + col * (cell + gap), startY + row * (cell + gap), cell, cell, 1, color);
+                    }
+                }
+            }
+            default -> {
+                String icon = page.navIcon();
+                g.drawString(font, icon, x + (size - font.width(icon)) / 2, y + (size - font.lineHeight) / 2 + 1, color, false);
+            }
         }
     }
 
@@ -203,13 +247,12 @@ public class HomesteadScreen extends Screen {
         if (button == 0 && Theme.inside(mx, my, minusX, cy, sz, sz)) { zoom(-STEP); return true; }
 
         // 3. 侧边栏导航
-        int itemH = 30;
-        int top = panelY + headerH + 10;
+        int itemSize = navItemSize();
+        int top = panelY + headerH + NAV_TOP_PAD;
         for (int i = 0; i < router.pages().size(); i++) {
-            int iy = top + i * (itemH + 4);
-            int ix = panelX + 8;
-            int iw = sidebarW - 16;
-            if (button == 0 && Theme.inside(mx, my, ix, iy, iw, itemH)) {
+            int iy = top + i * (itemSize + NAV_ITEM_GAP);
+            int ix = panelX + (sidebarW - itemSize) / 2;
+            if (button == 0 && Theme.inside(mx, my, ix, iy, itemSize, itemSize)) {
                 router.setActive(i);
                 lastPageId = router.current().id();
                 return true;
@@ -278,8 +321,10 @@ public class HomesteadScreen extends Screen {
     }
 
     private void resetZoom() {
-        if (uiScale != 1.0f) { uiScale = 1.0f; layout(); }
+        if (uiScale != MAX_SCALE) { uiScale = MAX_SCALE; layout(); }
     }
+
+    private int navItemSize() { return Math.min(NAV_ITEM_SIZE, Math.max(24, sidebarW - 12)); }
 
     private static int clamp(int v, int lo, int hi) { return Math.max(lo, Math.min(hi, v)); }
     private static float clampF(float v, float lo, float hi) { return Math.max(lo, Math.min(hi, v)); }

@@ -1,0 +1,226 @@
+package com.pockethomestead.transfer;
+
+import com.pockethomestead.registry.ChestRegistryManager;
+import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+public class TransferNode {
+    private static final int FLOW_WINDOW_TICKS = 20 * 20;
+
+    public record FlowSnapshot(String itemId, int inputRatePerMinute, int outputRatePerMinute, long inputTotal, long outputTotal) {}
+
+    public enum NodeType {
+        SUPPLY,
+        PICKUP,
+        REROUTE,
+        TRASH;
+
+        public static NodeType fromChestType(ChestRegistryManager.ChestType type) {
+            return type == ChestRegistryManager.ChestType.SUPPLY ? SUPPLY : PICKUP;
+        }
+
+        public ChestRegistryManager.ChestType toChestType() {
+            return this == SUPPLY ? ChestRegistryManager.ChestType.SUPPLY : this == PICKUP ? ChestRegistryManager.ChestType.PICKUP : null;
+        }
+
+        public boolean isVirtual() {
+            return this == REROUTE || this == TRASH;
+        }
+    }
+
+    private final String id;
+    private String pageId;
+    private final NodeType type;
+    private final String chestId;
+    private final String dimensionKey;
+    private final BlockPos pos;
+    private int x;
+    private int y;
+    private boolean expanded;
+    private boolean enabled;
+    private final List<String> filterItemIds = new ArrayList<>();
+    private transient final Map<String, FlowStats> flowStats = new LinkedHashMap<>();
+
+    public TransferNode(String id, String pageId, ChestRegistryManager.ChestType type, String chestId, String dimensionKey, BlockPos pos, int x, int y, boolean expanded, boolean enabled, List<String> filterItemIds) {
+        this(id, pageId, NodeType.fromChestType(type), chestId, dimensionKey, pos, x, y, expanded, enabled, filterItemIds);
+    }
+
+    public TransferNode(String id, String pageId, NodeType type, String chestId, String dimensionKey, BlockPos pos, int x, int y, boolean expanded, boolean enabled, List<String> filterItemIds) {
+        this.id = id;
+        this.pageId = pageId;
+        this.type = type;
+        this.chestId = chestId == null ? "" : chestId;
+        this.dimensionKey = dimensionKey == null ? "" : dimensionKey;
+        this.pos = pos == null ? BlockPos.ZERO : pos;
+        this.x = x;
+        this.y = y;
+        this.expanded = expanded;
+        this.enabled = enabled;
+        if (filterItemIds != null) {
+            for (String itemId : filterItemIds) addFilterItem(itemId);
+        }
+    }
+
+    public String getId() { return id; }
+    public String getPageId() { return pageId; }
+    public NodeType getNodeType() { return type; }
+    public ChestRegistryManager.ChestType getType() { return type.toChestType(); }
+    public String getChestId() { return chestId; }
+    public String getDimensionKey() { return dimensionKey; }
+    public BlockPos getPos() { return pos; }
+    public int getX() { return x; }
+    public int getY() { return y; }
+    public boolean isExpanded() { return expanded; }
+    public boolean isEnabled() { return enabled; }
+    public List<String> getFilterItemIds() { return filterItemIds; }
+
+    public void setPageId(String pageId) { this.pageId = pageId; }
+    public void setPosition(int x, int y) { this.x = x; this.y = y; }
+    public void setExpanded(boolean expanded) { this.expanded = expanded; }
+    public void setEnabled(boolean enabled) { this.enabled = enabled; }
+
+    public void addFilterItem(String itemId) {
+        if (itemId != null && !itemId.isBlank() && !filterItemIds.contains(itemId)) filterItemIds.add(itemId);
+    }
+
+    public void removeFilterItem(String itemId) { filterItemIds.remove(itemId); }
+
+    public void recordFlowInput(long gameTime, String itemId, int amount) {
+        if (itemId == null || itemId.isBlank() || amount <= 0) return;
+        FlowStats stats = flowStats.computeIfAbsent(itemId, FlowStats::new);
+        stats.refresh(gameTime);
+        stats.inputInWindow += amount;
+        stats.inputTotal += amount;
+    }
+
+    public void recordFlowOutput(long gameTime, String itemId, int amount) {
+        if (itemId == null || itemId.isBlank() || amount <= 0) return;
+        FlowStats stats = flowStats.computeIfAbsent(itemId, FlowStats::new);
+        stats.refresh(gameTime);
+        stats.outputInWindow += amount;
+        stats.outputTotal += amount;
+    }
+
+    public List<FlowSnapshot> getFlowStats() {
+        List<FlowSnapshot> snapshots = new ArrayList<>();
+        for (FlowStats stats : flowStats.values()) snapshots.add(stats.snapshot());
+        return snapshots;
+    }
+
+    public void copyFlowStatsFrom(TransferNode other) {
+        if (other == null) return;
+        flowStats.clear();
+        for (FlowStats source : other.flowStats.values()) {
+            FlowStats copy = new FlowStats(source.itemId);
+            copy.windowStartGameTime = source.windowStartGameTime;
+            copy.inputInWindow = source.inputInWindow;
+            copy.outputInWindow = source.outputInWindow;
+            copy.inputTotal = source.inputTotal;
+            copy.outputTotal = source.outputTotal;
+            flowStats.put(copy.itemId, copy);
+        }
+    }
+
+    public boolean matches(String chestId, String dimensionKey, BlockPos pos, ChestRegistryManager.ChestType type) {
+        return this.type.toChestType() == type && this.chestId.equals(chestId) && this.dimensionKey.equals(dimensionKey) && this.pos.equals(pos);
+    }
+
+    public CompoundTag save() {
+        CompoundTag tag = new CompoundTag();
+        tag.putString("Id", id);
+        tag.putString("PageId", pageId);
+        tag.putString("Type", type.name());
+        tag.putString("ChestId", chestId);
+        tag.putString("Dimension", dimensionKey);
+        tag.putLong("Pos", pos.asLong());
+        tag.putInt("X", x);
+        tag.putInt("Y", y);
+        tag.putBoolean("Expanded", expanded);
+        tag.putBoolean("Enabled", enabled);
+        ListTag filters = new ListTag();
+        for (String itemId : filterItemIds) {
+            CompoundTag item = new CompoundTag();
+            item.putString("Id", itemId);
+            filters.add(item);
+        }
+        tag.put("FilterItems", filters);
+        ListTag flows = new ListTag();
+        for (FlowStats stats : flowStats.values()) {
+            if (stats.inputTotal <= 0 && stats.outputTotal <= 0) continue;
+            CompoundTag flow = new CompoundTag();
+            flow.putString("Item", stats.itemId);
+            flow.putLong("InputTotal", stats.inputTotal);
+            flow.putLong("OutputTotal", stats.outputTotal);
+            flows.add(flow);
+        }
+        tag.put("FlowStats", flows);
+        return tag;
+    }
+
+    public static TransferNode load(CompoundTag tag, String defaultPageId) {
+        NodeType type;
+        try { type = NodeType.valueOf(tag.getString("Type")); } catch (Exception e) { type = NodeType.SUPPLY; }
+        List<String> filters = new ArrayList<>();
+        ListTag filterList = tag.getList("FilterItems", Tag.TAG_COMPOUND);
+        for (int i = 0; i < filterList.size(); i++) filters.add(filterList.getCompound(i).getString("Id"));
+        TransferNode node = new TransferNode(
+                tag.getString("Id"),
+                tag.contains("PageId") ? tag.getString("PageId") : defaultPageId,
+                type,
+                tag.getString("ChestId"),
+                tag.getString("Dimension"),
+                BlockPos.of(tag.getLong("Pos")),
+                tag.getInt("X"),
+                tag.getInt("Y"),
+                tag.getBoolean("Expanded"),
+                !tag.contains("Enabled") || tag.getBoolean("Enabled"),
+                filters
+        );
+        ListTag flowList = tag.getList("FlowStats", Tag.TAG_COMPOUND);
+        for (int i = 0; i < flowList.size(); i++) {
+            CompoundTag flowTag = flowList.getCompound(i);
+            String itemId = flowTag.getString("Item");
+            if (itemId == null || itemId.isBlank()) continue;
+            FlowStats stats = node.flowStats.computeIfAbsent(itemId, FlowStats::new);
+            stats.inputTotal = flowTag.getLong("InputTotal");
+            stats.outputTotal = flowTag.getLong("OutputTotal");
+        }
+        return node;
+    }
+
+    private static final class FlowStats {
+        private final String itemId;
+        private long windowStartGameTime = Long.MIN_VALUE;
+        private int inputInWindow;
+        private int outputInWindow;
+        private long inputTotal;
+        private long outputTotal;
+
+        private FlowStats(String itemId) {
+            this.itemId = itemId;
+        }
+
+        private void refresh(long gameTime) {
+            if (windowStartGameTime == Long.MIN_VALUE) {
+                windowStartGameTime = gameTime;
+                return;
+            }
+            if (gameTime - windowStartGameTime >= FLOW_WINDOW_TICKS) {
+                windowStartGameTime = gameTime;
+                inputInWindow = 0;
+                outputInWindow = 0;
+            }
+        }
+
+        private FlowSnapshot snapshot() {
+            return new FlowSnapshot(itemId, inputInWindow * 3, outputInWindow * 3, inputTotal, outputTotal);
+        }
+    }
+}
