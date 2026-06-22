@@ -6,6 +6,7 @@ import com.pockethomestead.production.ProductionStatsStorage;
 import com.pockethomestead.registry.ChestRegistryManager;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -28,15 +29,30 @@ import java.util.Map;
  *   13=设置绑定对同步间隔(value=秒数)
  * value: 取/放动作时为物品注册名（如 minecraft:oak_log）；绑定动作时为目标箱子ID或空串
  */
-public record ChestConfigPacket(int action, String value) implements CustomPacketPayload {
+public record ChestConfigPacket(int action, String value, ItemStack stack) implements CustomPacketPayload {
     public static final Type<ChestConfigPacket> TYPE = new Type<>(
         ResourceLocation.fromNamespaceAndPath("pockethomestead", "chest_config"));
 
-    public static final StreamCodec<ByteBuf, ChestConfigPacket> STREAM_CODEC = StreamCodec.composite(
-        ByteBufCodecs.VAR_INT, ChestConfigPacket::action,
-        ByteBufCodecs.STRING_UTF8, ChestConfigPacket::value,
-        ChestConfigPacket::new
-    );
+    public ChestConfigPacket(int action, String value) {
+        this(action, value, ItemStack.EMPTY);
+    }
+
+    public static final StreamCodec<RegistryFriendlyByteBuf, ChestConfigPacket> STREAM_CODEC = new StreamCodec<>() {
+        @Override
+        public ChestConfigPacket decode(RegistryFriendlyByteBuf buf) {
+            int action = ByteBufCodecs.VAR_INT.decode(buf);
+            String value = ByteBufCodecs.STRING_UTF8.decode(buf);
+            ItemStack stack = ItemStack.OPTIONAL_STREAM_CODEC.decode(buf);
+            return new ChestConfigPacket(action, value, stack);
+        }
+
+        @Override
+        public void encode(RegistryFriendlyByteBuf buf, ChestConfigPacket pkt) {
+            ByteBufCodecs.VAR_INT.encode(buf, pkt.action);
+            ByteBufCodecs.STRING_UTF8.encode(buf, pkt.value);
+            ItemStack.OPTIONAL_STREAM_CODEC.encode(buf, pkt.stack == null ? ItemStack.EMPTY : pkt.stack.copyWithCount(1));
+        }
+    };
 
     @Override
     public Type<? extends CustomPacketPayload> type() { return TYPE; }
@@ -71,9 +87,9 @@ public record ChestConfigPacket(int action, String value) implements CustomPacke
 
                 case 8 -> putFromCarried(menu, be, false);     // 放入全部
                 case 12 -> putFromCarried(menu, be, true);     // 放入一个
-                case 9 -> takeToCarried(menu, be, packet.value, false);  // 取一组
-                case 10 -> takeToCarried(menu, be, packet.value, true);  // 取一个
-                case 11 -> shiftTakeToInventory(player, menu, be, packet.value);  // Shift取出
+                case 9 -> takeToCarried(menu, be, packet.value, packet.stack, false);  // 取一组
+                case 10 -> takeToCarried(menu, be, packet.value, packet.stack, true);  // 取一个
+                case 11 -> shiftTakeToInventory(player, menu, be, packet.value, packet.stack);  // Shift取出
 
                 default -> {}
             }
@@ -95,7 +111,7 @@ public record ChestConfigPacket(int action, String value) implements CustomPacke
 
         int want = onlyOne ? 1 : carried.getCount();
         want = Math.min(want, carried.getCount());
-        int added = be.addItem(carried.getItem(), want);
+        int added = be.addItem(carried, want);
         if (added > 0) {
             carried.shrink(added);
             menu.setCarried(carried.isEmpty() ? ItemStack.EMPTY : carried);
@@ -104,19 +120,26 @@ public record ChestConfigPacket(int action, String value) implements CustomPacke
 
     /** 从箱子取物品到手持 */
     private static void takeToCarried(BaseChestMenu menu, BaseChestBlockEntity be, String itemId, boolean onlyOne) {
-        Item item = resolveItem(itemId);
+        takeToCarried(menu, be, itemId, ItemStack.EMPTY, onlyOne);
+    }
+
+    private static void takeToCarried(BaseChestMenu menu, BaseChestBlockEntity be, String itemId, ItemStack prototype, boolean onlyOne) {
+        Item item = prototype != null && !prototype.isEmpty() ? prototype.getItem() : resolveItem(itemId);
         if (item == null) return;
 
-        int have = be.getItemCount(item);
+        int have = prototype != null && !prototype.isEmpty() ? be.getStoredItems().stream()
+                .filter(stored -> stored.matches(prototype)).mapToInt(com.pockethomestead.blockentity.StoredItemStack::count).findFirst().orElse(0)
+                : be.getItemCount(item);
         if (have <= 0) return;
 
         ItemStack carried = menu.getCarried();
-        int maxStack = new ItemStack(item).getMaxStackSize();
+        ItemStack baseStack = prototype != null && !prototype.isEmpty() ? prototype.copyWithCount(1) : new ItemStack(item);
+        int maxStack = baseStack.getMaxStackSize();
 
         int want;
         if (carried.isEmpty()) {
             want = onlyOne ? 1 : maxStack;
-        } else if (carried.getItem() == item) {
+        } else if (ItemStack.isSameItemSameComponents(carried, baseStack)) {
             want = onlyOne ? 1 : (maxStack - carried.getCount());
         } else {
             return; // 手持其他物品，无法取
@@ -124,10 +147,10 @@ public record ChestConfigPacket(int action, String value) implements CustomPacke
         want = Math.min(want, have);
         if (want <= 0) return;
 
-        int removed = be.removeItem(item, want);
+        int removed = prototype != null && !prototype.isEmpty() ? be.removeItem(baseStack, want) : be.removeItem(item, want);
         if (removed > 0) {
             if (carried.isEmpty()) {
-                menu.setCarried(new ItemStack(item, removed));
+                menu.setCarried(baseStack.copyWithCount(removed));
             } else {
                 carried.grow(removed);
                 menu.setCarried(carried);
@@ -137,21 +160,29 @@ public record ChestConfigPacket(int action, String value) implements CustomPacke
 
     /** Shift取出一组到玩家背包 */
     private static void shiftTakeToInventory(ServerPlayer player, BaseChestMenu menu, BaseChestBlockEntity be, String itemId) {
-        Item item = resolveItem(itemId);
+        shiftTakeToInventory(player, menu, be, itemId, ItemStack.EMPTY);
+    }
+
+    private static void shiftTakeToInventory(ServerPlayer player, BaseChestMenu menu, BaseChestBlockEntity be, String itemId, ItemStack prototype) {
+        Item item = prototype != null && !prototype.isEmpty() ? prototype.getItem() : resolveItem(itemId);
         if (item == null) return;
 
-        int have = be.getItemCount(item);
+        int have = prototype != null && !prototype.isEmpty() ? be.getStoredItems().stream()
+                .filter(stored -> stored.matches(prototype)).mapToInt(com.pockethomestead.blockentity.StoredItemStack::count).findFirst().orElse(0)
+                : be.getItemCount(item);
         if (have <= 0) return;
 
-        int maxStack = new ItemStack(item).getMaxStackSize();
+        ItemStack baseStack = prototype != null && !prototype.isEmpty() ? prototype.copyWithCount(1) : new ItemStack(item);
+        int maxStack = baseStack.getMaxStackSize();
         int want = Math.min(maxStack, have);
 
-        ItemStack toGive = new ItemStack(item, want);
+        ItemStack toGive = baseStack.copyWithCount(want);
         player.getInventory().add(toGive);
         int leftover = toGive.getCount();
         int actuallyAdded = want - leftover;
         if (actuallyAdded > 0) {
-            be.removeItem(item, actuallyAdded);
+            if (prototype != null && !prototype.isEmpty()) be.removeItem(baseStack, actuallyAdded);
+            else be.removeItem(item, actuallyAdded);
         }
     }
 
@@ -287,11 +318,9 @@ public record ChestConfigPacket(int action, String value) implements CustomPacke
         java.util.List<String> bindings = new java.util.ArrayList<>(available);
         java.util.Collections.sort(bindings);
 
-        // 构建物品快照（itemId → count）
-        Map<String, Integer> items = new LinkedHashMap<>();
-        for (Map.Entry<Item, Integer> e : be.getAllItems().entrySet()) {
-            ResourceLocation key = BuiltInRegistries.ITEM.getKey(e.getKey());
-            items.put(key.toString(), e.getValue());
+        java.util.List<ChestSyncPacket.ItemEntry> items = new java.util.ArrayList<>();
+        for (com.pockethomestead.blockentity.StoredItemStack e : be.getStoredItems()) {
+            items.add(new ChestSyncPacket.ItemEntry(e.prototype(), e.count()));
         }
 
         // 构建流体快照（fluidId → amountMb）

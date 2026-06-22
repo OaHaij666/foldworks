@@ -104,7 +104,7 @@ public abstract class BaseChestMenu extends AbstractContainerMenu {
         ItemStack stack = slot.getItem();
         ItemStack copy = stack.copy();
 
-        int added = blockEntity.addItem(stack.getItem(), stack.getCount());
+        int added = blockEntity.addItem(stack, stack.getCount());
         if (added <= 0) return ItemStack.EMPTY;
 
         stack.shrink(added);

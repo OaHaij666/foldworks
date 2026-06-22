@@ -1,5 +1,6 @@
 package com.pockethomestead.blockentity;
 
+import com.pockethomestead.block.AbstractHomesteadBlock;
 import com.pockethomestead.config.ModConfig;
 import com.pockethomestead.production.ProductionStatsStorage;
 import com.pockethomestead.registry.ChestRegistryManager;
@@ -7,6 +8,7 @@ import com.pockethomestead.transfer.TransferEdge;
 import com.pockethomestead.transfer.TransferGraph;
 import com.pockethomestead.transfer.TransferGraphStorage;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -38,12 +40,14 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         private int moved() { return movedByItem.values().stream().mapToInt(Integer::intValue).sum(); }
     }
 
-    // 容量系统：Item -> 数量（总容量从ModConfig读取）
-    protected final Map<Item, Integer> itemStorage = new HashMap<>();
+    // 容量系统：完整 ItemStack 组件身份 -> 数量（总容量从ModConfig读取）
+    protected final List<StoredItemStack> itemStorage = new ArrayList<>();
     private final Map<String, Integer> transferRouteCursor = new HashMap<>();
 
     // 流体容量系统：Fluid -> mB（1000mB=1桶）
     protected final Map<Fluid, Integer> fluidStorage = new HashMap<>();
+    private final com.pockethomestead.compat.item.HomesteadChestItemHandler itemHandler =
+            new com.pockethomestead.compat.item.HomesteadChestItemHandler(this);
     private final com.pockethomestead.compat.fluid.HomesteadChestFluidHandler fluidHandler =
             new com.pockethomestead.compat.fluid.HomesteadChestFluidHandler(this);
 
@@ -129,7 +133,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
      * 获取当前已用容量
      */
     public int getUsedCapacity() {
-        return itemStorage.values().stream().mapToInt(Integer::intValue).sum();
+        return itemStorage.stream().mapToInt(StoredItemStack::count).sum();
     }
 
     /**
@@ -144,13 +148,20 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
      * @return 实际添加的数量
      */
     public int addItem(Item item, int count) {
+        return addItem(new ItemStack(item), count);
+    }
+
+    public int addItem(ItemStack stack, int count) {
+        if (stack == null || stack.isEmpty() || count <= 0) return 0;
         int remaining = getRemainingCapacity();
         int toAdd = Math.min(count, remaining);
         if (toAdd > 0) {
-            itemStorage.merge(item, toAdd, Integer::sum);
+            StoredItemStack stored = findStoredStack(stack);
+            if (stored == null) itemStorage.add(new StoredItemStack(stack, toAdd));
+            else stored.grow(toAdd);
             storageDirty = true;
             setChanged();
-            recordProductionInput(item, toAdd);
+            recordProductionInput(stack.getItem(), toAdd);
         }
         return toAdd;
     }
@@ -160,34 +171,80 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
      * @return 实际移除的数量
      */
     public int removeItem(Item item, int count) {
-        int current = itemStorage.getOrDefault(item, 0);
-        int toRemove = Math.min(count, current);
-        if (toRemove > 0) {
-            int newCount = current - toRemove;
-            if (newCount <= 0) {
-                itemStorage.remove(item);
-            } else {
-                itemStorage.put(item, newCount);
-            }
+        if (item == null || count <= 0) return 0;
+        int remaining = count;
+        int removed = 0;
+        Iterator<StoredItemStack> it = itemStorage.iterator();
+        while (it.hasNext() && remaining > 0) {
+            StoredItemStack stored = it.next();
+            if (stored.item() != item) continue;
+            int part = stored.shrink(remaining);
+            remaining -= part;
+            removed += part;
+            if (stored.isEmpty()) it.remove();
+        }
+        if (removed > 0) {
             storageDirty = true;
             setChanged();
-            recordProductionOutput(item, toRemove);
+            recordProductionOutput(item, removed);
         }
-        return toRemove;
+        return removed;
+    }
+
+    public int removeItem(ItemStack prototype, int count) {
+        if (prototype == null || prototype.isEmpty() || count <= 0) return 0;
+        StoredItemStack stored = findStoredStack(prototype);
+        if (stored == null) return 0;
+        int removed = stored.shrink(count);
+        if (stored.isEmpty()) itemStorage.remove(stored);
+        if (removed > 0) {
+            storageDirty = true;
+            setChanged();
+            recordProductionOutput(prototype.getItem(), removed);
+        }
+        return removed;
     }
 
     /**
      * 获取某物品的数量
      */
     public int getItemCount(Item item) {
-        return itemStorage.getOrDefault(item, 0);
+        int total = 0;
+        for (StoredItemStack stored : itemStorage) {
+            if (stored.item() == item) total += stored.count();
+        }
+        return total;
     }
 
     /**
      * 获取所有物品（只读视图）
      */
     public Map<Item, Integer> getAllItems() {
-        return Collections.unmodifiableMap(itemStorage);
+        Map<Item, Integer> items = new LinkedHashMap<>();
+        for (StoredItemStack stored : getStoredItems()) {
+            items.merge(stored.item(), stored.count(), Integer::sum);
+        }
+        return Collections.unmodifiableMap(items);
+    }
+
+    public List<StoredItemStack> getStoredItems() {
+        List<StoredItemStack> items = new ArrayList<>(itemStorage);
+        items.sort(Comparator.comparing(StoredItemStack::sortKey));
+        return Collections.unmodifiableList(items);
+    }
+
+    private StoredItemStack findStoredStack(ItemStack stack) {
+        for (StoredItemStack stored : itemStorage) {
+            if (stored.matches(stack)) return stored;
+        }
+        return null;
+    }
+
+    private void addLoadedItem(ItemStack stack, int count) {
+        if (stack == null || stack.isEmpty() || count <= 0) return;
+        StoredItemStack stored = findStoredStack(stack);
+        if (stored == null) itemStorage.add(new StoredItemStack(stack, count));
+        else stored.grow(count);
     }
 
     private void recordProductionInput(Item item, int amount) {
@@ -205,14 +262,27 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         if (itemId == null) return;
         ProductionStatsStorage storage = ProductionStatsStorage.get(serverLevel.getServer());
         String key = productionChestKey();
-        if (input) storage.recordInput(ownerUUID, key, itemId.toString(), amount, serverLevel.getGameTime());
-        else storage.recordOutput(ownerUUID, key, itemId.toString(), amount, serverLevel.getGameTime());
+        String resourceKey = TransferEdge.ITEM_PREFIX + itemId;
+        if (input) storage.recordInput(ownerUUID, key, resourceKey, amount, serverLevel.getGameTime());
+        else storage.recordOutput(ownerUUID, key, resourceKey, amount, serverLevel.getGameTime());
+    }
+
+    private void recordProductionFluidChange(Fluid fluid, int amount, boolean input) {
+        if (level == null || level.isClientSide || ownerUUID == null || amount <= 0) return;
+        if (!(level instanceof ServerLevel serverLevel)) return;
+        net.minecraft.resources.ResourceLocation fluidId = net.minecraft.core.registries.BuiltInRegistries.FLUID.getKey(fluid);
+        if (fluidId == null) return;
+        ProductionStatsStorage storage = ProductionStatsStorage.get(serverLevel.getServer());
+        String key = productionChestKey();
+        String resourceKey = TransferEdge.FLUID_PREFIX + fluidId;
+        if (input) storage.recordInput(ownerUUID, key, resourceKey, amount, serverLevel.getGameTime());
+        else storage.recordOutput(ownerUUID, key, resourceKey, amount, serverLevel.getGameTime());
     }
 
     private void refreshProductionInventorySnapshot() {
         if (level == null || level.isClientSide || ownerUUID == null) return;
         if (!(level instanceof ServerLevel serverLevel)) return;
-        ProductionStatsStorage.get(serverLevel.getServer()).refreshChestInventory(ownerUUID, productionChestKey(), productionItemSnapshot());
+        ProductionStatsStorage.get(serverLevel.getServer()).refreshChestInventory(ownerUUID, productionChestKey(), productionResourceSnapshot());
     }
 
     public String productionChestKey() {
@@ -221,10 +291,18 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     }
 
     public Map<String, Integer> productionItemSnapshot() {
+        return productionResourceSnapshot();
+    }
+
+    public Map<String, Integer> productionResourceSnapshot() {
         Map<String, Integer> items = new LinkedHashMap<>();
-        for (Map.Entry<Item, Integer> entry : itemStorage.entrySet()) {
-            net.minecraft.resources.ResourceLocation itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(entry.getKey());
-            if (itemId != null && entry.getValue() > 0) items.put(itemId.toString(), entry.getValue());
+        for (StoredItemStack stored : itemStorage) {
+            net.minecraft.resources.ResourceLocation itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stored.item());
+            if (itemId != null && stored.count() > 0) items.merge(TransferEdge.ITEM_PREFIX + itemId, stored.count(), Integer::sum);
+        }
+        for (Map.Entry<Fluid, Integer> entry : fluidStorage.entrySet()) {
+            net.minecraft.resources.ResourceLocation fluidId = net.minecraft.core.registries.BuiltInRegistries.FLUID.getKey(entry.getKey());
+            if (fluidId != null && entry.getValue() > 0) items.merge(TransferEdge.FLUID_PREFIX + fluidId, entry.getValue(), Integer::sum);
         }
         return items;
     }
@@ -247,6 +325,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
             fluidStorage.merge(fluid, toAdd, Integer::sum);
             storageDirty = true;
             setChanged();
+            recordProductionFluidChange(fluid, toAdd, true);
         }
         return toAdd;
     }
@@ -265,6 +344,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
             }
             storageDirty = true;
             setChanged();
+            recordProductionFluidChange(fluid, toRemove, false);
         }
         return toRemove;
     }
@@ -274,8 +354,36 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         return Collections.unmodifiableMap(fluidStorage);
     }
 
+    public com.pockethomestead.compat.item.HomesteadChestItemHandler getItemHandler() {
+        return itemHandler;
+    }
+
+    public com.pockethomestead.compat.item.HomesteadChestItemHandler getItemHandler(Direction side) {
+        return new com.pockethomestead.compat.item.HomesteadChestItemHandler(this, canAutomationInsert(side), canAutomationExtract(side));
+    }
+
     public com.pockethomestead.compat.fluid.HomesteadChestFluidHandler getFluidHandler() {
         return fluidHandler;
+    }
+
+    public com.pockethomestead.compat.fluid.HomesteadChestFluidHandler getFluidHandler(Direction side) {
+        return new com.pockethomestead.compat.fluid.HomesteadChestFluidHandler(this, canAutomationInsert(side), canAutomationExtract(side));
+    }
+
+    private boolean canAutomationInsert(Direction side) {
+        if (side == null) return true;
+        Direction front = getBlockState().getValue(AbstractHomesteadBlock.FACING);
+        Direction back = front.getOpposite();
+        if (side == Direction.UP || side == back) return true;
+        return side.getAxis().isHorizontal() && side != front && side != back;
+    }
+
+    private boolean canAutomationExtract(Direction side) {
+        if (side == null) return true;
+        Direction front = getBlockState().getValue(AbstractHomesteadBlock.FACING);
+        Direction back = front.getOpposite();
+        if (side == Direction.DOWN || side == front) return true;
+        return side.getAxis().isHorizontal() && side != front && side != back;
     }
 
     /**
@@ -284,7 +392,11 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     public void clientSyncItems(Map<Item, Integer> items) {
         if (level != null && level.isClientSide) {
             itemStorage.clear();
-            itemStorage.putAll(items);
+            for (Map.Entry<Item, Integer> entry : items.entrySet()) {
+                if (entry.getKey() != null && entry.getValue() > 0) {
+                    itemStorage.add(new StoredItemStack(new ItemStack(entry.getKey()), entry.getValue()));
+                }
+            }
         }
     }
 
@@ -319,7 +431,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
 
     /** 计算距离下一次传输还有多少秒（用于UI倒计时） */
     public int getNextTransferSeconds() {
-        if (!transferEnabled || !hasGraphOutgoingEdges()) return 0;
+        if (!hasGraphOutgoingEdges()) return 0;
         int interval = GRAPH_TRANSFER_INTERVAL_TICKS;
         int offset = Math.abs(worldPosition.hashCode()) % interval;
         int elapsed = (tickCounter + offset) % interval;
@@ -349,7 +461,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         // 兜底：确保箱子已注册（新放置时 onLoad 早于 setPlacedBy）
         registerIfReady();
         if (ownerUUID == null) return;
-        if (!transferEnabled) return;
+        if (!transferEnabled && !hasGraphOutgoingEdges()) return;
 
         tickCounter++;
         int interval = GRAPH_TRANSFER_INTERVAL_TICKS;
@@ -366,7 +478,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         // 只有供货箱发送物品，取货箱只接收不发送
         if (getChestType() != ChestRegistryManager.ChestType.SUPPLY) return;
         if (!(level instanceof ServerLevel serverLevel)) return;
-        if (itemStorage.isEmpty()) return;
+        if (itemStorage.isEmpty() && fluidStorage.isEmpty()) return;
 
         TransferGraph graph = TransferGraphStorage.get(serverLevel.getServer()).graphFor(ownerUUID);
         String dim = level.dimension().location().toString();
@@ -376,8 +488,14 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         if (page == null || !page.isEnabled()) return;
 
         boolean canVoid = ModConfig.VOID_ENABLED.get() && (voidModeEnabled || ModConfig.GLOBAL_VOID_MODE.get());
-        followOutgoingEdges(graph, serverLevel, node.getPageId(), node.getId(), TransferEdge.PORT_ALL, "ROOT",
-                new ArrayList<>(), new HashSet<>(), canVoid, Integer.MAX_VALUE);
+        if (!itemStorage.isEmpty()) {
+            followOutgoingEdges(graph, serverLevel, node.getPageId(), node.getId(), TransferEdge.PORT_ALL, "ROOT_ITEM",
+                    new ArrayList<>(), new HashSet<>(), canVoid, Integer.MAX_VALUE);
+        }
+        if (!fluidStorage.isEmpty()) {
+            followOutgoingEdges(graph, serverLevel, node.getPageId(), node.getId(), TransferEdge.FLUID_ALL, "ROOT_FLUID",
+                    new ArrayList<>(), new HashSet<>(), canVoid, Integer.MAX_VALUE);
+        }
     }
 
     private int followTransferEdge(TransferGraph graph, ServerLevel serverLevel, String pageId, TransferEdge edge,
@@ -403,7 +521,9 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         }
 
         if (targetNode.getNodeType() == com.pockethomestead.transfer.TransferNode.NodeType.TRASH) {
-            TransferResult result = voidFilteredItems(scopePort, nextPath, gameTime, routeBudget);
+            TransferResult result = isFluidScope(scopePort)
+                    ? voidFilteredFluids(scopePort, nextPath, gameTime, routeBudget)
+                    : voidFilteredItems(scopePort, nextPath, gameTime, routeBudget);
             recordTransferResult(graph, serverLevel, nextPath, gameTime, result);
             return result.moved();
         }
@@ -412,11 +532,15 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         BaseChestBlockEntity target = findNodeChest(targetNode, serverLevel);
         TransferResult result;
         if (target != null && !target.isRemoved()) {
-            result = transferItemsTo(target, scopePort, nextPath, gameTime, routeBudget, canVoid);
+            result = isFluidScope(scopePort)
+                    ? transferFluidsTo(target, scopePort, nextPath, gameTime, routeBudget, canVoid)
+                    : transferItemsTo(target, scopePort, nextPath, gameTime, routeBudget, canVoid);
         } else if (canVoid) {
-            result = voidFilteredItems(scopePort, nextPath, gameTime, routeBudget);
+            result = isFluidScope(scopePort)
+                    ? voidFilteredFluids(scopePort, nextPath, gameTime, routeBudget)
+                    : voidFilteredItems(scopePort, nextPath, gameTime, routeBudget);
         } else {
-            result = new TransferResult(Map.of(), TransferBlockReason.RECEIVER, firstMatchingItemId(scopePort));
+            result = new TransferResult(Map.of(), TransferBlockReason.RECEIVER, firstMatchingResourceId(scopePort));
         }
         recordTransferResult(graph, serverLevel, nextPath, gameTime, result);
         return result.moved();
@@ -519,8 +643,10 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     private String intersectPorts(String current, String next) {
         if (current == null || current.isBlank()) current = TransferEdge.PORT_ALL;
         if (next == null || next.isBlank()) next = TransferEdge.PORT_ALL;
-        if (TransferEdge.PORT_ALL.equals(current)) return next;
-        if (TransferEdge.PORT_ALL.equals(next)) return current;
+        if (TransferEdge.PORT_ALL.equals(current)) return isFluidScope(next) ? null : next;
+        if (TransferEdge.PORT_ALL.equals(next)) return isFluidScope(current) ? null : current;
+        if (TransferEdge.FLUID_ALL.equals(current) && isFluidScope(next)) return next;
+        if (TransferEdge.FLUID_ALL.equals(next) && isFluidScope(current)) return current;
         return current.equals(next) ? current : null;
     }
 
@@ -555,9 +681,18 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     }
 
     private int matchingSourceCount(String scopePort) {
+        if (isFluidScope(scopePort)) return matchingFluidSourceCount(scopePort);
         int total = 0;
-        for (Map.Entry<Item, Integer> entry : itemStorage.entrySet()) {
-            if (entry.getValue() > 0 && portAllows(scopePort, entry.getKey())) total += entry.getValue();
+        for (StoredItemStack stored : itemStorage) {
+            if (stored.count() > 0 && portAllows(scopePort, stored.item())) total += stored.count();
+        }
+        return total;
+    }
+
+    private int matchingFluidSourceCount(String scopePort) {
+        int total = 0;
+        for (Map.Entry<Fluid, Integer> entry : fluidStorage.entrySet()) {
+            if (entry.getValue() > 0 && portAllowsFluid(scopePort, entry.getKey())) total += entry.getValue();
         }
         return total;
     }
@@ -570,7 +705,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     private TransferResult transferItemsTo(BaseChestBlockEntity target, String scopePort, List<TransferEdge> path,
                                            long gameTime, int routeBudget, boolean canVoid) {
         // 快照物品列表避免并发修改
-        List<Map.Entry<Item, Integer>> entries = new ArrayList<>(itemStorage.entrySet());
+        List<StoredItemStack> entries = getStoredItems();
         int remainingRouteBudget = routeBudget;
         Map<String, Integer> movedByItem = new LinkedHashMap<>();
         boolean matchedSourceItem = false;
@@ -582,9 +717,9 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
                     : new TransferResult(Map.of(), TransferBlockReason.RECEIVER, firstMatchingItemId(scopePort));
         }
 
-        for (Map.Entry<Item, Integer> entry : entries) {
-            Item item = entry.getKey();
-            int count = entry.getValue();
+        for (StoredItemStack entry : entries) {
+            Item item = entry.item();
+            int count = entry.count();
             if (count <= 0) continue;
             if (!portAllows(scopePort, item)) continue;
             matchedSourceItem = true;
@@ -600,8 +735,13 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
             toTransfer = Math.min(toTransfer, target.getRemainingCapacity());
 
             if (toTransfer > 0) {
-                removeItem(item, toTransfer);
-                target.addItem(item, toTransfer);
+                ItemStack moving = entry.prototype();
+                int removed = removeItem(moving, toTransfer);
+                if (removed <= 0) continue;
+                int accepted = target.addItem(moving, removed);
+                if (accepted < removed) addItem(moving, removed - accepted);
+                if (accepted <= 0) continue;
+                toTransfer = accepted;
                 movedByItem.merge(itemId, toTransfer, Integer::sum);
                 remainingRouteBudget -= toTransfer;
 
@@ -631,6 +771,70 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
                 blockItemId != null ? blockItemId : lastMovedItemId(movedByItem));
     }
 
+    private TransferResult transferFluidsTo(BaseChestBlockEntity target, String scopePort, List<TransferEdge> path,
+                                            long gameTime, int routeBudget, boolean canVoid) {
+        List<Map.Entry<Fluid, Integer>> entries = new ArrayList<>(fluidStorage.entrySet());
+        entries.sort(Comparator.comparing(entry -> net.minecraft.core.registries.BuiltInRegistries.FLUID.getKey(entry.getKey()).toString()));
+        int remainingRouteBudget = routeBudget;
+        Map<String, Integer> movedByFluid = new LinkedHashMap<>();
+        boolean matchedSourceFluid = false;
+        boolean rateLimitedOnly = false;
+        TransferBlockReason blockReason = TransferBlockReason.NONE;
+        String blockFluidId = null;
+        if (target.getRemainingFluidCapacityMb() <= 0) {
+            return canVoid ? voidFilteredFluids(scopePort, path, gameTime, routeBudget)
+                    : new TransferResult(Map.of(), TransferBlockReason.RECEIVER, firstMatchingFluidId(scopePort));
+        }
+
+        for (Map.Entry<Fluid, Integer> entry : entries) {
+            Fluid fluid = entry.getKey();
+            int amount = entry.getValue();
+            if (amount <= 0 || !portAllowsFluid(scopePort, fluid)) continue;
+            matchedSourceFluid = true;
+            String fluidId = fluidId(fluid);
+            if (fluidId == null) continue;
+            int fluidBudget = pathBudget(path, gameTime, remainingRouteBudget, fluidId);
+            if (fluidBudget <= 0) {
+                rateLimitedOnly = true;
+                continue;
+            }
+            int toTransfer = Math.min(amount, fluidBudget);
+            toTransfer = Math.min(toTransfer, target.getRemainingFluidCapacityMb());
+            if (toTransfer > 0) {
+                int removed = removeFluid(fluid, toTransfer);
+                if (removed <= 0) continue;
+                int accepted = target.addFluid(fluid, removed);
+                if (accepted < removed) addFluid(fluid, removed - accepted);
+                if (accepted <= 0) continue;
+                movedByFluid.merge(fluidId, accepted, Integer::sum);
+                remainingRouteBudget -= accepted;
+
+                if (target.getRemainingFluidCapacityMb() <= 0) {
+                    if (canVoid && remainingRouteBudget > 0) {
+                        TransferResult voided = voidFilteredFluids(scopePort, path, gameTime, remainingRouteBudget);
+                        for (Map.Entry<String, Integer> moved : voided.movedByItem().entrySet()) movedByFluid.merge(moved.getKey(), moved.getValue(), Integer::sum);
+                        remainingRouteBudget -= voided.moved();
+                        blockReason = voided.reason();
+                        blockFluidId = voided.blockItemId();
+                    } else if (remainingRouteBudget > 0) {
+                        blockReason = TransferBlockReason.RECEIVER;
+                        blockFluidId = fluidId;
+                    }
+                    break;
+                }
+                if (remainingRouteBudget <= 0) break;
+            }
+        }
+        if (movedByFluid.isEmpty()) {
+            if (rateLimitedOnly) return new TransferResult(Map.of(), TransferBlockReason.NONE, null);
+            return new TransferResult(Map.of(), matchedSourceFluid ? TransferBlockReason.RECEIVER : TransferBlockReason.SOURCE,
+                    matchedSourceFluid ? firstMatchingFluidId(scopePort) : scopedFluidId(scopePort));
+        }
+        if (remainingRouteBudget <= 0) return new TransferResult(movedByFluid, TransferBlockReason.NONE, null);
+        return new TransferResult(movedByFluid, blockReason != TransferBlockReason.NONE ? blockReason : TransferBlockReason.SOURCE,
+                blockFluidId != null ? blockFluidId : lastMovedItemId(movedByFluid));
+    }
+
     /**
      * 虚空所有通过筛选的物品（整箱清空）
      */
@@ -640,18 +844,18 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         boolean matchedSourceItem = false;
         boolean rateLimitedOnly = false;
         Map<String, Integer> movedByItem = new LinkedHashMap<>();
-        List<Map.Entry<Item, Integer>> entries = new ArrayList<>(itemStorage.entrySet());
-        for (Map.Entry<Item, Integer> entry : entries) {
-            if (!portAllows(scopePort, entry.getKey())) continue;
+        List<StoredItemStack> entries = getStoredItems();
+        for (StoredItemStack entry : entries) {
+            if (!portAllows(scopePort, entry.item())) continue;
             matchedSourceItem = true;
-            String itemId = itemId(entry.getKey());
+            String itemId = itemId(entry.item());
             if (itemId == null) continue;
             int itemBudget = pathBudget(path, gameTime, remainingRouteBudget, itemId);
             if (itemBudget <= 0) {
                 rateLimitedOnly = true;
                 continue;
             }
-            int removed = removeItem(entry.getKey(), Math.min(entry.getValue(), itemBudget));
+            int removed = removeItem(entry.prototype(), Math.min(entry.count(), itemBudget));
             if (removed > 0) {
                 changed = true;
                 movedByItem.merge(itemId, removed, Integer::sum);
@@ -668,6 +872,41 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         return new TransferResult(Map.of(), TransferBlockReason.SOURCE, matchedSourceItem ? firstMatchingItemId(scopePort) : scopedItemId(scopePort));
     }
 
+    private TransferResult voidFilteredFluids(String scopePort, List<TransferEdge> path, long gameTime, int routeBudget) {
+        boolean changed = false;
+        int remainingRouteBudget = routeBudget;
+        boolean matchedSourceFluid = false;
+        boolean rateLimitedOnly = false;
+        Map<String, Integer> movedByFluid = new LinkedHashMap<>();
+        List<Map.Entry<Fluid, Integer>> entries = new ArrayList<>(fluidStorage.entrySet());
+        entries.sort(Comparator.comparing(entry -> net.minecraft.core.registries.BuiltInRegistries.FLUID.getKey(entry.getKey()).toString()));
+        for (Map.Entry<Fluid, Integer> entry : entries) {
+            if (!portAllowsFluid(scopePort, entry.getKey())) continue;
+            matchedSourceFluid = true;
+            String fluidId = fluidId(entry.getKey());
+            if (fluidId == null) continue;
+            int fluidBudget = pathBudget(path, gameTime, remainingRouteBudget, fluidId);
+            if (fluidBudget <= 0) {
+                rateLimitedOnly = true;
+                continue;
+            }
+            int removed = removeFluid(entry.getKey(), Math.min(entry.getValue(), fluidBudget));
+            if (removed > 0) {
+                changed = true;
+                movedByFluid.merge(fluidId, removed, Integer::sum);
+                remainingRouteBudget -= removed;
+                if (remainingRouteBudget <= 0) break;
+            }
+        }
+        if (changed) setChanged();
+        if (!movedByFluid.isEmpty()) {
+            return new TransferResult(movedByFluid, remainingRouteBudget > 0 ? TransferBlockReason.SOURCE : TransferBlockReason.NONE,
+                    remainingRouteBudget > 0 ? lastMovedItemId(movedByFluid) : null);
+        }
+        if (rateLimitedOnly) return new TransferResult(Map.of(), TransferBlockReason.NONE, null);
+        return new TransferResult(Map.of(), TransferBlockReason.SOURCE, matchedSourceFluid ? firstMatchingFluidId(scopePort) : scopedFluidId(scopePort));
+    }
+
     private boolean portAllows(String scopePort, Item item) {
         if (TransferEdge.PORT_ALL.equals(scopePort)) return true;
         if (scopePort == null || !scopePort.startsWith(TransferEdge.ITEM_PREFIX)) return false;
@@ -677,18 +916,49 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
 
     private String itemId(Item item) {
         net.minecraft.resources.ResourceLocation id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item);
-        return id == null ? null : id.toString();
+        return id == null ? null : TransferEdge.ITEM_PREFIX + id;
     }
 
     private String scopedItemId(String scopePort) {
-        return scopePort != null && scopePort.startsWith(TransferEdge.ITEM_PREFIX) ? scopePort.substring(TransferEdge.ITEM_PREFIX.length()) : null;
+        return scopePort != null && scopePort.startsWith(TransferEdge.ITEM_PREFIX) ? scopePort : null;
     }
 
     private String firstMatchingItemId(String scopePort) {
-        for (Map.Entry<Item, Integer> entry : itemStorage.entrySet()) {
-            if (entry.getValue() > 0 && portAllows(scopePort, entry.getKey())) return itemId(entry.getKey());
+        for (StoredItemStack stored : itemStorage) {
+            if (stored.count() > 0 && portAllows(scopePort, stored.item())) return itemId(stored.item());
         }
         return scopedItemId(scopePort);
+    }
+
+    private boolean isFluidScope(String scopePort) {
+        return scopePort != null && scopePort.startsWith(TransferEdge.FLUID_PREFIX);
+    }
+
+    private boolean portAllowsFluid(String scopePort, Fluid fluid) {
+        if (TransferEdge.FLUID_ALL.equals(scopePort)) return true;
+        if (scopePort == null || !scopePort.startsWith(TransferEdge.FLUID_PREFIX)) return false;
+        net.minecraft.resources.ResourceLocation id = net.minecraft.core.registries.BuiltInRegistries.FLUID.getKey(fluid);
+        return id != null && scopePort.substring(TransferEdge.FLUID_PREFIX.length()).equals(id.toString());
+    }
+
+    private String fluidId(Fluid fluid) {
+        net.minecraft.resources.ResourceLocation id = net.minecraft.core.registries.BuiltInRegistries.FLUID.getKey(fluid);
+        return id == null ? null : TransferEdge.FLUID_PREFIX + id;
+    }
+
+    private String scopedFluidId(String scopePort) {
+        return scopePort != null && scopePort.startsWith(TransferEdge.FLUID_PREFIX) && !TransferEdge.FLUID_ALL.equals(scopePort) ? scopePort : null;
+    }
+
+    private String firstMatchingFluidId(String scopePort) {
+        for (Map.Entry<Fluid, Integer> entry : fluidStorage.entrySet()) {
+            if (entry.getValue() > 0 && portAllowsFluid(scopePort, entry.getKey())) return fluidId(entry.getKey());
+        }
+        return scopedFluidId(scopePort);
+    }
+
+    private String firstMatchingResourceId(String scopePort) {
+        return isFluidScope(scopePort) ? firstMatchingFluidId(scopePort) : firstMatchingItemId(scopePort);
     }
 
     private String lastMovedItemId(Map<String, Integer> movedByItem) {
@@ -729,12 +999,10 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
 
         // 保存容量系统
         ListTag itemList = new ListTag();
-        for (Map.Entry<Item, Integer> entry : itemStorage.entrySet()) {
+        for (StoredItemStack entry : itemStorage) {
             CompoundTag itemTag = new CompoundTag();
-            // 获取 Item 的注册名
-            net.minecraft.resources.ResourceLocation itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(entry.getKey());
-            itemTag.putString("id", itemId.toString());
-            itemTag.putInt("count", entry.getValue());
+            itemTag.put("stack", entry.prototype().saveOptional(reg));
+            itemTag.putInt("count", entry.count());
             itemList.add(itemTag);
         }
         tag.put("Items", itemList);
@@ -780,14 +1048,17 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         ListTag itemList = tag.getList("Items", Tag.TAG_COMPOUND);
         for (Tag t : itemList) {
             CompoundTag itemTag = (CompoundTag) t;
-            String itemId = itemTag.getString("id");
             int count = itemTag.getInt("count");
-            // 使用 BuiltInRegistries 解析 Item
-            net.minecraft.resources.ResourceLocation loc = net.minecraft.resources.ResourceLocation.tryParse(itemId);
-            if (loc != null) {
-                Item item = net.minecraft.core.registries.BuiltInRegistries.ITEM.get(loc);
-                if (item != null && item != net.minecraft.world.item.Items.AIR) {
-                    itemStorage.put(item, count);
+            if (count <= 0) continue;
+            if (itemTag.contains("stack")) {
+                ItemStack stack = ItemStack.parseOptional(reg, itemTag.getCompound("stack"));
+                if (!stack.isEmpty()) addLoadedItem(stack, count);
+            } else {
+                String itemId = itemTag.getString("id");
+                net.minecraft.resources.ResourceLocation loc = net.minecraft.resources.ResourceLocation.tryParse(itemId);
+                if (loc != null) {
+                    Item item = net.minecraft.core.registries.BuiltInRegistries.ITEM.get(loc);
+                    if (item != null && item != net.minecraft.world.item.Items.AIR) addLoadedItem(new ItemStack(item), count);
                 }
             }
         }

@@ -53,17 +53,15 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
     private String cacheProductionGroupId = "";
 
     // 客户端物品快照（按数量从多到少排序）
-    private final List<Map.Entry<Item, Integer>> cacheItems = new ArrayList<>();
+    private final List<ChestSyncPacket.ItemEntry> cacheItems = new ArrayList<>();
     private final List<Map.Entry<Fluid, Integer>> cacheFluids = new ArrayList<>();
 
     private UiButton pageButton;
     private UiButton graphButton;
-    private UiButton statsToggleButton;
-    private UiButton statsGroupButton;
-    private UiButton statsNewGroupButton;
+    private boolean statsGroupDropdownOpen;
 
     // 悬停目标
-    private Item hoveredChestItem = null;
+    private ItemStack hoveredChestStack = ItemStack.EMPTY;
     private int hoveredChestCount = 0;
     private Fluid hoveredFluid = null;
     private int hoveredFluidAmount = 0;
@@ -123,14 +121,10 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
 
         // 解析物品快照（按数量从多到少排序）
         cacheItems.clear();
-        for (Map.Entry<String, Integer> e : p.items().entrySet()) {
-            ResourceLocation loc = ResourceLocation.tryParse(e.getKey());
-            if (loc != null) {
-                Item it = BuiltInRegistries.ITEM.get(loc);
-                if (it != Items.AIR) cacheItems.add(Map.entry(it, e.getValue()));
-            }
+        for (ChestSyncPacket.ItemEntry e : p.items()) {
+            if (!e.stack().isEmpty() && e.count() > 0) cacheItems.add(new ChestSyncPacket.ItemEntry(e.stack().copyWithCount(1), e.count()));
         }
-        cacheItems.sort(Comparator.<Map.Entry<Item, Integer>>comparingInt(Map.Entry::getValue).reversed());
+        cacheItems.sort(Comparator.<ChestSyncPacket.ItemEntry>comparingInt(ChestSyncPacket.ItemEntry::count).reversed());
 
         cacheFluids.clear();
         for (Map.Entry<String, Integer> e : p.fluids().entrySet()) {
@@ -144,13 +138,17 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
 
         int maxRow = Math.max(0, totalRows() - BaseChestMenu.CHEST_VISIBLE_ROWS);
         if (localScrollRow > maxRow) localScrollRow = maxRow;
-        updateConfigButtonLabels();
 
     }
 
     private void send(int action, String value) {
         if (Minecraft.getInstance().player != null)
             PacketDistributor.sendToServer(new ChestConfigPacket(action, value));
+    }
+
+    private void send(int action, String value, ItemStack stack) {
+        if (Minecraft.getInstance().player != null)
+            PacketDistributor.sendToServer(new ChestConfigPacket(action, value, stack == null ? ItemStack.EMPTY : stack.copyWithCount(1)));
     }
 
     // ── init ──
@@ -180,49 +178,20 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
     /** 根据当前页重建控件（配置页才创建配置控件） */
     private void rebuildPageWidgets() {
         graphButton = null;
-        statsToggleButton = null;
-        statsGroupButton = null;
-        statsNewGroupButton = null;
+        statsGroupDropdownOpen = false;
 
         if (pageButton != null) {
             pageButton.label(currentPage == 0 ? "配置 ▶" : "◀ 内容");
         }
 
         if (currentPage == 1) {
-            buildConfigWidgets(leftPos, topPos);
-        }
-    }
-
-    /** 构建配置页控件 */
-    private void buildConfigWidgets(int gl, int gt) {
-        int availW = panelW - 2 * BaseChestMenu.PANEL_PADDING;
-        int graphW = Math.min(142, availW);
-        int graphX = gl + BaseChestMenu.PANEL_PADDING + (availW - graphW) / 2;
-        int graphY = gt + BaseChestMenu.HEADER_HEIGHT + 28;
-        graphButton = new UiButton("打开可视化节点", UiButton.Variant.PRIMARY)
-                .bounds(graphX, graphY, graphW, 18)
-                .onClick(() -> {
-                    Minecraft.getInstance().setScreen(new TransferGraphScreen());
-                });
-        statsToggleButton = new UiButton("加入产率统计", UiButton.Variant.SECONDARY)
-                .bounds(gl + BaseChestMenu.PANEL_PADDING, graphY + 52, 92, 18)
-                .onClick(this::toggleProductionStats);
-        statsGroupButton = new UiButton("默认", UiButton.Variant.SECONDARY)
-                .bounds(gl + BaseChestMenu.PANEL_PADDING + 98, graphY + 52, Math.max(70, availW - 98), 18)
-                .onClick(this::cycleProductionGroup);
-        statsNewGroupButton = new UiButton("+ 新原子组", UiButton.Variant.SECONDARY)
-                .bounds(gl + BaseChestMenu.PANEL_PADDING, graphY + 76, Math.min(92, availW), 18)
-                .onClick(this::createProductionGroup);
-        updateConfigButtonLabels();
-    }
-
-    private void updateConfigButtonLabels() {
-        if (statsToggleButton != null) statsToggleButton.label(cacheProductionStatsEnabled ? "关闭产率统计" : "加入产率统计");
-        if (statsGroupButton != null) {
-            String groupId = selectedProductionGroupId();
-            var group = ClientProductionStatsCache.group(groupId);
-            String label = group == null ? "默认" : group.name();
-            statsGroupButton.label(cacheProductionStatsEnabled ? label : "未加入");
+            PacketDistributor.sendToServer(new RequestProductionStatsPacket());
+            int cardX = leftPos + BaseChestMenu.PANEL_PADDING;
+            int cardY = topPos + BaseChestMenu.HEADER_HEIGHT + 20;
+            int cardW = panelW - BaseChestMenu.PANEL_PADDING * 2;
+            graphButton = new UiButton("打开", UiButton.Variant.PRIMARY)
+                    .bounds(cardX + cardW - 58, cardY + 11, 48, 18)
+                    .onClick(() -> Minecraft.getInstance().setScreen(new TransferGraphScreen()));
         }
     }
 
@@ -235,24 +204,6 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
     private void toggleProductionStats() {
         String groupId = cacheProductionStatsEnabled ? "" : selectedProductionGroupId();
         PacketDistributor.sendToServer(new UpdateProductionStatsPacket("SET_CURRENT_CHEST_GROUP", List.of(groupId)));
-    }
-
-    private void cycleProductionGroup() {
-        List<com.pockethomestead.network.ProductionStatsSyncPacket.GroupData> groups = ClientProductionStatsCache.atomicGroups();
-        if (groups.isEmpty()) {
-            PacketDistributor.sendToServer(new RequestProductionStatsPacket());
-            return;
-        }
-        String current = selectedProductionGroupId();
-        int index = -1;
-        for (int i = 0; i < groups.size(); i++) if (groups.get(i).id().equals(current)) index = i;
-        String next = groups.get((index + 1 + groups.size()) % groups.size()).id();
-        PacketDistributor.sendToServer(new UpdateProductionStatsPacket("SET_CURRENT_CHEST_GROUP", List.of(next)));
-    }
-
-    private void createProductionGroup() {
-        String suffix = cacheChestId == null || cacheChestId.isBlank() ? "" : " " + cacheChestId;
-        PacketDistributor.sendToServer(new UpdateProductionStatsPacket("CREATE_GROUP", List.of("新分组" + suffix, "false", "assign_current")));
     }
 
     // ── 渲染 ──
@@ -332,7 +283,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
 
     /** 渲染存货区（纯渲染，1物品=1格，按滚动行切片） */
     private void renderChestSlots(GuiGraphics g, int mx, int my) {
-        hoveredChestItem = null;
+        hoveredChestStack = ItemStack.EMPTY;
         hoveredChestCount = 0;
 
         int x = leftPos, y = topPos;
@@ -356,15 +307,15 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
                 g.fill(slotX, slotY, slotX + 16, slotY + 16, hovered ? 0x50FFFFFF : 0x30FFFFFF);
 
                 if (dataIdx >= 0 && dataIdx < cacheItems.size()) {
-                    Map.Entry<Item, Integer> entry = cacheItems.get(dataIdx);
-                    Item item = entry.getKey();
-                    int count = entry.getValue();
+                    ChestSyncPacket.ItemEntry entry = cacheItems.get(dataIdx);
+                    ItemStack stack = entry.stack();
+                    int count = entry.count();
 
-                    g.renderItem(new ItemStack(item), slotX, slotY);
+                    g.renderItem(stack, slotX, slotY);
                     renderCountText(g, BaseChestMenu.formatCount(count), slotX, slotY);
 
                     if (hovered) {
-                        hoveredChestItem = item;
+                        hoveredChestStack = stack.copyWithCount(1);
                         hoveredChestCount = count;
                     }
                 }
@@ -446,18 +397,73 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
 
     /** 配置页渲染 */
     private void renderConfigPage(GuiGraphics g, int mx, int my, float partialTick) {
-        int gl = leftPos;
-        int y = topPos + BaseChestMenu.HEADER_HEIGHT + 16;
-        Theme.text(g, font, "节点编辑", gl + BaseChestMenu.PANEL_PADDING, y, Theme.TEXT);
+        int cardX = leftPos + BaseChestMenu.PANEL_PADDING;
+        int graphY = topPos + BaseChestMenu.HEADER_HEIGHT + 20;
+        int cardW = panelW - BaseChestMenu.PANEL_PADDING * 2;
+        int graphH = 40;
+
+        Theme.panel(g, cardX, graphY, cardW, graphH, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
+        Theme.text(g, font, "可视化节点", cardX + 10, graphY + 9, Theme.TEXT);
+        Theme.text(g, font, "编辑连线", cardX + 10, graphY + 23, Theme.TEXT_MUTED);
         if (graphButton != null) graphButton.render(g, mx, my, partialTick);
-        int statsY = y + 46;
-        Theme.text(g, font, "产率统计", gl + BaseChestMenu.PANEL_PADDING, statsY, Theme.TEXT);
-        Theme.text(g, font, "入=生产  出=消耗", gl + BaseChestMenu.PANEL_PADDING, statsY + 14, Theme.TEXT_MUTED);
-        updateConfigButtonLabels();
-        if (statsToggleButton != null) statsToggleButton.render(g, mx, my, partialTick);
-        if (statsGroupButton != null) statsGroupButton.render(g, mx, my, partialTick);
-        if (statsNewGroupButton != null) statsNewGroupButton.render(g, mx, my, partialTick);
+
+        int cardY = graphY + graphH + 10;
+        int cardH = 78;
+
+        Theme.panel(g, cardX, cardY, cardW, cardH, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
+        Theme.text(g, font, "产率统计", cardX + 10, cardY + 10, Theme.TEXT);
+        Theme.text(g, font, "加入统计", cardX + 10, cardY + 31, cacheProductionStatsEnabled ? Theme.TEXT : Theme.TEXT_MUTED);
+        drawStatsSwitch(g, statsToggleX(cardX, cardW), cardY + 27, cacheProductionStatsEnabled);
+
+        Theme.text(g, font, "分组", cardX + 10, cardY + 55, Theme.TEXT_MUTED);
+        drawGroupSelector(g, mx, my, groupSelectorX(cardX), cardY + 49, groupSelectorW(cardW), 18);
+        if (statsGroupDropdownOpen) renderGroupDropdown(g, mx, my, groupSelectorX(cardX), cardY + 68, groupSelectorW(cardW));
     }
+
+    private void drawStatsSwitch(GuiGraphics g, int x, int y, boolean enabled) {
+        int fill = enabled ? Theme.PRIMARY_SOFT : Theme.SURFACE_SUNK;
+        int border = enabled ? Theme.PRIMARY : Theme.BORDER_STRONG;
+        Theme.panel(g, x, y, 34, 14, 7, fill, border);
+        Theme.fillRound(g, x + (enabled ? 19 : 3), y + 3, 9, 8, 4, enabled ? Theme.PRIMARY_PRESS : Theme.TEXT_FAINT);
+    }
+
+    private void drawGroupSelector(GuiGraphics g, int mx, int my, int x, int y, int w, int h) {
+        boolean hover = Theme.inside(mx, my, x, y, w, h);
+        var group = ClientProductionStatsCache.group(selectedProductionGroupId());
+        String label = group == null ? "默认" : group.name();
+        int fill = cacheProductionStatsEnabled ? (hover ? 0xFFFFFFFF : Theme.SURFACE) : Theme.SURFACE_SUNK;
+        Theme.panel(g, x, y, w, h, 5, fill, hover ? Theme.PRIMARY : Theme.BORDER);
+        Theme.text(g, font, Theme.ellipsize(font, label, w - 22), x + 7, y + 5, cacheProductionStatsEnabled ? Theme.TEXT : Theme.TEXT_MUTED);
+        if (statsGroupDropdownOpen) Theme.chevronUp(g, x + w - 11, y + h / 2, 7, Theme.TEXT_MUTED);
+        else Theme.chevronDown(g, x + w - 11, y + h / 2, 7, Theme.TEXT_MUTED);
+    }
+
+    private void renderGroupDropdown(GuiGraphics g, int mx, int my, int x, int y, int w) {
+        List<com.pockethomestead.network.ProductionStatsSyncPacket.GroupData> groups = ClientProductionStatsCache.atomicGroups();
+        int rowH = 17;
+        int visible = Math.min(6, Math.max(1, groups.size()));
+        int h = visible * rowH + 6;
+        Theme.shadow(g, x, y, w, h, Theme.RADIUS + 1);
+        Theme.panel(g, x, y, w, h, Theme.RADIUS + 1, Theme.SURFACE, Theme.BORDER_STRONG);
+        if (groups.isEmpty()) {
+            Theme.text(g, font, "暂无分组", x + 7, y + 7, Theme.TEXT_FAINT);
+            return;
+        }
+        int rowY = y + 3;
+        String current = selectedProductionGroupId();
+        for (int i = 0; i < visible; i++) {
+            var group = groups.get(i);
+            boolean selected = group.id().equals(current);
+            boolean hover = Theme.inside(mx, my, x + 3, rowY, w - 6, rowH);
+            if (selected || hover) Theme.fillRound(g, x + 3, rowY, w - 6, rowH, 4, selected ? Theme.PRIMARY_SOFT : Theme.SURFACE_ALT);
+            Theme.text(g, font, Theme.ellipsize(font, group.name(), w - 18), x + 8, rowY + 5, selected ? Theme.PRIMARY_PRESS : Theme.TEXT);
+            rowY += rowH;
+        }
+    }
+
+    private int statsToggleX(int cardX, int cardW) { return cardX + cardW - 44; }
+    private int groupSelectorX(int cardX) { return cardX + 46; }
+    private int groupSelectorW(int cardW) { return Math.max(74, cardW - 56); }
 
     /** 标题与分区标签 */
     private void renderLabels(GuiGraphics g) {
@@ -466,7 +472,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
 
         if (currentPage == 0) {
             // 容量信息（头部右侧，翻页按钮左侧）— 用服务端同步的 maxCapacity
-            int used = cacheItems.stream().mapToInt(Map.Entry::getValue).sum();
+            int used = cacheItems.stream().mapToInt(ChestSyncPacket.ItemEntry::count).sum();
             int max = cacheMaxCapacity;
             String cap = BaseChestMenu.formatCount(used) + " / " + BaseChestMenu.formatCount(max);
             Theme.textRight(g, font, cap, x + pageButtonX - 6, y + titleLabelY, Theme.TEXT_MUTED);
@@ -492,8 +498,8 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         if (currentPage != 0) return;
         if (hoveredPlayerSlot != null && hoveredPlayerSlot.hasItem()) {
             g.renderTooltip(font, hoveredPlayerSlot.getItem(), mx, my);
-        } else if (hoveredChestItem != null) {
-            ItemStack stack = new ItemStack(hoveredChestItem);
+        } else if (!hoveredChestStack.isEmpty()) {
+            ItemStack stack = hoveredChestStack.copyWithCount(1);
             List<Component> lines = new ArrayList<>();
             lines.add(stack.getHoverName());
             lines.add(Component.literal("数量: " + hoveredChestCount).withStyle(ChatFormatting.GRAY));
@@ -553,11 +559,8 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         if (pageButton != null && pageButton.mouseClicked(mx, my, button)) return true;
 
         if (currentPage == 1) {
-            // 节点页只保留可视化入口
             if (graphButton != null && graphButton.mouseClicked(mx, my, button)) return true;
-            if (statsToggleButton != null && statsToggleButton.mouseClicked(mx, my, button)) return true;
-            if (statsGroupButton != null && statsGroupButton.mouseClicked(mx, my, button)) return true;
-            if (statsNewGroupButton != null && statsNewGroupButton.mouseClicked(mx, my, button)) return true;
+            if (handleConfigPageClick(mx, my, button)) return true;
             return true;
         }
 
@@ -570,19 +573,58 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             if (carrying) {
                 send(button == 1 ? 12 : 8, "");   // 右键放一个，左键放全部
             } else if (idx >= 0 && idx < cacheItems.size()) {
-                String itemId = BuiltInRegistries.ITEM.getKey(cacheItems.get(idx).getKey()).toString();
+                ItemStack stack = cacheItems.get(idx).stack().copyWithCount(1);
+                String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
                 if (shift) {
-                    send(11, itemId);             // Shift → 取一组到背包
+                    send(11, itemId, stack);      // Shift → 取一组到背包
                 } else if (button == 1) {
-                    send(10, itemId);             // 右键 → 取一个到手持
+                    send(10, itemId, stack);      // 右键 → 取一个到手持
                 } else {
-                    send(9, itemId);              // 左键 → 取一组到手持
+                    send(9, itemId, stack);       // 左键 → 取一组到手持
                 }
             }
             return true;
         }
 
         return super.mouseClicked(mx, my, button);
+    }
+
+    private boolean handleConfigPageClick(double mx, double my, int button) {
+        if (button != 0) return true;
+        int cardX = leftPos + BaseChestMenu.PANEL_PADDING;
+        int cardY = topPos + BaseChestMenu.HEADER_HEIGHT + 70;
+        int cardW = panelW - BaseChestMenu.PANEL_PADDING * 2;
+        int selectorX = groupSelectorX(cardX);
+        int selectorY = cardY + 49;
+        int selectorW = groupSelectorW(cardW);
+
+        if (statsGroupDropdownOpen) {
+            List<com.pockethomestead.network.ProductionStatsSyncPacket.GroupData> groups = ClientProductionStatsCache.atomicGroups();
+            int rowH = 17;
+            int listY = cardY + 68;
+            int visible = Math.min(6, groups.size());
+            for (int i = 0; i < visible; i++) {
+                int rowY = listY + 3 + i * rowH;
+                if (Theme.inside(mx, my, selectorX + 3, rowY, selectorW - 6, rowH)) {
+                    PacketDistributor.sendToServer(new UpdateProductionStatsPacket("SET_CURRENT_CHEST_GROUP", List.of(groups.get(i).id())));
+                    statsGroupDropdownOpen = false;
+                    return true;
+                }
+            }
+            if (!Theme.inside(mx, my, selectorX, listY, selectorW, visible * rowH + 6)) statsGroupDropdownOpen = false;
+        }
+
+        if (Theme.inside(mx, my, statsToggleX(cardX, cardW), cardY + 27, 34, 14)) {
+            statsGroupDropdownOpen = false;
+            toggleProductionStats();
+            return true;
+        }
+        if (Theme.inside(mx, my, selectorX, selectorY, selectorW, 18)) {
+            statsGroupDropdownOpen = !statsGroupDropdownOpen;
+            if (ClientProductionStatsCache.atomicGroups().isEmpty()) PacketDistributor.sendToServer(new RequestProductionStatsPacket());
+            return true;
+        }
+        return true;
     }
 
     @Override

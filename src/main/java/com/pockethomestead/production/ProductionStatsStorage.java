@@ -108,6 +108,15 @@ public class ProductionStatsStorage extends SavedData {
         return true;
     }
 
+    public boolean mergeGroups(UUID owner, String name, List<String> childIds) {
+        PlayerStats stats = statsFor(owner);
+        if (stats.mergeGroups(name, childIds)) {
+            setDirty();
+            return true;
+        }
+        return false;
+    }
+
     public boolean toggleChild(UUID owner, String parentId, String childId) {
         PlayerStats stats = statsFor(owner);
         if (stats.toggleChild(parentId, childId)) {
@@ -269,6 +278,27 @@ public class ProductionStatsStorage extends SavedData {
             parent.childIds.add(childId);
             if (hasCycle()) {
                 parent.childIds.remove(childId);
+                return false;
+            }
+            return true;
+        }
+
+        private boolean mergeGroups(String name, List<String> childIds) {
+            ensureDefaultGroup();
+            if (childIds == null) return false;
+            List<String> normalized = new ArrayList<>();
+            for (String childId : childIds) {
+                if (childId == null || childId.isBlank() || normalized.contains(childId) || !groups.containsKey(childId)) continue;
+                normalized.add(childId);
+            }
+            if (normalized.size() < 2) return false;
+
+            String id = UUID.randomUUID().toString();
+            Group group = new Group(id, sanitizeName(name, "新大组"), true, groups.size());
+            group.childIds.addAll(normalized);
+            groups.put(id, group);
+            if (hasCycle()) {
+                groups.remove(id);
                 return false;
             }
             return true;

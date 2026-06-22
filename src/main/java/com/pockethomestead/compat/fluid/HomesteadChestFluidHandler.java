@@ -2,12 +2,14 @@ package com.pockethomestead.compat.fluid;
 
 import com.pockethomestead.blockentity.BaseChestBlockEntity;
 import com.pockethomestead.config.ModConfig;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.Fluids;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.capability.IFluidHandler;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -17,13 +19,23 @@ import java.util.Map;
  */
 public class HomesteadChestFluidHandler implements IFluidHandler {
     private final BaseChestBlockEntity chest;
+    private final boolean canFill;
+    private final boolean canDrain;
 
     public HomesteadChestFluidHandler(BaseChestBlockEntity chest) {
+        this(chest, true, true);
+    }
+
+    public HomesteadChestFluidHandler(BaseChestBlockEntity chest, boolean canFill, boolean canDrain) {
         this.chest = chest;
+        this.canFill = canFill;
+        this.canDrain = canDrain;
     }
 
     private List<Map.Entry<Fluid, Integer>> fluids() {
-        return new ArrayList<>(chest.getAllFluids().entrySet());
+        List<Map.Entry<Fluid, Integer>> entries = new ArrayList<>(chest.getAllFluids().entrySet());
+        entries.sort(Comparator.comparing(entry -> BuiltInRegistries.FLUID.getKey(entry.getKey()).toString()));
+        return entries;
     }
 
     @Override
@@ -52,6 +64,7 @@ public class HomesteadChestFluidHandler implements IFluidHandler {
 
     @Override
     public int fill(FluidStack resource, FluidAction action) {
+        if (!canFill) return 0;
         if (resource == null || resource.isEmpty()) return 0;
         int accepted = Math.min(resource.getAmount(), chest.getRemainingFluidCapacityMb());
         if (accepted <= 0) return 0;
@@ -63,6 +76,7 @@ public class HomesteadChestFluidHandler implements IFluidHandler {
 
     @Override
     public FluidStack drain(FluidStack resource, FluidAction action) {
+        if (!canDrain) return FluidStack.EMPTY;
         if (resource == null || resource.isEmpty()) return FluidStack.EMPTY;
         int available = chest.getAllFluids().getOrDefault(resource.getFluid(), 0);
         int drained = Math.min(resource.getAmount(), available);
@@ -75,6 +89,7 @@ public class HomesteadChestFluidHandler implements IFluidHandler {
 
     @Override
     public FluidStack drain(int maxDrain, FluidAction action) {
+        if (!canDrain) return FluidStack.EMPTY;
         if (maxDrain <= 0) return FluidStack.EMPTY;
         for (Map.Entry<Fluid, Integer> entry : fluids()) {
             if (entry.getKey() == Fluids.EMPTY || entry.getValue() <= 0) continue;

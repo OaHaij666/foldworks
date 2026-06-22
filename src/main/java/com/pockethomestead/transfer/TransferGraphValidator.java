@@ -3,6 +3,7 @@ package com.pockethomestead.transfer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.material.Fluids;
 
 import java.util.*;
 
@@ -87,8 +88,9 @@ public final class TransferGraphValidator {
     }
 
     private static boolean validPort(TransferNode from, String port) {
-        if (from.getNodeType() == TransferNode.NodeType.REROUTE) return isAll(port) || validItemPort(port);
-        if (isAll(port)) return true;
+        if (from.getNodeType() == TransferNode.NodeType.REROUTE) return isAll(port) || validItemPort(port) || validFluidPort(port);
+        if (isAll(port) || TransferEdge.FLUID_ALL.equals(port)) return true;
+        if (validFluidPort(port)) return true;
         if (!validItemPort(port)) return false;
         return from.getFilterItemIds().contains(port.substring(TransferEdge.ITEM_PREFIX.length()));
     }
@@ -106,6 +108,13 @@ public final class TransferGraphValidator {
         if (port == null || !port.startsWith(TransferEdge.ITEM_PREFIX)) return false;
         ResourceLocation id = ResourceLocation.tryParse(port.substring(TransferEdge.ITEM_PREFIX.length()));
         return id != null && BuiltInRegistries.ITEM.get(id) != Items.AIR;
+    }
+
+    private static boolean validFluidPort(String port) {
+        if (TransferEdge.FLUID_ALL.equals(port)) return true;
+        if (port == null || !port.startsWith(TransferEdge.FLUID_PREFIX)) return false;
+        ResourceLocation id = ResourceLocation.tryParse(port.substring(TransferEdge.FLUID_PREFIX.length()));
+        return id != null && BuiltInRegistries.FLUID.get(id) != Fluids.EMPTY;
     }
 
     private static void detectCycles(Map<String, TransferNode> nodes, Map<String, List<TransferEdge>> outgoing, List<Issue> issues) {
@@ -160,38 +169,48 @@ public final class TransferGraphValidator {
             for (TransferEdge edge : outgoing.getOrDefault(node.getId(), List.of())) addScope(out, edge.getFromPortKey(), in);
             boolean hasAllOut = false;
             for (TransferEdge edge : outgoing.getOrDefault(node.getId(), List.of())) {
-                if (TransferEdge.PORT_ALL.equals(edge.getFromPortKey())) hasAllOut = true;
-                if (edge.getFromPortKey().startsWith(TransferEdge.ITEM_PREFIX)) {
-                    String item = edge.getFromPortKey().substring(TransferEdge.ITEM_PREFIX.length());
-                    if (!in.contains("*") && !in.contains(item)) {
-                        issues.add(new Issue(Severity.ERROR, node.getId(), edge.getId(), "中转点输出了未接收的 " + shortItem(item)));
+                if (TransferEdge.PORT_ALL.equals(edge.getFromPortKey()) || TransferEdge.FLUID_ALL.equals(edge.getFromPortKey())) hasAllOut = true;
+                if (edge.getFromPortKey().startsWith(TransferEdge.ITEM_PREFIX) || edge.getFromPortKey().startsWith(TransferEdge.FLUID_PREFIX)) {
+                    String resource = edge.getFromPortKey();
+                    if (!in.contains("*") && !in.contains(TransferEdge.FLUID_ALL) && !in.contains(resource)) {
+                        issues.add(new Issue(Severity.ERROR, node.getId(), edge.getId(), "中转点输出了未接收的 " + shortResource(resource)));
                     }
                 }
             }
-            if (in.contains("*")) continue;
-            for (String item : in) {
-                if (!out.contains(item) && !out.contains("*")) {
-                    issues.add(new Issue(Severity.ERROR, node.getId(), "", "中转点接收了 " + shortItem(item) + " 但没有输出"));
+            if (in.contains("*") && in.contains(TransferEdge.FLUID_ALL)) continue;
+            for (String resource : in) {
+                if (!out.contains(resource) && !out.contains("*") && !out.contains(TransferEdge.FLUID_ALL)) {
+                    issues.add(new Issue(Severity.ERROR, node.getId(), "", "中转点接收了 " + shortResource(resource) + " 但没有输出"));
                 }
             }
         }
     }
 
     private static void addScope(Set<String> scope, String port) {
-        addScope(scope, port, Set.of("*"));
+        addScope(scope, port, Set.of("*", TransferEdge.FLUID_ALL));
     }
 
     private static void addScope(Set<String> target, String port, Set<String> allowed) {
         if (TransferEdge.PORT_ALL.equals(port)) {
-            target.addAll(allowed);
+            if (allowed.contains("*")) target.add("*");
+            for (String resource : allowed) if (resource.startsWith(TransferEdge.ITEM_PREFIX)) target.add(resource);
+        } else if (TransferEdge.FLUID_ALL.equals(port)) {
+            if (allowed.contains(TransferEdge.FLUID_ALL)) target.add(TransferEdge.FLUID_ALL);
+            for (String resource : allowed) if (resource.startsWith(TransferEdge.FLUID_PREFIX)) target.add(resource);
         } else if (port != null && port.startsWith(TransferEdge.ITEM_PREFIX)) {
-            String item = port.substring(TransferEdge.ITEM_PREFIX.length());
-            if (allowed.contains("*") || allowed.contains(item)) target.add(item);
+            if (allowed.contains("*") || allowed.contains(port)) target.add(port);
+        } else if (port != null && port.startsWith(TransferEdge.FLUID_PREFIX)) {
+            if (allowed.contains(TransferEdge.FLUID_ALL) || allowed.contains(port)) target.add(port);
         }
     }
 
-    private static String shortItem(String itemId) {
-        int slash = itemId.indexOf(':');
-        return slash >= 0 ? itemId.substring(slash + 1) : itemId;
+    private static String shortResource(String resourceId) {
+        if ("*".equals(resourceId)) return "全部物品";
+        if (TransferEdge.FLUID_ALL.equals(resourceId)) return "全部流体";
+        String id = resourceId;
+        if (id.startsWith(TransferEdge.ITEM_PREFIX)) id = id.substring(TransferEdge.ITEM_PREFIX.length());
+        if (id.startsWith(TransferEdge.FLUID_PREFIX)) id = id.substring(TransferEdge.FLUID_PREFIX.length());
+        int slash = id.indexOf(':');
+        return slash >= 0 ? id.substring(slash + 1) : id;
     }
 }

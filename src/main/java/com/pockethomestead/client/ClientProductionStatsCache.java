@@ -14,7 +14,8 @@ public final class ClientProductionStatsCache {
     private ClientProductionStatsCache() {}
 
     public record ProductionRow(String itemId, int currentCount, int inputRatePerMinute, int outputRatePerMinute,
-                                int netRatePerMinute, List<Integer> trendNet) {}
+                                int netRatePerMinute, List<Integer> trendInput, List<Integer> trendOutput,
+                                List<Integer> trendNet) {}
 
     private static long serverGameTime;
     private static List<ProductionStatsSyncPacket.GroupData> groups = List.of();
@@ -75,7 +76,11 @@ public final class ClientProductionStatsCache {
             acc.input += bucket.input();
             acc.output += bucket.output();
             int index = trendIndex(bucket.bucketStart(), cutoff, rangeTicks);
-            if (index >= 0 && index < acc.trend.length) acc.trend[index] += bucket.input() - bucket.output();
+            if (index >= 0 && index < acc.trendNet.length) {
+                acc.trendInput[index] += bucket.input();
+                acc.trendOutput[index] += bucket.output();
+                acc.trendNet[index] += bucket.input() - bucket.output();
+            }
         }
 
         List<ProductionRow> rows = new ArrayList<>();
@@ -83,9 +88,16 @@ public final class ClientProductionStatsCache {
             Accumulator acc = entry.getValue();
             int inputRate = Math.round(acc.input / (float) safeMinutes);
             int outputRate = Math.round(acc.output / (float) safeMinutes);
-            List<Integer> trend = new ArrayList<>(acc.trend.length);
-            for (int value : acc.trend) trend.add(Math.round(value / (float) safeMinutes));
-            rows.add(new ProductionRow(entry.getKey(), acc.current, inputRate, outputRate, inputRate - outputRate, trend));
+            List<Integer> trendInput = new ArrayList<>(acc.trendInput.length);
+            List<Integer> trendOutput = new ArrayList<>(acc.trendOutput.length);
+            List<Integer> trendNet = new ArrayList<>(acc.trendNet.length);
+            for (int i = 0; i < acc.trendNet.length; i++) {
+                trendInput.add(Math.round(acc.trendInput[i] / (float) safeMinutes));
+                trendOutput.add(Math.round(acc.trendOutput[i] / (float) safeMinutes));
+                trendNet.add(Math.round(acc.trendNet[i] / (float) safeMinutes));
+            }
+            rows.add(new ProductionRow(entry.getKey(), acc.current, inputRate, outputRate, inputRate - outputRate,
+                    trendInput, trendOutput, trendNet));
         }
         return rows;
     }
@@ -126,6 +138,8 @@ public final class ClientProductionStatsCache {
         private int current;
         private int input;
         private int output;
-        private final int[] trend = new int[TREND_POINTS];
+        private final int[] trendInput = new int[TREND_POINTS];
+        private final int[] trendOutput = new int[TREND_POINTS];
+        private final int[] trendNet = new int[TREND_POINTS];
     }
 }

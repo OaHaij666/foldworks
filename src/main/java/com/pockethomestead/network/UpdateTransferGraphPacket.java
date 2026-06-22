@@ -16,6 +16,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.material.Fluid;
+import net.minecraft.world.level.material.Fluids;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.util.ArrayList;
@@ -167,9 +169,13 @@ public record UpdateTransferGraphPacket(String action, List<String> values, int 
     private static boolean validPort(TransferNode from, String port) {
         if (from.getNodeType() == TransferNode.NodeType.REROUTE) {
             return TransferEdge.PORT_ALL.equals(port)
-                    || (port != null && port.startsWith(TransferEdge.ITEM_PREFIX) && validItem(port.substring(TransferEdge.ITEM_PREFIX.length())));
+                    || (port != null && port.startsWith(TransferEdge.ITEM_PREFIX) && validItem(port.substring(TransferEdge.ITEM_PREFIX.length())))
+                    || (port != null && TransferEdge.FLUID_ALL.equals(port))
+                    || (port != null && port.startsWith(TransferEdge.FLUID_PREFIX) && validFluid(port.substring(TransferEdge.FLUID_PREFIX.length())));
         }
         if (TransferEdge.PORT_ALL.equals(port)) return true;
+        if (TransferEdge.FLUID_ALL.equals(port)) return true;
+        if (port.startsWith(TransferEdge.FLUID_PREFIX)) return validFluid(port.substring(TransferEdge.FLUID_PREFIX.length()));
         if (!port.startsWith(TransferEdge.ITEM_PREFIX)) return false;
         String itemId = port.substring(TransferEdge.ITEM_PREFIX.length());
         return from.getFilterItemIds().contains(itemId) && validItem(itemId);
@@ -201,5 +207,13 @@ public record UpdateTransferGraphPacket(String action, List<String> values, int 
         if (loc == null) return false;
         Item item = BuiltInRegistries.ITEM.get(loc);
         return item != Items.AIR;
+    }
+
+    private static boolean validFluid(String id) {
+        if ("*".equals(id)) return true;
+        ResourceLocation loc = ResourceLocation.tryParse(id);
+        if (loc == null) return false;
+        Fluid fluid = BuiltInRegistries.FLUID.get(loc);
+        return fluid != Fluids.EMPTY;
     }
 }

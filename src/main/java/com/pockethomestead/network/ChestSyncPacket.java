@@ -3,9 +3,11 @@ package com.pockethomestead.network;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.codec.ByteBufCodecs;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.util.ArrayList;
@@ -33,15 +35,17 @@ public record ChestSyncPacket(
     boolean productionStatsEnabled,
     String productionGroupId,
     List<String> availableBindings,
-    Map<String, Integer> items,
+    List<ItemEntry> items,
     Map<String, Integer> fluids
 ) implements CustomPacketPayload {
+    public record ItemEntry(ItemStack stack, int count) {}
+
     public static final Type<ChestSyncPacket> TYPE = new Type<>(
         ResourceLocation.fromNamespaceAndPath("pockethomestead", "chest_sync"));
 
-    public static final StreamCodec<ByteBuf, ChestSyncPacket> STREAM_CODEC = new StreamCodec<>() {
+    public static final StreamCodec<RegistryFriendlyByteBuf, ChestSyncPacket> STREAM_CODEC = new StreamCodec<>() {
         @Override
-        public ChestSyncPacket decode(ByteBuf buf) {
+        public ChestSyncPacket decode(RegistryFriendlyByteBuf buf) {
             String chestId = ByteBufCodecs.STRING_UTF8.decode(buf);
             String boundTargetId = ByteBufCodecs.STRING_UTF8.decode(buf);
             boolean transferEnabled = buf.readBoolean();
@@ -61,11 +65,11 @@ public record ChestSyncPacket(
             }
 
             int itemCount = ByteBufCodecs.VAR_INT.decode(buf);
-            Map<String, Integer> items = new LinkedHashMap<>();
+            List<ItemEntry> items = new ArrayList<>();
             for (int i = 0; i < itemCount; i++) {
-                String id = ByteBufCodecs.STRING_UTF8.decode(buf);
+                ItemStack stack = ItemStack.OPTIONAL_STREAM_CODEC.decode(buf);
                 int count = ByteBufCodecs.VAR_INT.decode(buf);
-                items.put(id, count);
+                if (!stack.isEmpty() && count > 0) items.add(new ItemEntry(stack.copyWithCount(1), count));
             }
 
             int fluidCount = ByteBufCodecs.VAR_INT.decode(buf);
@@ -79,11 +83,11 @@ public record ChestSyncPacket(
             return new ChestSyncPacket(chestId, boundTargetId, transferEnabled, voidModeEnabled,
                 transferRateLimit, syncIntervalSeconds, nextTransferSeconds, maxCapacity, maxFluidCapacityMb,
                 productionStatsEnabled, productionGroupId,
-                Collections.unmodifiableList(bindings), Collections.unmodifiableMap(items), Collections.unmodifiableMap(fluids));
+                Collections.unmodifiableList(bindings), Collections.unmodifiableList(items), Collections.unmodifiableMap(fluids));
         }
 
         @Override
-        public void encode(ByteBuf buf, ChestSyncPacket pkt) {
+        public void encode(RegistryFriendlyByteBuf buf, ChestSyncPacket pkt) {
             ByteBufCodecs.STRING_UTF8.encode(buf, pkt.chestId);
             ByteBufCodecs.STRING_UTF8.encode(buf, pkt.boundTargetId);
             buf.writeBoolean(pkt.transferEnabled);
@@ -102,9 +106,9 @@ public record ChestSyncPacket(
             }
 
             ByteBufCodecs.VAR_INT.encode(buf, pkt.items.size());
-            for (Map.Entry<String, Integer> e : pkt.items.entrySet()) {
-                ByteBufCodecs.STRING_UTF8.encode(buf, e.getKey());
-                ByteBufCodecs.VAR_INT.encode(buf, e.getValue());
+            for (ItemEntry e : pkt.items) {
+                ItemStack.OPTIONAL_STREAM_CODEC.encode(buf, e.stack().copyWithCount(1));
+                ByteBufCodecs.VAR_INT.encode(buf, e.count());
             }
 
             ByteBufCodecs.VAR_INT.encode(buf, pkt.fluids.size());

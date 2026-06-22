@@ -27,14 +27,24 @@ public class ModEvents {
     @SubscribeEvent
     public static void registerCapabilities(RegisterCapabilitiesEvent event) {
         event.registerBlockEntity(
+                Capabilities.ItemHandler.BLOCK,
+                ModBlockEntities.SUPPLY_CHEST.get(),
+                (be, context) -> be.getItemHandler(context)
+        );
+        event.registerBlockEntity(
+                Capabilities.ItemHandler.BLOCK,
+                ModBlockEntities.PICKUP_CHEST.get(),
+                (be, context) -> be.getItemHandler(context)
+        );
+        event.registerBlockEntity(
                 Capabilities.FluidHandler.BLOCK,
                 ModBlockEntities.SUPPLY_CHEST.get(),
-                (be, context) -> be.getFluidHandler()
+                (be, context) -> be.getFluidHandler(context)
         );
         event.registerBlockEntity(
                 Capabilities.FluidHandler.BLOCK,
                 ModBlockEntities.PICKUP_CHEST.get(),
-                (be, context) -> be.getFluidHandler()
+                (be, context) -> be.getFluidHandler(context)
         );
     }
 

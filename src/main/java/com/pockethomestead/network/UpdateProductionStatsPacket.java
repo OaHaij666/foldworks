@@ -90,6 +90,10 @@ public record UpdateProductionStatsPacket(String action, List<String> values) im
                 if (v.isEmpty()) yield false;
                 yield storage.deleteGroup(player.getUUID(), v.get(0));
             }
+            case "MERGE_GROUPS" -> {
+                if (v.size() < 3) yield false;
+                yield storage.mergeGroups(player.getUUID(), v.get(0), v.subList(1, v.size()));
+            }
             case "TOGGLE_CHILD" -> {
                 if (v.size() < 2) yield false;
                 yield storage.toggleChild(player.getUUID(), v.get(0), v.get(1));
@@ -99,11 +103,6 @@ public record UpdateProductionStatsPacket(String action, List<String> values) im
     }
 
     private static Map<String, Integer> itemSnapshot(BaseChestBlockEntity be) {
-        Map<String, Integer> items = new LinkedHashMap<>();
-        for (Map.Entry<Item, Integer> entry : be.getAllItems().entrySet()) {
-            ResourceLocation key = BuiltInRegistries.ITEM.getKey(entry.getKey());
-            if (key != null && entry.getValue() > 0) items.put(key.toString(), entry.getValue());
-        }
-        return items;
+        return be.productionResourceSnapshot();
     }
 }

@@ -287,6 +287,71 @@ public final class Theme {
         g.fill(x, y, x + 1, y + h, color);
     }
 
+    public static void line(GuiGraphics g, float x1, float y1, float x2, float y2, float thickness, int color) {
+        float dx = x2 - x1;
+        float dy = y2 - y1;
+        float len = (float) Math.sqrt(dx * dx + dy * dy);
+        if (len <= 0.001f || thickness <= 0f) return;
+
+        float nx = -dy / len * thickness / 2f;
+        float ny = dx / len * thickness / 2f;
+        float a = ((color >> 24) & 0xFF) / 255f;
+        float red = ((color >> 16) & 0xFF) / 255f;
+        float green = ((color >> 8) & 0xFF) / 255f;
+        float blue = (color & 0xFF) / 255f;
+
+        RenderSystem.setShader(GameRenderer::getPositionColorShader);
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+
+        Matrix4f matrix = g.pose().last().pose();
+        Tesselator tess = Tesselator.getInstance();
+        BufferBuilder buf = tess.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+        buf.addVertex(matrix, x1 + nx, y1 + ny, 0).setColor(red, green, blue, a);
+        buf.addVertex(matrix, x2 + nx, y2 + ny, 0).setColor(red, green, blue, a);
+        buf.addVertex(matrix, x2 - nx, y2 - ny, 0).setColor(red, green, blue, a);
+        buf.addVertex(matrix, x1 - nx, y1 - ny, 0).setColor(red, green, blue, a);
+        BufferUploader.drawWithShader(buf.buildOrThrow());
+
+        RenderSystem.disableBlend();
+    }
+
+    public static void chevronDown(GuiGraphics g, int cx, int cy, int size, int color) {
+        float half = size / 2f;
+        float top = cy - size / 4f;
+        float bottom = cy + size / 4f;
+        float thick = Math.max(1.15f, size / 5f);
+        line(g, cx - half, top, cx, bottom, thick, color);
+        line(g, cx + half, top, cx, bottom, thick, color);
+    }
+
+    public static void chevronUp(GuiGraphics g, int cx, int cy, int size, int color) {
+        float half = size / 2f;
+        float top = cy - size / 4f;
+        float bottom = cy + size / 4f;
+        float thick = Math.max(1.15f, size / 5f);
+        line(g, cx - half, bottom, cx, top, thick, color);
+        line(g, cx + half, bottom, cx, top, thick, color);
+    }
+
+    public static void chevronRight(GuiGraphics g, int cx, int cy, int size, int color) {
+        float left = cx - size / 4f;
+        float right = cx + size / 4f;
+        float half = size / 2f;
+        float thick = Math.max(1.15f, size / 5f);
+        line(g, left, cy - half, right, cy, thick, color);
+        line(g, left, cy + half, right, cy, thick, color);
+    }
+
+    public static void chevronLeft(GuiGraphics g, int cx, int cy, int size, int color) {
+        float left = cx - size / 4f;
+        float right = cx + size / 4f;
+        float half = size / 2f;
+        float thick = Math.max(1.15f, size / 5f);
+        line(g, right, cy - half, left, cy, thick, color);
+        line(g, right, cy + half, left, cy, thick, color);
+    }
+
     public static boolean inside(double mx, double my, int x, int y, int w, int h) {
         return mx >= x && mx < x + w && my >= y && my < y + h;
     }

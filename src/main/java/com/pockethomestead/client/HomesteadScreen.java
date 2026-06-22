@@ -9,25 +9,20 @@ import com.pockethomestead.client.ui.Theme;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
-import org.lwjgl.glfw.GLFW;
 
 /**
- * 口袋家园主界面：自适应窗口大小、带左侧导航栏与页面 router 的根 Screen。
- * 支持 Ctrl+滚轮 / Ctrl +/− 缩放、Ctrl+0 复位。
+ * 口袋家园主界面：固定宽高比自适应窗口大小、带左侧导航栏与页面 router 的根 Screen。
  */
 public class HomesteadScreen extends Screen {
 
-    private static final float MIN_SCALE = 0.6f;
-    private static final float MAX_SCALE = 1.6f;
-    private static final float STEP = 0.1f;
-    private static final int NAV_WIDTH_MIN = 46;
-    private static final int NAV_WIDTH_MAX = 56;
-    private static final int NAV_ITEM_SIZE = 34;
-    private static final int NAV_ITEM_GAP = 6;
+    private static final float PANEL_ASPECT = 1.6f;
+    private static final int NAV_WIDTH_MIN = 40;
+    private static final int NAV_WIDTH_MAX = 48;
+    private static final int NAV_ITEM_SIZE = 30;
+    private static final int NAV_ITEM_GAP = 5;
     private static final int NAV_TOP_PAD = 10;
 
     // 跨开启持久化的状态
-    private static float uiScale = MAX_SCALE;
     private static String lastPageId = "manage";
 
     private final Router router = new Router();
@@ -63,8 +58,16 @@ public class HomesteadScreen extends Screen {
     }
 
     private void layout() {
-        panelW = clamp(Math.round(width * 0.52f * uiScale), 240, width - 16);
-        panelH = clamp(Math.round(height * 0.60f * uiScale), 180, height - 16);
+        int maxW = Math.max(240, width - 16);
+        int maxH = Math.max(180, height - 16);
+        panelW = Math.min(maxW, Math.round(maxH * PANEL_ASPECT));
+        panelH = Math.round(panelW / PANEL_ASPECT);
+        if (panelH > maxH) {
+            panelH = maxH;
+            panelW = Math.round(panelH * PANEL_ASPECT);
+        }
+        panelW = clamp(panelW, 240, maxW);
+        panelH = clamp(panelH, 180, maxH);
         panelX = (width - panelW) / 2;
         panelY = (height - panelH) / 2;
 
@@ -126,32 +129,23 @@ public class HomesteadScreen extends Screen {
         g.drawString(font, Theme.styled(getTitle().getString()), panelX + Theme.PAD, panelY + (headerH - font.lineHeight) / 2 + 1, Theme.TEXT, false);
         Theme.hLine(g, panelX + 1, panelY + headerH, panelW - 2, Theme.DIVIDER);
 
-        // 窗口控件：[−][＋][✕]
-        int sz = 18, gap = 4;
+        // 窗口控件：[关闭]
+        int sz = 18;
         int closeX = panelX + panelW - Theme.PAD + 4 - sz;
-        int plusX = closeX - gap - sz;
-        int minusX = plusX - gap - sz;
         int cy = panelY + (headerH - sz) / 2;
 
-        boolean atMin = uiScale <= MIN_SCALE + 1e-3;
-        boolean atMax = uiScale >= MAX_SCALE - 1e-3;
-        drawControl(g, minusX, cy, sz, "−", mouseX, mouseY, false, atMin,
-                Component.translatable("pockethomestead.ui.zoom_out").getString());
-        drawControl(g, plusX, cy, sz, "＋", mouseX, mouseY, false, atMax,
-                Component.translatable("pockethomestead.ui.zoom_in").getString());
-        drawControl(g, closeX, cy, sz, "✕", mouseX, mouseY, true, false,
-                Component.translatable("pockethomestead.ui.close").getString());
+        drawCloseControl(g, closeX, cy, sz, mouseX, mouseY);
     }
 
-    private void drawControl(GuiGraphics g, int x, int y, int sz, String sym, int mouseX, int mouseY,
-                             boolean danger, boolean disabled, String tooltip) {
-        boolean hover = !disabled && Theme.inside(mouseX, mouseY, x, y, sz, sz);
+    private void drawCloseControl(GuiGraphics g, int x, int y, int sz, int mouseX, int mouseY) {
+        boolean hover = Theme.inside(mouseX, mouseY, x, y, sz, sz);
         if (hover) {
-            Theme.fillRound(g, x, y, sz, sz, Theme.RADIUS, danger ? Theme.DANGER_SOFT : Theme.SURFACE_ALT);
-            pendingTooltip = tooltip;
+            Theme.fillRound(g, x, y, sz, sz, Theme.RADIUS, Theme.DANGER_SOFT);
+            pendingTooltip = Component.translatable("pockethomestead.ui.close").getString();
         }
-        int col = disabled ? Theme.TEXT_FAINT : (hover ? (danger ? Theme.DANGER : Theme.PRIMARY_PRESS) : Theme.TEXT_MUTED);
-        Theme.textInBox(g, font, sym, x, y, sz, sz, col);
+        int col = hover ? Theme.DANGER : Theme.TEXT_MUTED;
+        Theme.line(g, x + 6, y + 6, x + sz - 6, y + sz - 6, 1.6f, col);
+        Theme.line(g, x + sz - 6, y + 6, x + 6, y + sz - 6, 1.6f, col);
     }
 
     private void renderSidebar(GuiGraphics g, int mouseX, int mouseY) {
@@ -237,14 +231,10 @@ public class HomesteadScreen extends Screen {
         if (cur != null && cur.overlayMouseClicked(mx, my, button)) return true;
 
         // 2. 窗口控件
-        int sz = 18, gap = 4;
+        int sz = 18;
         int closeX = panelX + panelW - Theme.PAD + 4 - sz;
-        int plusX = closeX - gap - sz;
-        int minusX = plusX - gap - sz;
         int cy = panelY + (headerH - sz) / 2;
         if (button == 0 && Theme.inside(mx, my, closeX, cy, sz, sz)) { onClose(); return true; }
-        if (button == 0 && Theme.inside(mx, my, plusX, cy, sz, sz)) { zoom(+STEP); return true; }
-        if (button == 0 && Theme.inside(mx, my, minusX, cy, sz, sz)) { zoom(-STEP); return true; }
 
         // 3. 侧边栏导航
         int itemSize = navItemSize();
@@ -266,10 +256,6 @@ public class HomesteadScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mx, double my, double sx, double sy) {
-        if (Screen.hasControlDown()) {
-            zoom(sy > 0 ? STEP : -STEP);
-            return true;
-        }
         Page cur = router.current();
         if (cur != null && cur.mouseScrolled(mx, my, sx, sy)) return true;
         return super.mouseScrolled(mx, my, sx, sy);
@@ -291,14 +277,6 @@ public class HomesteadScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (Screen.hasControlDown()) {
-            switch (keyCode) {
-                case GLFW.GLFW_KEY_EQUAL, GLFW.GLFW_KEY_KP_ADD -> { zoom(+STEP); return true; }
-                case GLFW.GLFW_KEY_MINUS, GLFW.GLFW_KEY_KP_SUBTRACT -> { zoom(-STEP); return true; }
-                case GLFW.GLFW_KEY_0, GLFW.GLFW_KEY_KP_0 -> { resetZoom(); return true; }
-                default -> {}
-            }
-        }
         Page cur = router.current();
         if (cur != null && cur.keyPressed(keyCode, scanCode, modifiers)) return true;
         return super.keyPressed(keyCode, scanCode, modifiers);
@@ -311,21 +289,7 @@ public class HomesteadScreen extends Screen {
         return super.charTyped(codePoint, modifiers);
     }
 
-    // ------------------------------------------------------------------
-    // 缩放
-    // ------------------------------------------------------------------
-    private void zoom(float delta) {
-        float old = uiScale;
-        uiScale = clampF(uiScale + delta, MIN_SCALE, MAX_SCALE);
-        if (uiScale != old) layout();
-    }
-
-    private void resetZoom() {
-        if (uiScale != MAX_SCALE) { uiScale = MAX_SCALE; layout(); }
-    }
-
     private int navItemSize() { return Math.min(NAV_ITEM_SIZE, Math.max(24, sidebarW - 12)); }
 
     private static int clamp(int v, int lo, int hi) { return Math.max(lo, Math.min(hi, v)); }
-    private static float clampF(float v, float lo, float hi) { return Math.max(lo, Math.min(hi, v)); }
 }

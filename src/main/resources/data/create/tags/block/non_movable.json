@@ -1,0 +1,12 @@
+{
+  "values": [
+    {
+      "id": "pockethomestead:supply_chest",
+      "required": false
+    },
+    {
+      "id": "pockethomestead:pickup_chest",
+      "required": false
+    }
+  ]
+}

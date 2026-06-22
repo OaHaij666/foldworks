@@ -38,12 +38,15 @@ run/
 **/src/generated/**/.cache/
 repo/
 !**/src/**/repo/
+META-INF/
+libs/**/*.jar
 
 .mcp.json
 
 ### AI Tools ###
 .claude/
 .trae/
+AGENTS.md
 
 ### Research & Reference ###
 referance/
