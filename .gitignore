@@ -40,6 +40,7 @@ repo/
 !**/src/**/repo/
 META-INF/
 libs/**/*.jar
+scripts/run-packaged-client.ps1
 
 .mcp.json
 

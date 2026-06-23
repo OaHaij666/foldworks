@@ -2,18 +2,20 @@
   "itemGroup.pockethomestead": "Pocket Homestead",
 
   "item.pockethomestead.homestead_tablet": "Dustsong Jade Tablet",
-  "item.pockethomestead.supply_chest": "Supply Chest",
-  "item.pockethomestead.pickup_chest": "Pickup Chest",
+  "item.pockethomestead.storage_upgrade": "Storage Upgrade",
+  "item.pockethomestead.fluid_upgrade": "Fluid Upgrade",
+  "item.pockethomestead.network_upgrade": "Network Upgrade",
+  "item.pockethomestead.energy_transfer_upgrade": "Energy Transfer Upgrade",
+  "item.pockethomestead.stress_upgrade": "Stress Upgrade",
+  "item.pockethomestead.homestead_chest": "Homestead Chest",
   "item.pockethomestead.portal_block": "Portal Block",
   "item.pockethomestead.export_block": "Export Block",
 
-  "block.pockethomestead.supply_chest": "Supply Chest",
-  "block.pockethomestead.pickup_chest": "Pickup Chest",
+  "block.pockethomestead.homestead_chest": "Homestead Chest",
   "block.pockethomestead.portal_block": "Portal Block",
   "block.pockethomestead.export_block": "Export Block",
 
-  "container.pockethomestead.supply_chest": "Supply Chest",
-  "container.pockethomestead.pickup_chest": "Pickup Chest",
+  "container.pockethomestead.homestead_chest": "Homestead Chest",
   "container.pockethomestead.portal": "Portal Block",
   "container.pockethomestead.export": "Export Block",
 
@@ -100,11 +102,12 @@
 
   "pockethomestead.chest.id_label": "ID:",
   "pockethomestead.chest.id_hint": "Chest ID",
-  "pockethomestead.chest.bind_label": "->",
-  "pockethomestead.chest.bind_none": "(none)",
   "pockethomestead.chest.rate_label": "R:",
   "pockethomestead.chest.transfer_on": "Trans: ON",
   "pockethomestead.chest.transfer_off": "Trans: OFF",
   "pockethomestead.chest.void_on": "Void: ON",
-  "pockethomestead.chest.void_off": "Void: OFF"
+  "pockethomestead.chest.void_off": "Void: OFF",
+  "pockethomestead.chest.energy": "Energy",
+  "pockethomestead.chest.stress": "Stress",
+  "pockethomestead.chest.side_config": "Side Config"
 }

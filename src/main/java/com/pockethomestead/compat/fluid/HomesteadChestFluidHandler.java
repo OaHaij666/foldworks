@@ -1,7 +1,6 @@
 package com.pockethomestead.compat.fluid;
 
 import com.pockethomestead.blockentity.BaseChestBlockEntity;
-import com.pockethomestead.config.ModConfig;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.Fluids;
@@ -40,7 +39,7 @@ public class HomesteadChestFluidHandler implements IFluidHandler {
 
     @Override
     public int getTanks() {
-        return Math.max(1, chest.getAllFluids().size());
+        return Math.max(1, chest.getMaxFluidTypes());
     }
 
     @Override
@@ -54,19 +53,19 @@ public class HomesteadChestFluidHandler implements IFluidHandler {
 
     @Override
     public int getTankCapacity(int tank) {
-        return ModConfig.MAX_CHEST_FLUID_CAPACITY_MB.get();
+        return chest.getMaxFluidCapacityPerTypeMb();
     }
 
     @Override
     public boolean isFluidValid(int tank, FluidStack stack) {
-        return stack != null && !stack.isEmpty();
+        return canFill && stack != null && !stack.isEmpty();
     }
 
     @Override
     public int fill(FluidStack resource, FluidAction action) {
         if (!canFill) return 0;
         if (resource == null || resource.isEmpty()) return 0;
-        int accepted = Math.min(resource.getAmount(), chest.getRemainingFluidCapacityMb());
+        int accepted = Math.min(resource.getAmount(), chest.getRemainingFluidCapacityMb(resource.getFluid()));
         if (accepted <= 0) return 0;
         if (action.execute()) {
             chest.addFluid(resource.getFluid(), accepted);

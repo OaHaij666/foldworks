@@ -1,5 +1,7 @@
 package com.pockethomestead.network;
 
+import com.pockethomestead.blockentity.BaseChestBlockEntity;
+import com.pockethomestead.blockentity.HomesteadChestAccess;
 import com.pockethomestead.registry.ChestRegistryManager;
 import com.pockethomestead.transfer.TransferEdge;
 import com.pockethomestead.transfer.TransferGraph;
@@ -82,13 +84,13 @@ public record UpdateTransferGraphPacket(String action, List<String> values, int 
                 return true;
             }
             case "ADD_NODE" -> {
-                if (v.size() < 5) return false;
+                if (v.size() < 4) return false;
                 String pageId = v.get(0);
-                ChestRegistryManager.ChestType type = parseType(v.get(1));
-                if (type == null) return false;
-                BlockPos pos = parsePos(v.get(4));
-                if (pos == null || !ownsChest(player, type, v.get(2), v.get(3), pos)) return false;
-                graph.addNode(pageId, type, v.get(2), v.get(3), pos, packet.x, packet.y);
+                String chestId = v.get(1);
+                String dimensionKey = v.get(2);
+                BlockPos pos = parsePos(v.get(3));
+                if (pos == null || !ownsChest(player, chestId, dimensionKey, pos)) return false;
+                graph.addNode(pageId, chestId, dimensionKey, pos, packet.x, packet.y);
                 return true;
             }
             case "ADD_REROUTE_NODE" -> {
@@ -125,7 +127,7 @@ public record UpdateTransferGraphPacket(String action, List<String> values, int 
             case "ADD_FILTER_ITEM" -> {
                 if (v.size() < 2 || !validItem(v.get(1))) return false;
                 TransferNode node = graph.getNode(v.get(0));
-                if (node == null || (node.getNodeType() != TransferNode.NodeType.SUPPLY && node.getNodeType() != TransferNode.NodeType.REROUTE)) return false;
+                if (node == null || (node.getNodeType() != TransferNode.NodeType.CHEST && node.getNodeType() != TransferNode.NodeType.REROUTE)) return false;
                 node.addFilterItem(v.get(1));
                 return true;
             }
@@ -140,9 +142,13 @@ public record UpdateTransferGraphPacket(String action, List<String> values, int 
                 TransferNode to = graph.getNode(v.get(2));
                 if (from == null || to == null || from.getId().equals(to.getId())) return false;
                 if (!from.getPageId().equals(to.getPageId())) return false;
+                String fromPort = v.get(1);
+                String toPort = normalizeInputPort(fromPort, v.get(3));
                 if (!validEdgeDirection(from, to)) return false;
-                if (!validPort(from, v.get(1))) return false;
-                graph.addEdge(from.getPageId(), from.getId(), v.get(1), to.getId(), v.get(3), false, 1, TransferEdge.clampRate(packet.rate));
+                if (!validPort(from, fromPort)) return false;
+                if (!validTargetPort(to, toPort)) return false;
+                if (!TransferEdge.sameResourceKind(fromPort, toPort)) return false;
+                graph.addEdge(from.getPageId(), from.getId(), fromPort, to.getId(), toPort, false, 1, TransferEdge.clampRate(packet.rate));
                 return true;
             }
             case "UPDATE_EDGE_RATE_LIMIT" -> {
@@ -166,40 +172,58 @@ public record UpdateTransferGraphPacket(String action, List<String> values, int 
         }
     }
 
-    private static boolean validPort(TransferNode from, String port) {
-        if (from.getNodeType() == TransferNode.NodeType.REROUTE) {
-            return TransferEdge.PORT_ALL.equals(port)
-                    || (port != null && port.startsWith(TransferEdge.ITEM_PREFIX) && validItem(port.substring(TransferEdge.ITEM_PREFIX.length())))
-                    || (port != null && TransferEdge.FLUID_ALL.equals(port))
-                    || (port != null && port.startsWith(TransferEdge.FLUID_PREFIX) && validFluid(port.substring(TransferEdge.FLUID_PREFIX.length())));
+    private static String normalizeInputPort(String fromPort, String requested) {
+        if (requested == null || requested.isBlank() || TransferEdge.PORT_IN.equals(requested)) {
+            return TransferEdge.inputPortFor(fromPort);
         }
-        if (TransferEdge.PORT_ALL.equals(port)) return true;
-        if (TransferEdge.FLUID_ALL.equals(port)) return true;
+        return requested;
+    }
+
+    private static boolean validPort(TransferNode from, String port) {
+        if (from.getNodeType() == TransferNode.NodeType.TRASH) return false;
+        if (TransferEdge.ITEM_ALL.equals(port) || TransferEdge.FLUID_ALL.equals(port) || TransferEdge.ENERGY_FE.equals(port) || TransferEdge.STRESS_SU.equals(port)) return true;
+        if (port == null) return false;
         if (port.startsWith(TransferEdge.FLUID_PREFIX)) return validFluid(port.substring(TransferEdge.FLUID_PREFIX.length()));
         if (!port.startsWith(TransferEdge.ITEM_PREFIX)) return false;
         String itemId = port.substring(TransferEdge.ITEM_PREFIX.length());
-        return from.getFilterItemIds().contains(itemId) && validItem(itemId);
+        return (from.getNodeType() == TransferNode.NodeType.REROUTE || from.getFilterItemIds().contains(itemId)) && validItem(itemId);
+    }
+
+    private static boolean validTargetPort(TransferNode to, String port) {
+        if (to.getNodeType() == TransferNode.NodeType.TRASH) {
+            return TransferEdge.ITEM_IN.equals(port) || TransferEdge.FLUID_IN.equals(port);
+        }
+        return to.getNodeType() == TransferNode.NodeType.CHEST || to.getNodeType() == TransferNode.NodeType.REROUTE;
     }
 
     private static boolean validEdgeDirection(TransferNode from, TransferNode to) {
-        if (from.getNodeType() == TransferNode.NodeType.PICKUP || from.getNodeType() == TransferNode.NodeType.TRASH) return false;
-        if (to.getNodeType() == TransferNode.NodeType.SUPPLY) return false;
-        return from.getNodeType() == TransferNode.NodeType.SUPPLY || from.getNodeType() == TransferNode.NodeType.REROUTE;
-    }
-
-    private static ChestRegistryManager.ChestType parseType(String value) {
-        try { return ChestRegistryManager.ChestType.valueOf(value); } catch (Exception e) { return null; }
+        if (from.getNodeType() == TransferNode.NodeType.TRASH) return false;
+        return from.getNodeType() == TransferNode.NodeType.CHEST || from.getNodeType() == TransferNode.NodeType.REROUTE;
     }
 
     private static BlockPos parsePos(String value) {
         try { return BlockPos.of(Long.parseLong(value)); } catch (NumberFormatException e) { return null; }
     }
 
-    private static boolean ownsChest(ServerPlayer player, ChestRegistryManager.ChestType type, String chestId, String dimensionKey, BlockPos pos) {
-        for (ChestRegistryManager.ChestLocation loc : ChestRegistryManager.getInstance().getChestLocationsByType(player.getUUID(), chestId, type)) {
-            if (loc.dimensionKey.equals(dimensionKey) && loc.pos.equals(pos)) return true;
+    private static boolean ownsChest(ServerPlayer player, String chestId, String dimensionKey, BlockPos pos) {
+        for (ChestRegistryManager.ChestLocation loc : ChestRegistryManager.getInstance().getChestLocations(player.getUUID(), chestId)) {
+            if (loc.dimensionKey.equals(dimensionKey) && loc.pos.equals(pos)) {
+                BaseChestBlockEntity be = loadedChest(player, dimensionKey, pos);
+                return be != null && be.hasNetworkUpgrade();
+            }
         }
         return false;
+    }
+
+    private static BaseChestBlockEntity loadedChest(ServerPlayer player, String dimensionKey, BlockPos pos) {
+        ResourceLocation dimLoc = ResourceLocation.tryParse(dimensionKey);
+        if (dimLoc == null) return null;
+        net.minecraft.server.level.ServerLevel level = player.server.getLevel(net.minecraft.resources.ResourceKey.create(
+                net.minecraft.core.registries.Registries.DIMENSION,
+                dimLoc
+        ));
+        if (level == null) return null;
+        return HomesteadChestAccess.resolve(level.getBlockEntity(pos));
     }
 
     private static boolean validItem(String id) {

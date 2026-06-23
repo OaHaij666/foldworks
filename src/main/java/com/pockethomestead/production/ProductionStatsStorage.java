@@ -1,6 +1,5 @@
 package com.pockethomestead.production;
 
-import com.pockethomestead.registry.ChestRegistryManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
@@ -35,8 +34,8 @@ public class ProductionStatsStorage extends SavedData {
         return server.overworld().getDataStorage().computeIfAbsent(factory(), DATA_NAME);
     }
 
-    public static String chestKey(ChestRegistryManager.ChestType type, String dimensionKey, BlockPos pos) {
-        return type.name() + "|" + dimensionKey + "|" + pos.asLong();
+    public static String chestKey(String dimensionKey, BlockPos pos) {
+        return dimensionKey + "|" + pos.asLong();
     }
 
     public static SavedData.Factory<ProductionStatsStorage> factory() {

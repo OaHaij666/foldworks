@@ -3,6 +3,7 @@ package com.pockethomestead.blockentity;
 import com.pockethomestead.block.AbstractHomesteadBlock;
 import com.pockethomestead.config.ModConfig;
 import com.pockethomestead.production.ProductionStatsStorage;
+import com.pockethomestead.registration.ModItems;
 import com.pockethomestead.registry.ChestRegistryManager;
 import com.pockethomestead.transfer.TransferEdge;
 import com.pockethomestead.transfer.TransferGraph;
@@ -30,10 +31,16 @@ import java.util.*;
 
 /**
  * 箱子基类 - 实现容量系统（而非固定格子）
- * 支持最多 MAX_CHEST_CAPACITY 方块的总容量（默认4096），物品种类不限
+ * 容量由基础配置与箱子内升级槽共同决定，物品种类不限。
  */
-public abstract class BaseChestBlockEntity extends BlockEntity implements MenuProvider {
+public abstract class BaseChestBlockEntity extends BlockEntity implements MenuProvider, HomesteadChestAccess {
     private static final int GRAPH_TRANSFER_INTERVAL_TICKS = 20;
+    public static final int UPGRADE_SLOT_COUNT = 6;
+    public static final int STORAGE_UPGRADE_SLOT = 0;
+    public static final int FLUID_UPGRADE_SLOT = 1;
+    public static final int NETWORK_UPGRADE_SLOT = 2;
+    public static final int ENERGY_UPGRADE_SLOT = 3;
+    public static final int STRESS_UPGRADE_SLOT = 4;
 
     private enum TransferBlockReason { NONE, SOURCE, RECEIVER }
     private record TransferResult(Map<String, Integer> movedByItem, TransferBlockReason reason, String blockItemId) {
@@ -42,20 +49,22 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
 
     // 容量系统：完整 ItemStack 组件身份 -> 数量（总容量从ModConfig读取）
     protected final List<StoredItemStack> itemStorage = new ArrayList<>();
+    private final int[] upgradeCounts = new int[UPGRADE_SLOT_COUNT];
     private final Map<String, Integer> transferRouteCursor = new HashMap<>();
+    private final EnumMap<ResourceKind, EnumMap<RelativeSide, SideMode>> sideConfig = new EnumMap<>(ResourceKind.class);
 
     // 流体容量系统：Fluid -> mB（1000mB=1桶）
     protected final Map<Fluid, Integer> fluidStorage = new HashMap<>();
+    protected int energyStored = 0;
     private final com.pockethomestead.compat.item.HomesteadChestItemHandler itemHandler =
             new com.pockethomestead.compat.item.HomesteadChestItemHandler(this);
     private final com.pockethomestead.compat.fluid.HomesteadChestFluidHandler fluidHandler =
             new com.pockethomestead.compat.fluid.HomesteadChestFluidHandler(this);
+    private final com.pockethomestead.compat.energy.HomesteadChestEnergyStorage energyHandler =
+            new com.pockethomestead.compat.energy.HomesteadChestEnergyStorage(this);
 
-    // 箱子ID（玩家自定义，用于绑定）
+    // 箱子ID（玩家自定义，用于传输图节点识别）
     protected String chestId = "";
-
-    // 绑定的目标箱子ID
-    protected String boundTargetId = "";
 
     // 所有者UUID
     protected UUID ownerUUID = null;
@@ -72,11 +81,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     // 传输速率限制（物品/tick，0=无限制）
     protected int transferRateLimit = 0;
 
-    // 同步间隔（秒）：供货箱每隔该时长向绑定的取货箱传输一次。
-    // 属于绑定对的属性，绑定时双方保持一致。
-    protected int syncIntervalSeconds = 30;
-
-    // TODO: 信任度机制 - 占位，后续实现反作弊/可信度评估
+    // 信任度机制占位，当前固定为可信。
     protected double trustScore = 1.0;
 
     // GUI 存货区滚动行偏移（服务端持有，供 VirtualChestContainer.refill 读取）
@@ -90,12 +95,13 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
 
     public BaseChestBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
+        resetDefaultSideConfig();
     }
 
-    /**
-     * 获取箱子类型（子类实现）
-     */
-    public abstract ChestRegistryManager.ChestType getChestType();
+    @Override
+    public BaseChestBlockEntity homesteadChest() {
+        return this;
+    }
 
     @Override
     public void onLoad() {
@@ -112,7 +118,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         if (level == null || level.isClientSide) return;
         if (registered) return;
         if (ownerUUID == null || chestId.isEmpty()) return;
-        ChestRegistryManager.getInstance().registerChest(ownerUUID, chestId, level, worldPosition, getChestType());
+        ChestRegistryManager.getInstance().registerChest(ownerUUID, chestId, level, worldPosition);
         registered = true;
         refreshProductionInventorySnapshot();
     }
@@ -121,7 +127,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     public void setRemoved() {
         // 服务端卸载时从全局管理器注销
         if (!level.isClientSide && ownerUUID != null && !chestId.isEmpty() && registered) {
-            ChestRegistryManager.getInstance().unregisterChest(ownerUUID, chestId, level, worldPosition, getChestType());
+            ChestRegistryManager.getInstance().unregisterChest(ownerUUID, chestId, level, worldPosition);
             registered = false;
         }
         super.setRemoved();
@@ -136,11 +142,171 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         return itemStorage.stream().mapToInt(StoredItemStack::count).sum();
     }
 
+    public int getMaxItemCapacity() {
+        return projectedMaxItemCapacity(getUpgradeCount(STORAGE_UPGRADE_SLOT));
+    }
+
     /**
      * 获取剩余容量
      */
     public int getRemainingCapacity() {
-        return ModConfig.MAX_CHEST_CAPACITY.get() - getUsedCapacity();
+        return Math.max(0, getMaxItemCapacity() - getUsedCapacity());
+    }
+
+    public int getUpgradeCount(int slot) {
+        return slot >= 0 && slot < upgradeCounts.length ? upgradeCounts[slot] : 0;
+    }
+
+    public int[] getUpgradeCounts() {
+        return Arrays.copyOf(upgradeCounts, upgradeCounts.length);
+    }
+
+    public Item getUpgradeItem(int slot) {
+        return switch (slot) {
+            case STORAGE_UPGRADE_SLOT -> ModItems.STORAGE_UPGRADE.get();
+            case FLUID_UPGRADE_SLOT -> ModItems.FLUID_UPGRADE.get();
+            case NETWORK_UPGRADE_SLOT -> ModItems.NETWORK_UPGRADE.get();
+            case ENERGY_UPGRADE_SLOT -> ModItems.ENERGY_TRANSFER_UPGRADE.get();
+            case STRESS_UPGRADE_SLOT -> ModItems.STRESS_UPGRADE.get();
+            default -> null;
+        };
+    }
+
+    public boolean isUpgradeSlotEnabled(int slot) {
+        return getUpgradeItem(slot) != null;
+    }
+
+    public boolean canPlaceUpgrade(int slot, ItemStack stack) {
+        Item expected = getUpgradeItem(slot);
+        return expected != null && stack != null && !stack.isEmpty() && stack.getItem() == expected;
+    }
+
+    public int addUpgrade(int slot, ItemStack stack, int count) {
+        if (!canPlaceUpgrade(slot, stack) || count <= 0) return 0;
+        long next = (long) upgradeCounts[slot] + count;
+        upgradeCounts[slot] = (int) Math.min(Integer.MAX_VALUE, next);
+        storageDirty = true;
+        setChanged();
+        return count;
+    }
+
+    public ItemStack removeUpgrade(int slot, int count) {
+        Item item = getUpgradeItem(slot);
+        if (item == null || count <= 0 || getUpgradeCount(slot) <= 0) return ItemStack.EMPTY;
+        int removed = Math.min(count, upgradeCounts[slot]);
+        if (!canRemoveUpgrade(slot, removed)) return ItemStack.EMPTY;
+        upgradeCounts[slot] -= removed;
+        storageDirty = true;
+        setChanged();
+        return new ItemStack(item, removed);
+    }
+
+    public boolean canRemoveUpgrade(int slot, int count) {
+        if (slot < 0 || slot >= upgradeCounts.length || count <= 0) return false;
+        int removed = Math.min(count, upgradeCounts[slot]);
+        if (removed <= 0) return false;
+        int remainingUpgrades = upgradeCounts[slot] - removed;
+        return switch (slot) {
+            case STORAGE_UPGRADE_SLOT -> projectedMaxItemCapacity(remainingUpgrades) >= getUsedCapacity();
+            case FLUID_UPGRADE_SLOT -> canFitFluidsWithUpgradeCount(remainingUpgrades);
+            case ENERGY_UPGRADE_SLOT -> projectedMaxEnergyStored(remainingUpgrades) >= energyStored;
+            default -> true;
+        };
+    }
+
+    private int projectedMaxItemCapacity(int storageUpgradeCount) {
+        long value = (long) ModConfig.BASE_CHEST_CAPACITY.get()
+                + (long) Math.max(0, storageUpgradeCount) * ModConfig.STORAGE_UPGRADE_CAPACITY.get();
+        return (int) Math.max(0, Math.min(Integer.MAX_VALUE, value));
+    }
+
+    private int projectedMaxFluidTypes(int fluidUpgradeCount) {
+        long value = (long) ModConfig.BASE_CHEST_FLUID_TYPES.get()
+                + (long) Math.max(0, fluidUpgradeCount) * ModConfig.FLUID_UPGRADE_TYPES.get();
+        return (int) Math.max(0, Math.min(Integer.MAX_VALUE, value));
+    }
+
+    private int projectedMaxFluidCapacityPerTypeMb(int fluidUpgradeCount) {
+        long value = (long) ModConfig.BASE_CHEST_FLUID_CAPACITY_MB.get()
+                + (long) Math.max(0, fluidUpgradeCount) * ModConfig.FLUID_UPGRADE_CAPACITY_MB.get();
+        return (int) Math.max(0, Math.min(Integer.MAX_VALUE, value));
+    }
+
+    private boolean canFitFluidsWithUpgradeCount(int fluidUpgradeCount) {
+        int maxTypes = projectedMaxFluidTypes(fluidUpgradeCount);
+        int maxPerType = projectedMaxFluidCapacityPerTypeMb(fluidUpgradeCount);
+        int usedTypes = 0;
+        for (int amount : fluidStorage.values()) {
+            if (amount <= 0) continue;
+            usedTypes++;
+            if (amount > maxPerType) return false;
+        }
+        return usedTypes <= maxTypes;
+    }
+
+    public boolean hasNetworkUpgrade() {
+        return getUpgradeCount(NETWORK_UPGRADE_SLOT) > 0;
+    }
+
+    public boolean hasEnergyUpgrade() {
+        return getUpgradeCount(ENERGY_UPGRADE_SLOT) > 0;
+    }
+
+    public boolean hasStressUpgrade() {
+        return getUpgradeCount(STRESS_UPGRADE_SLOT) > 0;
+    }
+
+    public int getStressTransferLimit() {
+        if (!hasStressUpgrade()) return 0;
+        long value = (long) getUpgradeCount(STRESS_UPGRADE_SLOT) * ModConfig.STRESS_UPGRADE_CAPACITY_SU.get();
+        return (int) Math.max(0, Math.min(Integer.MAX_VALUE, value));
+    }
+
+    private int projectedMaxEnergyStored(int energyUpgradeCount) {
+        long value = (long) ModConfig.BASE_CHEST_ENERGY_CAPACITY_FE.get()
+                + (long) Math.max(0, energyUpgradeCount) * ModConfig.ENERGY_UPGRADE_CAPACITY_FE.get();
+        return (int) Math.max(0, Math.min(Integer.MAX_VALUE, value));
+    }
+
+    public int getMaxEnergyStored() {
+        return hasEnergyUpgrade() ? projectedMaxEnergyStored(getUpgradeCount(ENERGY_UPGRADE_SLOT)) : 0;
+    }
+
+    public int getEnergyTransferLimit() {
+        if (!hasEnergyUpgrade()) return 0;
+        long value = (long) ModConfig.BASE_CHEST_ENERGY_TRANSFER_FE.get()
+                + (long) Math.max(0, getUpgradeCount(ENERGY_UPGRADE_SLOT)) * ModConfig.ENERGY_UPGRADE_TRANSFER_FE.get();
+        return (int) Math.max(0, Math.min(Integer.MAX_VALUE, value));
+    }
+
+    public int getEnergyStored() {
+        return Math.min(energyStored, getMaxEnergyStored());
+    }
+
+    public int getRemainingEnergyCapacity() {
+        return Math.max(0, getMaxEnergyStored() - getEnergyStored());
+    }
+
+    public int receiveEnergyInternal(int amount, boolean simulate) {
+        if (!hasEnergyUpgrade() || amount <= 0) return 0;
+        int accepted = Math.min(amount, Math.min(getEnergyTransferLimit(), getRemainingEnergyCapacity()));
+        if (accepted > 0 && !simulate) {
+            energyStored += accepted;
+            storageDirty = true;
+            setChanged();
+        }
+        return accepted;
+    }
+
+    public int extractEnergyInternal(int amount, boolean simulate) {
+        if (!hasEnergyUpgrade() || amount <= 0) return 0;
+        int extracted = Math.min(amount, Math.min(getEnergyTransferLimit(), getEnergyStored()));
+        if (extracted > 0 && !simulate) {
+            energyStored -= extracted;
+            storageDirty = true;
+            setChanged();
+        }
+        return extracted;
     }
 
     /**
@@ -287,7 +453,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
 
     public String productionChestKey() {
         if (level == null) return "";
-        return ProductionStatsStorage.chestKey(getChestType(), level.dimension().location().toString(), worldPosition);
+        return ProductionStatsStorage.chestKey(level.dimension().location().toString(), worldPosition);
     }
 
     public Map<String, Integer> productionItemSnapshot() {
@@ -312,15 +478,42 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         return fluidStorage.values().stream().mapToInt(Integer::intValue).sum();
     }
 
+    public int getMaxFluidTypes() {
+        return projectedMaxFluidTypes(getUpgradeCount(FLUID_UPGRADE_SLOT));
+    }
+
+    public int getMaxFluidCapacityPerTypeMb() {
+        return projectedMaxFluidCapacityPerTypeMb(getUpgradeCount(FLUID_UPGRADE_SLOT));
+    }
+
+    public int getMaxFluidCapacityMb() {
+        long value = (long) getMaxFluidTypes() * getMaxFluidCapacityPerTypeMb();
+        return (int) Math.max(0, Math.min(Integer.MAX_VALUE, value));
+    }
+
     /** 获取剩余流体容量（mB） */
     public int getRemainingFluidCapacityMb() {
-        return ModConfig.MAX_CHEST_FLUID_CAPACITY_MB.get() - getUsedFluidCapacityMb();
+        long remaining = 0;
+        int perType = getMaxFluidCapacityPerTypeMb();
+        for (int amount : fluidStorage.values()) {
+            remaining += Math.max(0, perType - amount);
+        }
+        int emptyTypes = Math.max(0, getMaxFluidTypes() - fluidStorage.size());
+        remaining += (long) emptyTypes * perType;
+        return (int) Math.max(0, Math.min(Integer.MAX_VALUE, remaining));
+    }
+
+    public int getRemainingFluidCapacityMb(Fluid fluid) {
+        if (fluid == null || fluid == Fluids.EMPTY) return 0;
+        int current = fluidStorage.getOrDefault(fluid, 0);
+        if (current <= 0 && fluidStorage.size() >= getMaxFluidTypes()) return 0;
+        return Math.max(0, getMaxFluidCapacityPerTypeMb() - current);
     }
 
     /** 尝试添加流体（尽力而为，单位 mB） */
     public int addFluid(Fluid fluid, int amountMb) {
         if (fluid == null || fluid == Fluids.EMPTY || amountMb <= 0) return 0;
-        int toAdd = Math.min(amountMb, getRemainingFluidCapacityMb());
+        int toAdd = Math.min(amountMb, getRemainingFluidCapacityMb(fluid));
         if (toAdd > 0) {
             fluidStorage.merge(fluid, toAdd, Integer::sum);
             storageDirty = true;
@@ -354,12 +547,116 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         return Collections.unmodifiableMap(fluidStorage);
     }
 
+    private void resetDefaultSideConfig() {
+        sideConfig.clear();
+        for (ResourceKind kind : ResourceKind.values()) {
+            EnumMap<RelativeSide, SideMode> modes = new EnumMap<>(RelativeSide.class);
+            for (RelativeSide side : RelativeSide.values()) modes.put(side, SideMode.DISABLED);
+            sideConfig.put(kind, modes);
+        }
+        setDefault(ResourceKind.ITEM, RelativeSide.UP, SideMode.INPUT);
+        setDefault(ResourceKind.ITEM, RelativeSide.BACK, SideMode.INPUT);
+        setDefault(ResourceKind.ITEM, RelativeSide.FRONT, SideMode.OUTPUT);
+        setDefault(ResourceKind.ITEM, RelativeSide.DOWN, SideMode.OUTPUT);
+        setDefault(ResourceKind.ITEM, RelativeSide.LEFT, SideMode.BOTH);
+        setDefault(ResourceKind.ITEM, RelativeSide.RIGHT, SideMode.BOTH);
+
+        setDefault(ResourceKind.FLUID, RelativeSide.UP, SideMode.INPUT);
+        setDefault(ResourceKind.FLUID, RelativeSide.BACK, SideMode.INPUT);
+        setDefault(ResourceKind.FLUID, RelativeSide.FRONT, SideMode.OUTPUT);
+        setDefault(ResourceKind.FLUID, RelativeSide.DOWN, SideMode.OUTPUT);
+        setDefault(ResourceKind.FLUID, RelativeSide.LEFT, SideMode.BOTH);
+        setDefault(ResourceKind.FLUID, RelativeSide.RIGHT, SideMode.BOTH);
+
+        for (RelativeSide side : RelativeSide.values()) setDefault(ResourceKind.ENERGY, side, SideMode.BOTH);
+    }
+
+    private void setDefault(ResourceKind kind, RelativeSide side, SideMode mode) {
+        sideConfig.computeIfAbsent(kind, k -> new EnumMap<>(RelativeSide.class)).put(side, mode);
+    }
+
+    public SideMode getSideMode(ResourceKind kind, RelativeSide side) {
+        EnumMap<RelativeSide, SideMode> modes = sideConfig.get(kind);
+        if (modes == null) return SideMode.DISABLED;
+        return modes.getOrDefault(side, SideMode.DISABLED);
+    }
+
+    public void setSideMode(ResourceKind kind, RelativeSide side, SideMode mode) {
+        if (kind == null || side == null || mode == null) return;
+        EnumMap<RelativeSide, SideMode> modes = sideConfig.computeIfAbsent(kind, k -> new EnumMap<>(RelativeSide.class));
+        if (kind == ResourceKind.STRESS) {
+            if (mode == SideMode.BOTH) return;
+            if (mode != SideMode.DISABLED) {
+                for (RelativeSide existing : RelativeSide.values()) modes.put(existing, SideMode.DISABLED);
+            }
+        }
+        modes.put(side, mode);
+        if (kind == ResourceKind.STRESS) updateStressAxisFromConfig();
+        storageDirty = true;
+        setChanged();
+    }
+
+    private void updateStressAxisFromConfig() {
+        if (level == null || level.isClientSide) return;
+        Direction stressSide = getConfiguredStressWorldSide();
+        if (stressSide == null) return;
+        com.pockethomestead.compat.create.CreateStressHooks.updateStressAxis(level, worldPosition, stressSide.getAxis());
+    }
+
+    public int configuredStressInputSides() {
+        int count = 0;
+        for (RelativeSide side : RelativeSide.values()) {
+            if (getSideMode(ResourceKind.STRESS, side).canInput()) count++;
+        }
+        return count;
+    }
+
+    public int configuredStressOutputSides() {
+        int count = 0;
+        for (RelativeSide side : RelativeSide.values()) {
+            if (getSideMode(ResourceKind.STRESS, side).canOutput()) count++;
+        }
+        return count;
+    }
+
+    public Direction getConfiguredStressInputWorldSide() {
+        return getConfiguredStressWorldSide(true);
+    }
+
+    public Direction getConfiguredStressOutputWorldSide() {
+        return getConfiguredStressWorldSide(false);
+    }
+
+    public Direction getConfiguredStressWorldSide() {
+        Direction input = getConfiguredStressInputWorldSide();
+        return input != null ? input : getConfiguredStressOutputWorldSide();
+    }
+
+    private Direction getConfiguredStressWorldSide(boolean input) {
+        Direction front = getBlockState().getValue(AbstractHomesteadBlock.FACING);
+        for (RelativeSide side : RelativeSide.values()) {
+            SideMode mode = getSideMode(ResourceKind.STRESS, side);
+            if (input ? mode.canInput() : mode.canOutput()) return side.toWorld(front);
+        }
+        return null;
+    }
+
+    public Map<ResourceKind, Map<RelativeSide, SideMode>> getSideConfigSnapshot() {
+        EnumMap<ResourceKind, Map<RelativeSide, SideMode>> copy = new EnumMap<>(ResourceKind.class);
+        for (ResourceKind kind : ResourceKind.values()) {
+            copy.put(kind, new EnumMap<>(sideConfig.getOrDefault(kind, new EnumMap<>(RelativeSide.class))));
+        }
+        return Collections.unmodifiableMap(copy);
+    }
+
     public com.pockethomestead.compat.item.HomesteadChestItemHandler getItemHandler() {
         return itemHandler;
     }
 
     public com.pockethomestead.compat.item.HomesteadChestItemHandler getItemHandler(Direction side) {
-        return new com.pockethomestead.compat.item.HomesteadChestItemHandler(this, canAutomationInsert(side), canAutomationExtract(side));
+        return new com.pockethomestead.compat.item.HomesteadChestItemHandler(this,
+                canAutomation(ResourceKind.ITEM, side, true),
+                canAutomation(ResourceKind.ITEM, side, false));
     }
 
     public com.pockethomestead.compat.fluid.HomesteadChestFluidHandler getFluidHandler() {
@@ -367,23 +664,36 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     }
 
     public com.pockethomestead.compat.fluid.HomesteadChestFluidHandler getFluidHandler(Direction side) {
-        return new com.pockethomestead.compat.fluid.HomesteadChestFluidHandler(this, canAutomationInsert(side), canAutomationExtract(side));
+        return new com.pockethomestead.compat.fluid.HomesteadChestFluidHandler(this,
+                canAutomation(ResourceKind.FLUID, side, true),
+                canAutomation(ResourceKind.FLUID, side, false));
     }
 
-    private boolean canAutomationInsert(Direction side) {
-        if (side == null) return true;
-        Direction front = getBlockState().getValue(AbstractHomesteadBlock.FACING);
-        Direction back = front.getOpposite();
-        if (side == Direction.UP || side == back) return true;
-        return side.getAxis().isHorizontal() && side != front && side != back;
+    public com.pockethomestead.compat.energy.HomesteadChestEnergyStorage getEnergyHandler() {
+        return energyHandler;
     }
 
-    private boolean canAutomationExtract(Direction side) {
+    public com.pockethomestead.compat.energy.HomesteadChestEnergyStorage getEnergyHandler(Direction side) {
+        return new com.pockethomestead.compat.energy.HomesteadChestEnergyStorage(this,
+                canAutomation(ResourceKind.ENERGY, side, true),
+                canAutomation(ResourceKind.ENERGY, side, false));
+    }
+
+    public boolean canStressInput(Direction side) {
+        return hasStressUpgrade() && canAutomation(ResourceKind.STRESS, side, true);
+    }
+
+    public boolean canStressOutput(Direction side) {
+        return hasStressUpgrade() && canAutomation(ResourceKind.STRESS, side, false);
+    }
+
+    private boolean canAutomation(ResourceKind kind, Direction side, boolean input) {
         if (side == null) return true;
+        if (kind == ResourceKind.ENERGY && !hasEnergyUpgrade()) return false;
+        if (kind == ResourceKind.STRESS && !hasStressUpgrade()) return false;
         Direction front = getBlockState().getValue(AbstractHomesteadBlock.FACING);
-        Direction back = front.getOpposite();
-        if (side == Direction.DOWN || side == front) return true;
-        return side.getAxis().isHorizontal() && side != front && side != back;
+        SideMode mode = getSideMode(kind, RelativeSide.fromWorld(side, front));
+        return input ? mode.canInput() : mode.canOutput();
     }
 
     /**
@@ -405,9 +715,6 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     public String getChestId() { return chestId; }
     public void setChestId(String id) { this.chestId = id; setChanged(); }
 
-    public String getBoundTargetId() { return boundTargetId; }
-    public void setBoundTargetId(String id) { this.boundTargetId = id; setChanged(); }
-
     public UUID getOwnerUUID() { return ownerUUID; }
     public void setOwnerUUID(UUID uuid) { this.ownerUUID = uuid; setChanged(); }
 
@@ -421,13 +728,6 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
 
     public int getTransferRateLimit() { return transferRateLimit; }
     public void setTransferRateLimit(int limit) { this.transferRateLimit = limit; setChanged(); }
-
-    public int getSyncIntervalSeconds() { return syncIntervalSeconds; }
-    public void setSyncIntervalSeconds(int seconds) {
-        this.syncIntervalSeconds = Math.max(1, seconds);
-        this.tickCounter = 0; // 重置计数，立即按新间隔重新计时
-        setChanged();
-    }
 
     /** 计算距离下一次传输还有多少秒（用于UI倒计时） */
     public int getNextTransferSeconds() {
@@ -461,7 +761,8 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         // 兜底：确保箱子已注册（新放置时 onLoad 早于 setPlacedBy）
         registerIfReady();
         if (ownerUUID == null) return;
-        if (!transferEnabled && !hasGraphOutgoingEdges()) return;
+        if (hasNetworkUpgrade() && hasStressUpgrade()) doStressLinkTick();
+        if (!hasGraphOutgoingEdges()) return;
 
         tickCounter++;
         int interval = GRAPH_TRANSFER_INTERVAL_TICKS;
@@ -472,30 +773,46 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     }
 
     /**
-     * 执行一次传输周期（仅供货箱发起：SUPPLY → PICKUP 单向传输）
+     * 执行一次传输周期。统一箱子只要拥有网络升级和有效输出边即可作为源节点。
      */
     protected void doTransferTick() {
-        // 只有供货箱发送物品，取货箱只接收不发送
-        if (getChestType() != ChestRegistryManager.ChestType.SUPPLY) return;
         if (!(level instanceof ServerLevel serverLevel)) return;
-        if (itemStorage.isEmpty() && fluidStorage.isEmpty()) return;
+        if (!hasNetworkUpgrade()) return;
+        if (itemStorage.isEmpty() && fluidStorage.isEmpty() && energyStored <= 0) return;
 
         TransferGraph graph = TransferGraphStorage.get(serverLevel.getServer()).graphFor(ownerUUID);
         String dim = level.dimension().location().toString();
-        var node = graph.findNode(chestId, dim, worldPosition, ChestRegistryManager.ChestType.SUPPLY);
+        var node = graph.findNode(chestId, dim, worldPosition);
         if (node == null || !node.isEnabled()) return;
         var page = graph.getPage(node.getPageId());
         if (page == null || !page.isEnabled()) return;
 
         boolean canVoid = ModConfig.VOID_ENABLED.get() && (voidModeEnabled || ModConfig.GLOBAL_VOID_MODE.get());
         if (!itemStorage.isEmpty()) {
-            followOutgoingEdges(graph, serverLevel, node.getPageId(), node.getId(), TransferEdge.PORT_ALL, "ROOT_ITEM",
+            followOutgoingEdges(graph, serverLevel, node.getPageId(), node.getId(), TransferEdge.ITEM_ALL, "ROOT_ITEM",
                     new ArrayList<>(), new HashSet<>(), canVoid, Integer.MAX_VALUE);
         }
         if (!fluidStorage.isEmpty()) {
             followOutgoingEdges(graph, serverLevel, node.getPageId(), node.getId(), TransferEdge.FLUID_ALL, "ROOT_FLUID",
                     new ArrayList<>(), new HashSet<>(), canVoid, Integer.MAX_VALUE);
         }
+        if (energyStored > 0) {
+            followOutgoingEdges(graph, serverLevel, node.getPageId(), node.getId(), TransferEdge.ENERGY_FE, "ROOT_ENERGY",
+                    new ArrayList<>(), new HashSet<>(), false, Integer.MAX_VALUE);
+        }
+    }
+
+    private void doStressLinkTick() {
+        if (!(level instanceof ServerLevel serverLevel)) return;
+        if (!hasNetworkUpgrade() || !hasStressUpgrade() || ownerUUID == null || chestId.isEmpty()) return;
+        TransferGraph graph = TransferGraphStorage.get(serverLevel.getServer()).graphFor(ownerUUID);
+        String dim = level.dimension().location().toString();
+        var node = graph.findNode(chestId, dim, worldPosition);
+        if (node == null || !node.isEnabled()) return;
+        var page = graph.getPage(node.getPageId());
+        if (page == null || !page.isEnabled()) return;
+        followOutgoingEdges(graph, serverLevel, node.getPageId(), node.getId(), TransferEdge.STRESS_SU, "ROOT_STRESS",
+                new ArrayList<>(), new HashSet<>(), false, getStressTransferLimit());
     }
 
     private int followTransferEdge(TransferGraph graph, ServerLevel serverLevel, String pageId, TransferEdge edge,
@@ -521,6 +838,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         }
 
         if (targetNode.getNodeType() == com.pockethomestead.transfer.TransferNode.NodeType.TRASH) {
+            if (isEnergyScope(scopePort) || isStressScope(scopePort)) return 0;
             TransferResult result = isFluidScope(scopePort)
                     ? voidFilteredFluids(scopePort, nextPath, gameTime, routeBudget)
                     : voidFilteredItems(scopePort, nextPath, gameTime, routeBudget);
@@ -528,13 +846,19 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
             return result.moved();
         }
 
-        if (targetNode.getNodeType() != com.pockethomestead.transfer.TransferNode.NodeType.PICKUP) return 0;
+        if (targetNode.getNodeType() != com.pockethomestead.transfer.TransferNode.NodeType.CHEST) return 0;
         BaseChestBlockEntity target = findNodeChest(targetNode, serverLevel);
         TransferResult result;
         if (target != null && !target.isRemoved()) {
-            result = isFluidScope(scopePort)
-                    ? transferFluidsTo(target, scopePort, nextPath, gameTime, routeBudget, canVoid)
-                    : transferItemsTo(target, scopePort, nextPath, gameTime, routeBudget, canVoid);
+            if (isEnergyScope(scopePort)) {
+                result = transferEnergyTo(target, nextPath, gameTime, routeBudget);
+            } else if (isStressScope(scopePort)) {
+                result = transferStressTo(target, nextPath, gameTime, routeBudget);
+            } else {
+                result = isFluidScope(scopePort)
+                        ? transferFluidsTo(target, scopePort, nextPath, gameTime, routeBudget, canVoid)
+                        : transferItemsTo(target, scopePort, nextPath, gameTime, routeBudget, canVoid);
+            }
         } else if (canVoid) {
             result = isFluidScope(scopePort)
                     ? voidFilteredFluids(scopePort, nextPath, gameTime, routeBudget)
@@ -641,10 +965,10 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     }
 
     private String intersectPorts(String current, String next) {
-        if (current == null || current.isBlank()) current = TransferEdge.PORT_ALL;
-        if (next == null || next.isBlank()) next = TransferEdge.PORT_ALL;
-        if (TransferEdge.PORT_ALL.equals(current)) return isFluidScope(next) ? null : next;
-        if (TransferEdge.PORT_ALL.equals(next)) return isFluidScope(current) ? null : current;
+        if (current == null || current.isBlank()) current = TransferEdge.ITEM_ALL;
+        if (next == null || next.isBlank()) next = TransferEdge.ITEM_ALL;
+        if (TransferEdge.ITEM_ALL.equals(current)) return isFluidScope(next) || isEnergyScope(next) || isStressScope(next) ? null : next;
+        if (TransferEdge.ITEM_ALL.equals(next)) return isFluidScope(current) || isEnergyScope(current) || isStressScope(current) ? null : current;
         if (TransferEdge.FLUID_ALL.equals(current) && isFluidScope(next)) return next;
         if (TransferEdge.FLUID_ALL.equals(next) && isFluidScope(current)) return current;
         return current.equals(next) ? current : null;
@@ -682,6 +1006,8 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
 
     private int matchingSourceCount(String scopePort) {
         if (isFluidScope(scopePort)) return matchingFluidSourceCount(scopePort);
+        if (isEnergyScope(scopePort)) return getEnergyStored();
+        if (isStressScope(scopePort)) return getStressTransferLimit();
         int total = 0;
         for (StoredItemStack stored : itemStorage) {
             if (stored.count() > 0 && portAllows(scopePort, stored.item())) total += stored.count();
@@ -799,7 +1125,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
                 continue;
             }
             int toTransfer = Math.min(amount, fluidBudget);
-            toTransfer = Math.min(toTransfer, target.getRemainingFluidCapacityMb());
+            toTransfer = Math.min(toTransfer, target.getRemainingFluidCapacityMb(fluid));
             if (toTransfer > 0) {
                 int removed = removeFluid(fluid, toTransfer);
                 if (removed <= 0) continue;
@@ -809,7 +1135,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
                 movedByFluid.merge(fluidId, accepted, Integer::sum);
                 remainingRouteBudget -= accepted;
 
-                if (target.getRemainingFluidCapacityMb() <= 0) {
+                if (target.getRemainingFluidCapacityMb(fluid) <= 0) {
                     if (canVoid && remainingRouteBudget > 0) {
                         TransferResult voided = voidFilteredFluids(scopePort, path, gameTime, remainingRouteBudget);
                         for (Map.Entry<String, Integer> moved : voided.movedByItem().entrySet()) movedByFluid.merge(moved.getKey(), moved.getValue(), Integer::sum);
@@ -833,6 +1159,68 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         if (remainingRouteBudget <= 0) return new TransferResult(movedByFluid, TransferBlockReason.NONE, null);
         return new TransferResult(movedByFluid, blockReason != TransferBlockReason.NONE ? blockReason : TransferBlockReason.SOURCE,
                 blockFluidId != null ? blockFluidId : lastMovedItemId(movedByFluid));
+    }
+
+    private TransferResult transferEnergyTo(BaseChestBlockEntity target, List<TransferEdge> path, long gameTime, int routeBudget) {
+        if (!hasEnergyUpgrade() || !target.hasEnergyUpgrade()) {
+            return new TransferResult(Map.of(), TransferBlockReason.RECEIVER, TransferEdge.ENERGY_FE);
+        }
+        int available = getEnergyStored();
+        if (available <= 0) return new TransferResult(Map.of(), TransferBlockReason.SOURCE, TransferEdge.ENERGY_FE);
+        int receiverRoom = target.getRemainingEnergyCapacity();
+        if (receiverRoom <= 0) return new TransferResult(Map.of(), TransferBlockReason.RECEIVER, TransferEdge.ENERGY_FE);
+        int budget = pathBudget(path, gameTime, routeBudget, TransferEdge.ENERGY_FE);
+        if (budget <= 0) return new TransferResult(Map.of(), TransferBlockReason.NONE, null);
+        int moving = Math.min(Math.min(available, receiverRoom), Math.min(budget, getEnergyTransferLimit()));
+        moving = Math.min(moving, target.getEnergyTransferLimit());
+        if (moving <= 0) return new TransferResult(Map.of(), TransferBlockReason.NONE, null);
+        int extracted = extractEnergyInternal(moving, false);
+        int accepted = target.receiveEnergyInternal(extracted, false);
+        if (accepted < extracted) receiveEnergyInternal(extracted - accepted, false);
+        if (accepted <= 0) return new TransferResult(Map.of(), TransferBlockReason.RECEIVER, TransferEdge.ENERGY_FE);
+        return new TransferResult(Map.of(TransferEdge.ENERGY_FE, accepted), TransferBlockReason.NONE, null);
+    }
+
+    private TransferResult transferStressTo(BaseChestBlockEntity target, List<TransferEdge> path, long gameTime, int routeBudget) {
+        if (!hasStressUpgrade() || !target.hasStressUpgrade()) {
+            return new TransferResult(Map.of(), TransferBlockReason.RECEIVER, TransferEdge.STRESS_SU);
+        }
+        if (configuredStressInputSides() != 1 || configuredStressOutputSides() != 0) {
+            return new TransferResult(Map.of(), TransferBlockReason.SOURCE, TransferEdge.STRESS_SU);
+        }
+        if (target.configuredStressOutputSides() != 1 || target.configuredStressInputSides() != 0) {
+            return new TransferResult(Map.of(), TransferBlockReason.RECEIVER, TransferEdge.STRESS_SU);
+        }
+        HomesteadStressEndpoint sourceEndpoint = stressEndpoint(this);
+        HomesteadStressEndpoint targetEndpoint = stressEndpoint(target);
+        if (sourceEndpoint == null || targetEndpoint == null) {
+            return new TransferResult(Map.of(), TransferBlockReason.RECEIVER, TransferEdge.STRESS_SU);
+        }
+        if (!sourceEndpoint.canSendGraphStress()) {
+            return new TransferResult(Map.of(), TransferBlockReason.SOURCE, TransferEdge.STRESS_SU);
+        }
+        int budget = Math.min(routeBudget, Math.min((int) sourceEndpoint.graphStressCapacity(), target.getStressTransferLimit()));
+        if (budget <= 0) return new TransferResult(Map.of(), TransferBlockReason.NONE, null);
+        float speed = sourceEndpoint.graphStressSpeed();
+        if (speed == 0) return new TransferResult(Map.of(), TransferBlockReason.SOURCE, TransferEdge.STRESS_SU);
+        targetEndpoint.receiveGraphStressLease(stressLeaseId(path, target), speed, budget, gameTime);
+        return new TransferResult(Map.of(TransferEdge.STRESS_SU, budget), TransferBlockReason.NONE, null);
+    }
+
+    private HomesteadStressEndpoint stressEndpoint(BaseChestBlockEntity chest) {
+        if (chest == null || chest.getLevel() == null) return null;
+        BlockEntity blockEntity = chest.getLevel().getBlockEntity(chest.getBlockPos());
+        if (blockEntity instanceof HomesteadStressEndpoint endpoint && endpoint.homesteadChest() == chest) return endpoint;
+        return null;
+    }
+
+    private String stressLeaseId(List<TransferEdge> path, BaseChestBlockEntity target) {
+        StringBuilder id = new StringBuilder();
+        if (level != null) id.append(level.dimension().location());
+        id.append('|').append(worldPosition.asLong()).append('|');
+        for (TransferEdge edge : path) id.append(edge.getId()).append('>');
+        id.append(target.getBlockPos().asLong());
+        return id.toString();
     }
 
     /**
@@ -908,7 +1296,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     }
 
     private boolean portAllows(String scopePort, Item item) {
-        if (TransferEdge.PORT_ALL.equals(scopePort)) return true;
+        if (TransferEdge.ITEM_ALL.equals(scopePort)) return true;
         if (scopePort == null || !scopePort.startsWith(TransferEdge.ITEM_PREFIX)) return false;
         net.minecraft.resources.ResourceLocation id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item);
         return id != null && scopePort.substring(TransferEdge.ITEM_PREFIX.length()).equals(id.toString());
@@ -932,6 +1320,14 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
 
     private boolean isFluidScope(String scopePort) {
         return scopePort != null && scopePort.startsWith(TransferEdge.FLUID_PREFIX);
+    }
+
+    private boolean isEnergyScope(String scopePort) {
+        return TransferEdge.ENERGY_FE.equals(scopePort);
+    }
+
+    private boolean isStressScope(String scopePort) {
+        return TransferEdge.STRESS_SU.equals(scopePort);
     }
 
     private boolean portAllowsFluid(String scopePort, Fluid fluid) {
@@ -958,6 +1354,8 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     }
 
     private String firstMatchingResourceId(String scopePort) {
+        if (isEnergyScope(scopePort)) return TransferEdge.ENERGY_FE;
+        if (isStressScope(scopePort)) return TransferEdge.STRESS_SU;
         return isFluidScope(scopePort) ? firstMatchingFluidId(scopePort) : firstMatchingItemId(scopePort);
     }
 
@@ -975,9 +1373,10 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
                 dimLoc
         ));
         if (targetLevel == null) return null;
-        if (targetLevel.getBlockEntity(node.getPos()) instanceof BaseChestBlockEntity be
-                && be.getChestType() == node.getType()
-                && be.getChestId().equals(node.getChestId())) {
+        BaseChestBlockEntity be = HomesteadChestAccess.resolve(targetLevel.getBlockEntity(node.getPos()));
+        if (be != null
+                && be.getChestId().equals(node.getChestId())
+                && be.hasNetworkUpgrade()) {
             return be;
         }
         return null;
@@ -985,9 +1384,10 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
 
     private boolean hasGraphOutgoingEdges() {
         if (level == null || level.isClientSide || ownerUUID == null || chestId.isEmpty()) return false;
+        if (!hasNetworkUpgrade()) return false;
         if (!(level instanceof ServerLevel serverLevel)) return false;
         TransferGraph graph = TransferGraphStorage.get(serverLevel.getServer()).graphFor(ownerUUID);
-        var node = graph.findNode(chestId, level.dimension().location().toString(), worldPosition, getChestType());
+        var node = graph.findNode(chestId, level.dimension().location().toString(), worldPosition);
         return node != null && graph.hasOutgoing(node.getId());
     }
 
@@ -1018,14 +1418,37 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         }
         tag.put("Fluids", fluidList);
 
-        // 保存绑定信息
+        ListTag upgradeList = new ListTag();
+        for (int i = 0; i < upgradeCounts.length; i++) {
+            if (upgradeCounts[i] <= 0) continue;
+            CompoundTag upgradeTag = new CompoundTag();
+            upgradeTag.putInt("slot", i);
+            upgradeTag.putInt("count", upgradeCounts[i]);
+            upgradeList.add(upgradeTag);
+        }
+        tag.put("UpgradeSlots", upgradeList);
+
+        tag.putInt("EnergyStored", getEnergyStored());
+
+        ListTag sideList = new ListTag();
+        for (ResourceKind kind : ResourceKind.values()) {
+            for (RelativeSide side : RelativeSide.values()) {
+                SideMode mode = getSideMode(kind, side);
+                CompoundTag sideTag = new CompoundTag();
+                sideTag.putString("Kind", kind.name());
+                sideTag.putString("Side", side.name());
+                sideTag.putString("Mode", mode.name());
+                sideList.add(sideTag);
+            }
+        }
+        tag.put("SideConfig", sideList);
+
+        // 保存基础信息
         tag.putString("ChestId", chestId);
-        tag.putString("BoundTargetId", boundTargetId);
         if (ownerUUID != null) tag.putUUID("Owner", ownerUUID);
         tag.putBoolean("TransferEnabled", transferEnabled);
         tag.putBoolean("VoidModeEnabled", voidModeEnabled);
         tag.putInt("TransferRateLimit", transferRateLimit);
-        tag.putInt("SyncIntervalSeconds", syncIntervalSeconds);
         tag.putDouble("TrustScore", trustScore);
 
         // 保存筛选器
@@ -1079,14 +1502,38 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
             }
         }
 
-        // 加载绑定信息
+        Arrays.fill(upgradeCounts, 0);
+        ListTag upgradeList = tag.getList("UpgradeSlots", Tag.TAG_COMPOUND);
+        for (Tag t : upgradeList) {
+            CompoundTag upgradeTag = (CompoundTag) t;
+            int slot = upgradeTag.getInt("slot");
+            int count = upgradeTag.getInt("count");
+            if (slot >= 0 && slot < upgradeCounts.length && count > 0 && isUpgradeSlotEnabled(slot)) {
+                upgradeCounts[slot] = count;
+            }
+        }
+
+        energyStored = Math.max(0, Math.min(tag.getInt("EnergyStored"), getMaxEnergyStored()));
+
+        resetDefaultSideConfig();
+        ListTag sideList = tag.getList("SideConfig", Tag.TAG_COMPOUND);
+        for (Tag t : sideList) {
+            CompoundTag sideTag = (CompoundTag) t;
+            try {
+                ResourceKind kind = ResourceKind.valueOf(sideTag.getString("Kind"));
+                RelativeSide side = RelativeSide.valueOf(sideTag.getString("Side"));
+                SideMode mode = SideMode.valueOf(sideTag.getString("Mode"));
+                setSideMode(kind, side, mode);
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+
+        // 加载基础信息
         chestId = tag.getString("ChestId");
-        boundTargetId = tag.getString("BoundTargetId");
         if (tag.hasUUID("Owner")) ownerUUID = tag.getUUID("Owner");
         transferEnabled = tag.getBoolean("TransferEnabled");
         voidModeEnabled = tag.getBoolean("VoidModeEnabled");
         transferRateLimit = tag.getInt("TransferRateLimit");
-        syncIntervalSeconds = Math.max(1, tag.getInt("SyncIntervalSeconds"));
         trustScore = tag.getDouble("TrustScore");
 
         // 加载筛选器

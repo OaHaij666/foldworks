@@ -28,17 +28,18 @@ public class ProductionStatsPage extends Page {
     private static final int[] RANGES = {1, 5, 10, 30, 60};
     private static final String[] SORT_LABELS = {"净产率", "生产", "消耗", "名称", "库存"};
 
-    private static final int TOOLBAR_H = 36;
-    private static final int HEADER_H = 20;
-    private static final int ROW_H = 58;
-    private static final int ROW_GAP = 6;
+    private static final int TOOLBAR_H = 22;
+    private static final int HEADER_H = 14;
+    private static final int ROW_H = 30;
+    private static final int ROW_GAP = 2;
     private static final int GROUP_ROW_H = 18;
 
     private static final int PRODUCTION_COLOR = 0xFF18A8F2;
     private static final int CONSUMPTION_COLOR = 0xFFD9AD24;
     private static final int GRAPH_BG = 0xFFE9F1F8;
-    private static final int GRAPH_GRID = 0x66FFFFFF;
-    private static final int GRAPH_GRID_DARK = 0x44B9CADB;
+    private static final int GRAPH_GRID = 0x77FFFFFF;
+    private static final int GRAPH_GRID_DARK = 0x2294AFC7;
+    private static final String[] COMPACT_SUFFIXES = {"", "K", "M", "B", "T", "P", "E"};
 
     private String selectedGroupId = ProductionStatsStorage.DEFAULT_GROUP_ID;
     private int rangeIndex = 2;
@@ -110,40 +111,40 @@ public class ProductionStatsPage extends Page {
     }
 
     private void renderToolbar(GuiGraphics g, int mx, int my) {
-        int toolbarY = y + 7;
-        if (w >= 300) Theme.text(g, font, "产率统计", x + 11, toolbarY + 5, Theme.TEXT);
+        int toolbarY = y + 3;
+        if (w >= 300) Theme.text(g, font, "产率统计", x + 11, toolbarY + 4, Theme.TEXT);
 
         int groupX = groupButtonX();
         int groupY = groupButtonY();
         int groupW = groupButtonWidth();
-        boolean groupHover = Theme.inside(mx, my, groupX, groupY, groupW, 18);
-        pill(g, groupX, groupY, groupW, 18, selectedGroupName(), groupHover || groupDropdownOpen ? Theme.PRIMARY_SOFT : Theme.SURFACE_ALT,
+        boolean groupHover = Theme.inside(mx, my, groupX, groupY, groupW, 16);
+        pill(g, groupX, groupY, groupW, 16, selectedGroupName(), groupHover || groupDropdownOpen ? Theme.PRIMARY_SOFT : Theme.SURFACE_ALT,
                 groupHover || groupDropdownOpen ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED);
-        Theme.chevronDown(g, groupX + groupW - 11, groupY + 9, 6, groupHover || groupDropdownOpen ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED);
+        Theme.chevronDown(g, groupX + groupW - 11, groupY + 8, 6, groupHover || groupDropdownOpen ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED);
 
         int rangeX = rangeButtonX();
         int sortX = sortButtonX();
         int zeroX = zeroButtonX();
-        if (showHideZeroControl()) chip(g, zeroX, toolbarY + 1, 56, 17, hideZero ? "显示零" : "隐藏零", Theme.SURFACE_ALT, Theme.TEXT_MUTED);
-        if (showSortControl()) chip(g, sortX, toolbarY + 1, 62, 17, SORT_LABELS[sortMode], Theme.SURFACE_ALT, Theme.TEXT_MUTED);
-        chip(g, rangeX, toolbarY + 1, 62, 17, RANGES[rangeIndex] + "分钟", Theme.PRIMARY_SOFT, Theme.PRIMARY_PRESS);
+        if (showHideZeroControl()) chip(g, zeroX, toolbarY, 56, 16, hideZero ? "显示零" : "隐藏零", Theme.SURFACE_ALT, Theme.TEXT_MUTED);
+        if (showSortControl()) chip(g, sortX, toolbarY, 62, 16, SORT_LABELS[sortMode], Theme.SURFACE_ALT, Theme.TEXT_MUTED);
+        chip(g, rangeX, toolbarY, 62, 16, RANGES[rangeIndex] + "分钟", Theme.PRIMARY_SOFT, Theme.PRIMARY_PRESS);
 
         int searchX = groupX + groupW + 8;
         int searchRight = searchRightX();
         if (searchRight - searchX >= 66) {
             int searchW = Math.min(132, searchRight - searchX);
-            Theme.panel(g, searchX, toolbarY + 1, searchW, 18, 7, searchFocused ? 0xFFFFFFFF : Theme.SURFACE_SUNK,
+            Theme.panel(g, searchX, toolbarY, searchW, 16, 7, searchFocused ? 0xFFFFFFFF : Theme.SURFACE_SUNK,
                     searchFocused ? Theme.PRIMARY : Theme.BORDER);
             Theme.text(g, font, searchValue.isEmpty() ? "搜索资源" : Theme.ellipsize(font, searchValue, searchW - 14),
-                    searchX + 7, toolbarY + 6, searchValue.isEmpty() ? Theme.TEXT_FAINT : Theme.TEXT);
+                    searchX + 7, toolbarY + 4, searchValue.isEmpty() ? Theme.TEXT_FAINT : Theme.TEXT);
         }
     }
 
     private void renderTable(GuiGraphics g, int mx, int my) {
         int innerX = x + 8;
         int innerW = w - 16;
-        int headerY = y + TOOLBAR_H + 6;
-        int listY = headerY + HEADER_H + 6;
+        int headerY = y + TOOLBAR_H + 4;
+        int listY = headerY + HEADER_H + 4;
         int bottomPad = 8;
         int maxRows = Math.max(1, (h - (listY - y) - bottomPad) / (ROW_H + ROW_GAP));
         List<ClientProductionStatsCache.ProductionRow> rows = filteredRows();
@@ -168,12 +169,12 @@ public class ProductionStatsPage extends Page {
         int trendX = hx + infoW + gap;
         int statX = trendX + trendW + gap;
 
-        Theme.fillRound(g, hx, hy, hw, HEADER_H, 9, 0x99E5EDF5);
-        Theme.vLine(g, trendX - gap / 2, hy + 3, HEADER_H - 6, 0x99C8D7E6);
-        Theme.vLine(g, statX - gap / 2, hy + 3, HEADER_H - 6, 0x99C8D7E6);
-        Theme.textCentered(g, font, "产物信息", hx + infoW / 2, hy + 6, Theme.TEXT_MUTED);
-        Theme.textCentered(g, font, "产率/消耗率走势", trendX + trendW / 2, hy + 6, Theme.TEXT_MUTED);
-        Theme.textCentered(g, font, "当前统计", statX + statW / 2, hy + 6, Theme.TEXT_MUTED);
+        Theme.fillRound(g, hx, hy, hw, HEADER_H, 7, 0x99E5EDF5);
+        Theme.vLine(g, trendX - gap / 2, hy + 2, HEADER_H - 4, 0x99C8D7E6);
+        Theme.vLine(g, statX - gap / 2, hy + 2, HEADER_H - 4, 0x99C8D7E6);
+        Theme.textCentered(g, font, "产物信息", hx + infoW / 2, hy + 3, Theme.TEXT_MUTED);
+        Theme.textCentered(g, font, "产率/消耗率走势", trendX + trendW / 2, hy + 3, Theme.TEXT_MUTED);
+        Theme.textCentered(g, font, "当前统计", statX + statW / 2, hy + 3, Theme.TEXT_MUTED);
     }
 
     private void renderEmptyState(GuiGraphics g, int ex, int ey, int ew, int eh) {
@@ -191,7 +192,7 @@ public class ProductionStatsPage extends Page {
     private void renderRow(GuiGraphics g, int mx, int my, ClientProductionStatsCache.ProductionRow row,
                            int rx, int ry, int rw, int rh) {
         boolean hover = Theme.inside(mx, my, rx, ry, rw, rh);
-        Theme.panel(g, rx, ry, rw, rh, 7, hover ? 0xFFFFFFFF : 0xFFF8FCFF, hover ? Theme.BORDER_STRONG : Theme.DIVIDER);
+        Theme.panel(g, rx, ry, rw, rh, 6, hover ? 0xFFFFFFFF : 0xFFF8FCFF, hover ? Theme.BORDER_STRONG : Theme.DIVIDER);
 
         int infoW = infoColumnWidth(rw);
         int statW = statColumnWidth(rw);
@@ -202,18 +203,18 @@ public class ProductionStatsPage extends Page {
         boolean fluid = isFluidResource(row.itemId());
 
         renderResourceInfo(g, row, fluid, rx, ry, infoW, rh);
-        drawTrendGraph(g, row.trendInput(), row.trendOutput(), row.trendNet(), trendX, ry + 8, trendW, rh - 16);
+        drawTrendGraph(g, row.trendInput(), row.trendOutput(), row.trendNet(), trendX, ry + 4, trendW, rh - 8);
         renderCurrentStats(g, row, fluid, statX, ry, statW, rh);
     }
 
     private void renderResourceInfo(GuiGraphics g, ClientProductionStatsCache.ProductionRow row, boolean fluid,
                                     int ix, int iy, int iw, int ih) {
-        Theme.text(g, font, "★", ix + 7, iy + 22, Theme.TEXT_FAINT);
-        int iconX = ix + 25;
-        int iconY = iy + 18;
+        textScaled(g, "★", ix + 7, iy + 11, Theme.TEXT_FAINT, 0.82f);
+        int iconX = ix + 24;
+        int iconY = iy + 8;
         g.pose().pushPose();
         g.pose().translate(iconX, iconY, 0);
-        g.pose().scale(1.15f, 1.15f, 1f);
+        g.pose().scale(0.78f, 0.78f, 1f);
         if (fluid) g.renderItem(new ItemStack(Items.WATER_BUCKET), 0, 0);
         else {
             Item item = resolveItem(row.itemId());
@@ -221,34 +222,38 @@ public class ProductionStatsPage extends Page {
         }
         g.pose().popPose();
 
-        int textX = ix + 50;
-        int textW = Math.max(36, iw - 56);
-        Theme.text(g, font, Theme.ellipsize(font, shortResource(row.itemId()), textW), textX, iy + 14, Theme.TEXT);
-        Theme.text(g, font, "库存 " + formatCount(row.currentCount()) + (fluid ? " mB" : ""), textX, iy + 31, Theme.TEXT_MUTED);
+        int textX = ix + 45;
+        int textW = Math.max(36, iw - 50);
+        textScaled(g, Theme.ellipsize(font, shortResource(row.itemId()), Math.round(textW / 0.82f)), textX, iy + 3, Theme.TEXT, 0.82f);
+        textScaled(g, "库存 " + formatCount(row.currentCount()) + (fluid ? " mB" : ""), textX, iy + 16, Theme.TEXT_MUTED, 0.82f);
     }
 
     private void renderCurrentStats(GuiGraphics g, ClientProductionStatsCache.ProductionRow row, boolean fluid,
                                     int sx, int sy, int sw, int sh) {
         int labelX = sx + 8;
         int valueX = sx + sw - 8;
-        String inputText = Theme.ellipsize(font, formatRate(row.inputRatePerMinute(), fluid), Math.max(32, sw - 44));
-        String outputText = Theme.ellipsize(font, formatRate(row.outputRatePerMinute(), fluid), Math.max(32, sw - 44));
-        String netText = Theme.ellipsize(font, signedRate(row.netRatePerMinute(), fluid), Math.max(36, sw - 18));
-        Theme.text(g, font, "生产", labelX, sy + 10, PRODUCTION_COLOR);
-        Theme.textRight(g, font, inputText, valueX, sy + 10, PRODUCTION_COLOR);
-        Theme.text(g, font, "消耗", labelX, sy + 25, CONSUMPTION_COLOR);
-        Theme.textRight(g, font, outputText, valueX, sy + 25, CONSUMPTION_COLOR);
+        int labelW = Math.max(Theme.styledWidth(font, "生产"), Theme.styledWidth(font, "消耗"));
+        int valueW = Math.max(28, valueX - (labelX + labelW + 6));
+        float statScale = 0.82f;
+        String inputText = Theme.ellipsize(font, formatRate(row.inputRatePerMinute(), fluid), Math.round(valueW / statScale));
+        String outputText = Theme.ellipsize(font, formatRate(row.outputRatePerMinute(), fluid), Math.round(valueW / statScale));
+        String netText = Theme.ellipsize(font, signedRate(row.netRatePerMinute(), fluid), Math.round(Math.max(36, sw - 18) / statScale));
+        textScaled(g, "生产", labelX, sy + 1, PRODUCTION_COLOR, statScale);
+        textRightScaled(g, inputText, valueX, sy + 1, PRODUCTION_COLOR, statScale);
+        textScaled(g, "消耗", labelX, sy + 11, CONSUMPTION_COLOR, statScale);
+        textRightScaled(g, outputText, valueX, sy + 11, CONSUMPTION_COLOR, statScale);
 
         int netColor = row.netRatePerMinute() >= 0 ? Theme.SUCCESS : Theme.DANGER;
         int badgeFill = row.netRatePerMinute() >= 0 ? 0xFFE6F8F0 : Theme.DANGER_SOFT;
-        int badgeW = Math.min(sw - 12, Math.max(54, Theme.styledWidth(font, netText) + 12));
-        Theme.fillRound(g, valueX - badgeW, sy + sh - 20, badgeW, 14, 7, badgeFill);
-        Theme.textRight(g, font, netText, valueX - 6, sy + sh - 17, netColor);
+        int badgeW = Math.min(sw - 12, Math.max(46, Math.round(Theme.styledWidth(font, netText) * statScale) + 10));
+        int netY = sy + sh - 10;
+        Theme.fillRound(g, valueX - badgeW, netY - 1, badgeW, 10, 5, badgeFill);
+        textRightScaled(g, netText, valueX - 5, netY, netColor, statScale);
     }
 
     private void drawTrendGraph(GuiGraphics g, List<Integer> input, List<Integer> output, List<Integer> net,
                                 int gx, int gy, int gw, int gh) {
-        Theme.fillRound(g, gx, gy, gw, gh, 5, GRAPH_BG);
+        Theme.fillRound(g, gx, gy, gw, gh, 4, GRAPH_BG);
         drawFineGrid(g, gx, gy, gw, gh);
         if (input.isEmpty() && output.isEmpty() && net.isEmpty()) return;
 
@@ -257,40 +262,73 @@ public class ProductionStatsPage extends Page {
         for (int v : output) max = Math.max(max, Math.abs(v));
         for (int v : net) max = Math.max(max, Math.abs(v));
 
-        int mid = gy + gh / 2;
-        Theme.hLine(g, gx + 3, mid, gw - 6, 0x88C4D4E3);
-        int points = Math.max(1, Math.max(input.size(), Math.max(output.size(), net.size())));
-        int barW = Math.max(1, gw / points);
-        for (int i = 0; i < net.size(); i++) {
-            int value = net.get(i);
-            if (value == 0) continue;
-            int bx = gx + i * gw / points;
-            int bh = Math.max(1, Math.round(Math.abs(value) * (gh / 2f - 3) / max));
-            int color = value >= 0 ? 0x5520A8F0 : 0x55D9AD24;
-            if (value >= 0) g.fill(bx, mid - bh, bx + Math.max(1, barW - 1), mid, color);
-            else g.fill(bx, mid, bx + Math.max(1, barW - 1), mid + bh, color);
-        }
-        drawSparkline(g, input, gx + 4, gy + 4, gw - 8, gh - 8, max, PRODUCTION_COLOR);
-        drawSparkline(g, output, gx + 4, gy + 4, gw - 8, gh - 8, max, CONSUMPTION_COLOR);
+        int chartX = gx + 5;
+        int chartY = gy + 4;
+        int chartW = gw - 10;
+        int chartH = gh - 9;
+        int baseline = chartY + chartH - 1;
+        Theme.hLine(g, chartX, baseline, chartW, 0x88D9AD24);
+        fillSparkArea(g, input, chartX, chartY, chartW, chartH, max, baseline, 0x1A20A8F0);
+        drawSparkline(g, output, chartX, chartY, chartW, chartH, max, 0xA8D9AD24, 0.85f, false);
+        drawSparkline(g, input, chartX, chartY, chartW, chartH, max, PRODUCTION_COLOR, 1.15f, true);
     }
 
     private void drawFineGrid(GuiGraphics g, int x, int y, int w, int h) {
-        for (int gx = x + 12; gx < x + w; gx += 12) g.fill(gx, y + 2, gx + 1, y + h - 2, GRAPH_GRID);
-        for (int gy = y + 9; gy < y + h; gy += 9) g.fill(x + 2, gy, x + w - 2, gy + 1, GRAPH_GRID_DARK);
+        for (int i = 1; i < 4; i++) {
+            int gx = x + i * w / 5;
+            g.fill(gx, y + 4, gx + 1, y + h - 4, GRAPH_GRID);
+        }
+        for (int i = 1; i < 3; i++) {
+            int gy = y + i * h / 3;
+            g.fill(x + 3, gy, x + w - 3, gy + 1, GRAPH_GRID_DARK);
+        }
     }
 
-    private void drawSparkline(GuiGraphics g, List<Integer> values, int x, int y, int w, int h, int max, int color) {
+    private void drawSparkline(GuiGraphics g, List<Integer> values, int x, int y, int w, int h, int max, int color,
+                               float width, boolean highlightLast) {
         if (values.size() < 2 || w <= 0 || h <= 0) return;
-        float step = w / (float) (values.size() - 1);
+        List<Integer> sampled = sampleTrend(values);
+        float step = w / (float) (sampled.size() - 1);
         float prevX = x;
-        float prevY = sparkY(values.get(0), y, h, max);
-        for (int i = 1; i < values.size(); i++) {
-            float nextX = x + step * i;
-            float nextY = sparkY(values.get(i), y, h, max);
-            Theme.line(g, prevX, prevY, nextX, nextY, 1.35f, color);
+        float prevY = sparkY(sampled.get(0), y, h, max);
+        float nextX = prevX;
+        float nextY = prevY;
+        for (int i = 1; i < sampled.size(); i++) {
+            nextX = x + step * i;
+            nextY = sparkY(sampled.get(i), y, h, max);
+            Theme.line(g, prevX, prevY, nextX, nextY, width, color);
             prevX = nextX;
             prevY = nextY;
         }
+        if (highlightLast) {
+            Theme.fillRound(g, Math.round(nextX) - 2, Math.round(nextY) - 2, 4, 4, 2, 0xFFFFFFFF);
+            Theme.fillRound(g, Math.round(nextX) - 1, Math.round(nextY) - 1, 2, 2, 1, color);
+        }
+    }
+
+    private void fillSparkArea(GuiGraphics g, List<Integer> values, int x, int y, int w, int h, int max, int baseline, int color) {
+        if (values.size() < 2 || w <= 0 || h <= 0) return;
+        List<Integer> sampled = sampleTrend(values);
+        float step = w / (float) (sampled.size() - 1);
+        for (int i = 1; i < sampled.size(); i++) {
+            int x0 = Math.round(x + step * (i - 1));
+            int x1 = Math.round(x + step * i);
+            int y0 = Math.round(sparkY(sampled.get(i - 1), y, h, max));
+            int y1 = Math.round(sparkY(sampled.get(i), y, h, max));
+            int top = Math.min(y0, y1);
+            if (baseline > top) g.fill(x0, top, Math.max(x0 + 1, x1), baseline, color);
+        }
+    }
+
+    private List<Integer> sampleTrend(List<Integer> values) {
+        int maxPoints = 32;
+        if (values.size() <= maxPoints) return values;
+        List<Integer> sampled = new ArrayList<>(maxPoints);
+        for (int i = 0; i < maxPoints; i++) {
+            int index = Math.round(i * (values.size() - 1) / (float) (maxPoints - 1));
+            sampled.add(values.get(index));
+        }
+        return sampled;
     }
 
     private float sparkY(int value, int y, int h, int max) {
@@ -396,7 +434,7 @@ public class ProductionStatsPage extends Page {
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
         if (button != 0) return false;
-        if (Theme.inside(mx, my, groupButtonX(), groupButtonY(), groupButtonWidth(), 18)) {
+        if (Theme.inside(mx, my, groupButtonX(), groupButtonY(), groupButtonWidth(), 16)) {
             groupDropdownOpen = !groupDropdownOpen;
             searchFocused = false;
             return true;
@@ -414,23 +452,23 @@ public class ProductionStatsPage extends Page {
         int searchRight = searchRightX();
         if (searchRight - searchX >= 66) {
             int searchW = Math.min(132, searchRight - searchX);
-            if (Theme.inside(mx, my, searchX, toolbarY + 1, searchW, 18)) {
+            if (Theme.inside(mx, my, searchX, toolbarY, searchW, 16)) {
                 searchFocused = true;
                 return true;
             }
         }
         searchFocused = false;
-        if (Theme.inside(mx, my, rangeX, toolbarY + 1, 62, 17)) {
+        if (Theme.inside(mx, my, rangeX, toolbarY, 62, 16)) {
             rangeIndex = (rangeIndex + 1) % RANGES.length;
             rowScroll = 0;
             return true;
         }
-        if (showSortControl() && Theme.inside(mx, my, sortX, toolbarY + 1, 62, 17)) {
+        if (showSortControl() && Theme.inside(mx, my, sortX, toolbarY, 62, 16)) {
             sortMode = (sortMode + 1) % SORT_LABELS.length;
             rowScroll = 0;
             return true;
         }
-        if (showHideZeroControl() && Theme.inside(mx, my, zeroX, toolbarY + 1, 56, 17)) {
+        if (showHideZeroControl() && Theme.inside(mx, my, zeroX, toolbarY, 56, 16)) {
             hideZero = !hideZero;
             rowScroll = 0;
             return true;
@@ -439,7 +477,7 @@ public class ProductionStatsPage extends Page {
     }
 
     private boolean handleGroupDropdownClick(double mx, double my) {
-        if (Theme.inside(mx, my, groupButtonX(), groupButtonY(), groupButtonWidth(), 18)) {
+        if (Theme.inside(mx, my, groupButtonX(), groupButtonY(), groupButtonWidth(), 16)) {
             groupDropdownOpen = false;
             return true;
         }
@@ -546,7 +584,7 @@ public class ProductionStatsPage extends Page {
         }
         if (Theme.inside(mx, my, x, y, w, h)) {
             List<ClientProductionStatsCache.ProductionRow> rows = filteredRows();
-            int listY = y + TOOLBAR_H + 6 + HEADER_H + 6;
+            int listY = y + TOOLBAR_H + 4 + HEADER_H + 4;
             int maxRows = Math.max(1, (h - (listY - y) - 8) / (ROW_H + ROW_GAP));
             rowScroll = clamp(rowScroll - (int) Math.signum(sy), 0, Math.max(0, rows.size() - maxRows));
             return true;
@@ -683,7 +721,7 @@ public class ProductionStatsPage extends Page {
     }
 
     private int groupButtonY() {
-        return y + 8;
+        return y + 5;
     }
 
     private int groupButtonWidth() {
@@ -700,7 +738,7 @@ public class ProductionStatsPage extends Page {
     }
 
     private int groupPopupY() {
-        return y + 31;
+        return y + 28;
     }
 
     private int groupPopupW() {
@@ -759,7 +797,23 @@ public class ProductionStatsPage extends Page {
     }
 
     private int statColumnWidth(int totalW) {
-        return clamp(Math.round(totalW * 0.22f), totalW < 380 ? 92 : 112, 140);
+        return clamp(Math.round(totalW * 0.24f), totalW < 380 ? 96 : 116, 150);
+    }
+
+    private void textScaled(GuiGraphics g, String text, int x, int y, int color, float scale) {
+        g.pose().pushPose();
+        g.pose().translate(x, y, 0);
+        g.pose().scale(scale, scale, 1f);
+        Theme.text(g, font, text, 0, 0, color);
+        g.pose().popPose();
+    }
+
+    private void textRightScaled(GuiGraphics g, String text, int rightX, int y, int color, float scale) {
+        g.pose().pushPose();
+        g.pose().translate(rightX, y, 0);
+        g.pose().scale(scale, scale, 1f);
+        Theme.textRight(g, font, text, 0, 0, color);
+        g.pose().popPose();
     }
 
     private void chip(GuiGraphics g, int x, int y, int w, int h, String label, int fill, int color) {
@@ -795,7 +849,7 @@ public class ProductionStatsPage extends Page {
     }
 
     private String formatRate(int value, boolean fluid) {
-        return value + (fluid ? "mB/分" : "/分");
+        return formatCompact(value) + (fluid ? "mB/分" : "/分");
     }
 
     private String signedRate(int value, boolean fluid) {
@@ -803,9 +857,27 @@ public class ProductionStatsPage extends Page {
     }
 
     private String formatCount(int value) {
-        if (value >= 1000000) return (value / 1000000) + "m";
-        if (value >= 10000) return (value / 1000) + "k";
-        return String.valueOf(value);
+        return formatCompact(value);
+    }
+
+    private String formatCompact(int value) {
+        long abs = Math.abs((long) value);
+        int suffixIndex = 0;
+        double scaled = abs;
+        while (scaled >= 1000.0 && suffixIndex < COMPACT_SUFFIXES.length - 1) {
+            scaled /= 1000.0;
+            suffixIndex++;
+        }
+        if (suffixIndex == 0) return String.valueOf(value);
+
+        String sign = value < 0 ? "-" : "";
+        String number;
+        if (scaled >= 100.0 || Math.abs(scaled - Math.rint(scaled)) < 0.0001) {
+            number = String.format(Locale.ROOT, "%.0f", scaled);
+        } else {
+            number = String.format(Locale.ROOT, "%.1f", scaled);
+        }
+        return sign + number + COMPACT_SUFFIXES[suffixIndex];
     }
 
     private static int clamp(int value, int min, int max) {

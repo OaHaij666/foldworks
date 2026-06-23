@@ -1,6 +1,5 @@
 package com.pockethomestead.transfer;
 
-import com.pockethomestead.registry.ChestRegistryManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -58,26 +57,26 @@ public class TransferGraph {
         if (pages.isEmpty()) ensureDefaultPage();
     }
 
-    public TransferNode findNode(String chestId, String dimensionKey, BlockPos pos, ChestRegistryManager.ChestType type) {
-        for (TransferNode node : nodes.values()) if (node.matches(chestId, dimensionKey, pos, type)) return node;
+    public TransferNode findNode(String chestId, String dimensionKey, BlockPos pos) {
+        for (TransferNode node : nodes.values()) if (node.matches(chestId, dimensionKey, pos)) return node;
         return null;
     }
 
-    public TransferNode addNode(String pageId, ChestRegistryManager.ChestType type, String chestId, String dimensionKey, BlockPos pos, int x, int y) {
+    public TransferNode addNode(String pageId, String chestId, String dimensionKey, BlockPos pos, int x, int y) {
         if (!pages.containsKey(pageId)) pageId = ensureDefaultPage().getId();
-        TransferNode existing = findNode(chestId, dimensionKey, pos, type);
+        TransferNode existing = findNode(chestId, dimensionKey, pos);
         if (existing != null) {
             existing.setPageId(pageId);
             existing.setPosition(x, y);
             return existing;
         }
-        TransferNode node = new TransferNode(UUID.randomUUID().toString(), pageId, type, chestId, dimensionKey, pos, x, y, false, true, List.of());
+        TransferNode node = new TransferNode(UUID.randomUUID().toString(), pageId, TransferNode.NodeType.CHEST, chestId, dimensionKey, pos, x, y, false, true, List.of());
         nodes.put(node.getId(), node);
         return node;
     }
 
-    public TransferNode addNode(ChestRegistryManager.ChestType type, String chestId, String dimensionKey, BlockPos pos, int x, int y) {
-        return addNode(DEFAULT_PAGE_ID, type, chestId, dimensionKey, pos, x, y);
+    public TransferNode addNode(String chestId, String dimensionKey, BlockPos pos, int x, int y) {
+        return addNode(DEFAULT_PAGE_ID, chestId, dimensionKey, pos, x, y);
     }
 
     public TransferNode addRerouteNode(String pageId, int x, int y) {
@@ -126,7 +125,9 @@ public class TransferGraph {
         TransferNode node = nodes.get(nodeId);
         if (node == null) return;
         node.removeFilterItem(itemId);
-        String port = TransferEdge.itemPort(itemId);
+        String port = itemId != null && itemId.startsWith(TransferEdge.FLUID_PREFIX)
+                ? itemId
+                : TransferEdge.itemPort(itemId);
         edges.values().removeIf(edge -> edge.getFromNodeId().equals(nodeId) && edge.getFromPortKey().equals(port));
     }
 
@@ -181,12 +182,14 @@ public class TransferGraph {
         ListTag nodeList = tag.getList("Nodes", Tag.TAG_COMPOUND);
         for (int i = 0; i < nodeList.size(); i++) {
             TransferNode node = TransferNode.load(nodeList.getCompound(i), defaultPage);
-            graph.nodes.put(node.getId(), node);
+            if (node != null) graph.nodes.put(node.getId(), node);
         }
         ListTag edgeList = tag.getList("Edges", Tag.TAG_COMPOUND);
         for (int i = 0; i < edgeList.size(); i++) {
             TransferEdge edge = TransferEdge.load(edgeList.getCompound(i), defaultPage);
-            graph.edges.put(edge.getId(), edge);
+            if (graph.nodes.containsKey(edge.getFromNodeId()) && graph.nodes.containsKey(edge.getToNodeId())) {
+                graph.edges.put(edge.getId(), edge);
+            }
         }
         return graph;
     }

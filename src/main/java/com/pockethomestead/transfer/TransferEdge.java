@@ -14,11 +14,20 @@ import java.util.List;
 import java.util.Map;
 
 public class TransferEdge {
-    public static final String PORT_ALL = "ALL";
-    public static final String PORT_IN = "IN";
     public static final String ITEM_PREFIX = "ITEM:";
+    public static final String ITEM_ALL = ITEM_PREFIX + "*";
     public static final String FLUID_PREFIX = "FLUID:";
     public static final String FLUID_ALL = FLUID_PREFIX + "*";
+    public static final String ENERGY_PREFIX = "ENERGY:";
+    public static final String ENERGY_FE = ENERGY_PREFIX + "FE";
+    public static final String STRESS_PREFIX = "STRESS:";
+    public static final String STRESS_SU = STRESS_PREFIX + "SU";
+    public static final String PORT_ALL = ITEM_ALL;
+    public static final String PORT_IN = "IN";
+    public static final String ITEM_IN = ITEM_PREFIX + "IN";
+    public static final String FLUID_IN = FLUID_PREFIX + "IN";
+    public static final String ENERGY_IN = ENERGY_PREFIX + "IN";
+    public static final String STRESS_IN = STRESS_PREFIX + "IN";
 
     public record ItemRateSnapshot(String itemId, boolean rateLimitEnabled, int rateLimitSeconds, int rateLimitItems,
                                    String health, int actualRatePerMinute, boolean configured) {}
@@ -223,12 +232,31 @@ public class TransferEdge {
     public boolean isAllPort() { return PORT_ALL.equals(fromPortKey); }
     public boolean isItemPort() { return fromPortKey.startsWith(ITEM_PREFIX); }
     public boolean isFluidPort() { return fromPortKey.startsWith(FLUID_PREFIX); }
+    public boolean isEnergyPort() { return fromPortKey.startsWith(ENERGY_PREFIX); }
+    public boolean isStressPort() { return fromPortKey.startsWith(STRESS_PREFIX); }
     public String itemId() { return isItemPort() ? fromPortKey.substring(ITEM_PREFIX.length()) : ""; }
     public String fluidId() { return isFluidPort() ? fromPortKey.substring(FLUID_PREFIX.length()) : ""; }
     public String resourceId() { return isItemPort() || isFluidPort() ? fromPortKey : ""; }
 
     public static String itemPort(String itemId) { return ITEM_PREFIX + itemId; }
     public static String fluidPort(String fluidId) { return FLUID_PREFIX + fluidId; }
+    public static String inputPortFor(String outputPort) {
+        if (outputPort == null) return ITEM_IN;
+        if (outputPort.startsWith(FLUID_PREFIX)) return FLUID_IN;
+        if (outputPort.startsWith(ENERGY_PREFIX)) return ENERGY_IN;
+        if (outputPort.startsWith(STRESS_PREFIX)) return STRESS_IN;
+        return ITEM_IN;
+    }
+
+    public static boolean sameResourceKind(String outputPort, String inputPort) {
+        if (inputPort == null || inputPort.isBlank() || PORT_IN.equals(inputPort)) return true;
+        if (outputPort == null) return false;
+        if (outputPort.startsWith(ITEM_PREFIX)) return ITEM_IN.equals(inputPort);
+        if (outputPort.startsWith(FLUID_PREFIX)) return FLUID_IN.equals(inputPort);
+        if (outputPort.startsWith(ENERGY_PREFIX)) return ENERGY_IN.equals(inputPort);
+        if (outputPort.startsWith(STRESS_PREFIX)) return STRESS_IN.equals(inputPort);
+        return false;
+    }
 
     public static int clampRate(int rate) {
         return Math.max(1, Math.min(100000, rate));

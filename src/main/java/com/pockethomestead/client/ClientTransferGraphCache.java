@@ -9,23 +9,20 @@ public class ClientTransferGraphCache {
     private static List<TransferGraphSyncPacket.PageData> pages = List.of();
     private static List<TransferGraphSyncPacket.NodeData> nodes = List.of();
     private static List<TransferGraphSyncPacket.EdgeData> edges = List.of();
-    private static List<TransferGraphSyncPacket.ChestData> supplyChests = List.of();
-    private static List<TransferGraphSyncPacket.ChestData> pickupChests = List.of();
+    private static List<TransferGraphSyncPacket.ChestData> chests = List.of();
     private static List<com.pockethomestead.network.TransferGraphValidationPacket.IssueData> validationIssues = List.of();
 
     public static void update(TransferGraphSyncPacket packet) {
         pages = List.copyOf(packet.pages());
         nodes = List.copyOf(packet.nodes());
         edges = List.copyOf(packet.edges());
-        supplyChests = List.copyOf(packet.supplyChests());
-        pickupChests = List.copyOf(packet.pickupChests());
+        chests = List.copyOf(packet.chests());
     }
 
     public static List<TransferGraphSyncPacket.PageData> pages() { return pages; }
     public static List<TransferGraphSyncPacket.NodeData> nodes() { return nodes; }
     public static List<TransferGraphSyncPacket.EdgeData> edges() { return edges; }
-    public static List<TransferGraphSyncPacket.ChestData> supplyChests() { return supplyChests; }
-    public static List<TransferGraphSyncPacket.ChestData> pickupChests() { return pickupChests; }
+    public static List<TransferGraphSyncPacket.ChestData> chests() { return chests; }
     public static List<com.pockethomestead.network.TransferGraphValidationPacket.IssueData> validationIssues() { return validationIssues; }
 
     public static void updateValidation(List<com.pockethomestead.network.TransferGraphValidationPacket.IssueData> issues) {

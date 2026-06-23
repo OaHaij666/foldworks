@@ -39,13 +39,49 @@ public class ModConfig {
 
     // ── 箱子传输配置 ──────────────────────────────────────────────────────────
 
-    public static final ModConfigSpec.IntValue MAX_CHEST_CAPACITY = BUILDER
-            .comment("箱子最大容量（总方块数，所有物品合计）")
-            .defineInRange("maxChestCapacity", 4096, 27, 100000);
+    public static final ModConfigSpec.IntValue BASE_CHEST_CAPACITY = BUILDER
+            .comment("箱子基础物品容量（总方块数，所有物品合计）")
+            .defineInRange("baseChestCapacity", 256, 1, 100000000);
 
-    public static final ModConfigSpec.IntValue MAX_CHEST_FLUID_CAPACITY_MB = BUILDER
-            .comment("箱子最大流体容量（mB，1000mB=1桶）")
-            .defineInRange("maxChestFluidCapacityMb", 16000, 1000, 1000000);
+    public static final ModConfigSpec.IntValue STORAGE_UPGRADE_CAPACITY = BUILDER
+            .comment("每个存储升级增加的物品容量")
+            .defineInRange("storageUpgradeCapacity", 64, 0, 100000000);
+
+    public static final ModConfigSpec.IntValue BASE_CHEST_FLUID_TYPES = BUILDER
+            .comment("箱子基础可存储的流体种类数量")
+            .defineInRange("baseChestFluidTypes", 1, 0, 1000000);
+
+    public static final ModConfigSpec.IntValue FLUID_UPGRADE_TYPES = BUILDER
+            .comment("每个流体升级增加的流体种类数量")
+            .defineInRange("fluidUpgradeTypes", 1, 0, 1000000);
+
+    public static final ModConfigSpec.IntValue BASE_CHEST_FLUID_CAPACITY_MB = BUILDER
+            .comment("箱子基础每种流体容量（mB，1000mB=1桶）")
+            .defineInRange("baseChestFluidCapacityMb", 16000, 0, 100000000);
+
+    public static final ModConfigSpec.IntValue FLUID_UPGRADE_CAPACITY_MB = BUILDER
+            .comment("每个流体升级增加的每种流体容量（mB，1000mB=1桶）")
+            .defineInRange("fluidUpgradeCapacityMb", 16000, 0, 100000000);
+
+    public static final ModConfigSpec.IntValue BASE_CHEST_ENERGY_CAPACITY_FE = BUILDER
+            .comment("箱子基础电力容量（FE）。只有安装电力传输升级后生效")
+            .defineInRange("baseChestEnergyCapacityFe", 100000, 0, 1000000000);
+
+    public static final ModConfigSpec.IntValue ENERGY_UPGRADE_CAPACITY_FE = BUILDER
+            .comment("每个电力传输升级增加的电力容量（FE）")
+            .defineInRange("energyUpgradeCapacityFe", 100000, 0, 1000000000);
+
+    public static final ModConfigSpec.IntValue BASE_CHEST_ENERGY_TRANSFER_FE = BUILDER
+            .comment("箱子基础单次电力收发上限（FE）")
+            .defineInRange("baseChestEnergyTransferFe", 4096, 0, 1000000000);
+
+    public static final ModConfigSpec.IntValue ENERGY_UPGRADE_TRANSFER_FE = BUILDER
+            .comment("每个电力传输升级增加的单次电力收发上限（FE）")
+            .defineInRange("energyUpgradeTransferFe", 4096, 0, 1000000000);
+
+    public static final ModConfigSpec.IntValue STRESS_UPGRADE_CAPACITY_SU = BUILDER
+            .comment("每个应力升级可传递的 Create 应力上限（SU）")
+            .defineInRange("stressUpgradeCapacitySu", 256, 0, 100000000);
 
     public static final ModConfigSpec.BooleanValue GLOBAL_VOID_MODE = BUILDER
             .comment("全局虚空模式开关（服务器默认值，玩家可在箱子UI中单独开关）")
@@ -54,10 +90,6 @@ public class ModConfig {
     public static final ModConfigSpec.IntValue TRANSFER_TICK_INTERVAL = BUILDER
             .comment("物品传输间隔（tick），20=每秒一次，值越小传输越频繁但服务器开销越大")
             .defineInRange("transferTickInterval", 20, 1, 1200);
-
-    public static final ModConfigSpec.IntValue SYNC_INTERVAL_SECONDS = BUILDER
-            .comment("同步时间（秒）：供货箱每隔该时长将物品传输到绑定的取货箱一次。默认30秒。")
-            .defineInRange("syncIntervalSeconds", 30, 1, 3600);
 
     public static final ModConfigSpec.BooleanValue VOID_ENABLED = BUILDER
             .comment("是否启用虚空产出（关闭时箱子UI中的虚空按钮置灰不可用，传输只在实际目标箱子存在时进行）")

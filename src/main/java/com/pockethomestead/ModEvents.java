@@ -20,6 +20,7 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
 import com.pockethomestead.registration.ModBlockEntities;
+import com.pockethomestead.blockentity.HomesteadChestAccess;
 
 @EventBusSubscriber(modid = PocketHomestead.MODID)
 public class ModEvents {
@@ -28,23 +29,27 @@ public class ModEvents {
     public static void registerCapabilities(RegisterCapabilitiesEvent event) {
         event.registerBlockEntity(
                 Capabilities.ItemHandler.BLOCK,
-                ModBlockEntities.SUPPLY_CHEST.get(),
-                (be, context) -> be.getItemHandler(context)
-        );
-        event.registerBlockEntity(
-                Capabilities.ItemHandler.BLOCK,
-                ModBlockEntities.PICKUP_CHEST.get(),
-                (be, context) -> be.getItemHandler(context)
-        );
-        event.registerBlockEntity(
-                Capabilities.FluidHandler.BLOCK,
-                ModBlockEntities.SUPPLY_CHEST.get(),
-                (be, context) -> be.getFluidHandler(context)
+                ModBlockEntities.HOMESTEAD_CHEST.get(),
+                (be, context) -> {
+                    var chest = HomesteadChestAccess.resolve(be);
+                    return chest == null ? null : chest.getItemHandler(context);
+                }
         );
         event.registerBlockEntity(
                 Capabilities.FluidHandler.BLOCK,
-                ModBlockEntities.PICKUP_CHEST.get(),
-                (be, context) -> be.getFluidHandler(context)
+                ModBlockEntities.HOMESTEAD_CHEST.get(),
+                (be, context) -> {
+                    var chest = HomesteadChestAccess.resolve(be);
+                    return chest == null ? null : chest.getFluidHandler(context);
+                }
+        );
+        event.registerBlockEntity(
+                Capabilities.EnergyStorage.BLOCK,
+                ModBlockEntities.HOMESTEAD_CHEST.get(),
+                (be, context) -> {
+                    var chest = HomesteadChestAccess.resolve(be);
+                    return chest == null ? null : chest.getEnergyHandler(context);
+                }
         );
     }
 

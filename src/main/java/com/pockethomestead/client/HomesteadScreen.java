@@ -19,8 +19,8 @@ public class HomesteadScreen extends Screen {
     private static final int NAV_WIDTH_MIN = 40;
     private static final int NAV_WIDTH_MAX = 48;
     private static final int NAV_ITEM_SIZE = 30;
-    private static final int NAV_ITEM_GAP = 5;
-    private static final int NAV_TOP_PAD = 10;
+    private static final int NAV_ITEM_GAP = 4;
+    private static final int NAV_TOP_PAD = 6;
 
     // 跨开启持久化的状态
     private static String lastPageId = "manage";
@@ -71,7 +71,7 @@ public class HomesteadScreen extends Screen {
         panelX = (width - panelW) / 2;
         panelY = (height - panelH) / 2;
 
-        headerH = 34;
+        headerH = 26;
         sidebarW = clamp(Math.round(panelW * 0.045f), NAV_WIDTH_MIN, NAV_WIDTH_MAX);
 
         contentX = panelX + sidebarW + 1;

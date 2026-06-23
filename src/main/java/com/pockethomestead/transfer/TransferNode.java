@@ -1,6 +1,5 @@
 package com.pockethomestead.transfer;
 
-import com.pockethomestead.registry.ChestRegistryManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -17,18 +16,9 @@ public class TransferNode {
     public record FlowSnapshot(String itemId, int inputRatePerMinute, int outputRatePerMinute, long inputTotal, long outputTotal) {}
 
     public enum NodeType {
-        SUPPLY,
-        PICKUP,
+        CHEST,
         REROUTE,
         TRASH;
-
-        public static NodeType fromChestType(ChestRegistryManager.ChestType type) {
-            return type == ChestRegistryManager.ChestType.SUPPLY ? SUPPLY : PICKUP;
-        }
-
-        public ChestRegistryManager.ChestType toChestType() {
-            return this == SUPPLY ? ChestRegistryManager.ChestType.SUPPLY : this == PICKUP ? ChestRegistryManager.ChestType.PICKUP : null;
-        }
 
         public boolean isVirtual() {
             return this == REROUTE || this == TRASH;
@@ -48,14 +38,10 @@ public class TransferNode {
     private final List<String> filterItemIds = new ArrayList<>();
     private transient final Map<String, FlowStats> flowStats = new LinkedHashMap<>();
 
-    public TransferNode(String id, String pageId, ChestRegistryManager.ChestType type, String chestId, String dimensionKey, BlockPos pos, int x, int y, boolean expanded, boolean enabled, List<String> filterItemIds) {
-        this(id, pageId, NodeType.fromChestType(type), chestId, dimensionKey, pos, x, y, expanded, enabled, filterItemIds);
-    }
-
     public TransferNode(String id, String pageId, NodeType type, String chestId, String dimensionKey, BlockPos pos, int x, int y, boolean expanded, boolean enabled, List<String> filterItemIds) {
         this.id = id;
         this.pageId = pageId;
-        this.type = type;
+        this.type = type == null ? NodeType.CHEST : type;
         this.chestId = chestId == null ? "" : chestId;
         this.dimensionKey = dimensionKey == null ? "" : dimensionKey;
         this.pos = pos == null ? BlockPos.ZERO : pos;
@@ -71,7 +57,6 @@ public class TransferNode {
     public String getId() { return id; }
     public String getPageId() { return pageId; }
     public NodeType getNodeType() { return type; }
-    public ChestRegistryManager.ChestType getType() { return type.toChestType(); }
     public String getChestId() { return chestId; }
     public String getDimensionKey() { return dimensionKey; }
     public BlockPos getPos() { return pos; }
@@ -128,8 +113,8 @@ public class TransferNode {
         }
     }
 
-    public boolean matches(String chestId, String dimensionKey, BlockPos pos, ChestRegistryManager.ChestType type) {
-        return this.type.toChestType() == type && this.chestId.equals(chestId) && this.dimensionKey.equals(dimensionKey) && this.pos.equals(pos);
+    public boolean matches(String chestId, String dimensionKey, BlockPos pos) {
+        return this.type == NodeType.CHEST && this.chestId.equals(chestId) && this.dimensionKey.equals(dimensionKey) && this.pos.equals(pos);
     }
 
     public CompoundTag save() {
@@ -165,8 +150,14 @@ public class TransferNode {
     }
 
     public static TransferNode load(CompoundTag tag, String defaultPageId) {
+        String typeName = tag.getString("Type");
+        if ("SUPPLY".equals(typeName) || "PICKUP".equals(typeName)) return null;
         NodeType type;
-        try { type = NodeType.valueOf(tag.getString("Type")); } catch (Exception e) { type = NodeType.SUPPLY; }
+        try {
+            type = NodeType.valueOf(typeName);
+        } catch (Exception e) {
+            type = NodeType.CHEST;
+        }
         List<String> filters = new ArrayList<>();
         ListTag filterList = tag.getList("FilterItems", Tag.TAG_COMPOUND);
         for (int i = 0; i < filterList.size(); i++) filters.add(filterList.getCompound(i).getString("Id"));

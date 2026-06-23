@@ -1,7 +1,9 @@
-package com.pockethomestead.block;
+package com.pockethomestead.compat.create;
 
+import com.mojang.serialization.MapCodec;
 import com.pockethomestead.blockentity.BaseChestBlockEntity;
 import com.pockethomestead.blockentity.HomesteadChestAccess;
+import com.simibubi.create.content.kinetics.base.KineticBlock;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionResult;
@@ -12,42 +14,40 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.BaseEntityBlock;
+import net.minecraft.world.level.LevelReader;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityTicker;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.storage.loot.LootParams;
-import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.DirectionProperty;
 import net.minecraft.world.level.block.state.properties.EnumProperty;
+import net.minecraft.world.level.storage.loot.LootParams;
+import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
 import net.minecraft.world.phys.BlockHitResult;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
 
-/**
- * 口袋家园方块基类 - 提取4个方块类的共同逻辑：
- * - 渲染形状为 MODEL
- * - 右键打开菜单
- * - 支持红石比较器输出
- * - 水平朝向（facing属性）
- *
- * 子类只需实现 codec() 和 newBlockEntity()
- */
-public abstract class AbstractHomesteadBlock extends BaseEntityBlock {
+public class CreateHomesteadChestBlock extends KineticBlock implements EntityBlock {
     public static final DirectionProperty FACING = BlockStateProperties.HORIZONTAL_FACING;
     public static final EnumProperty<Direction.Axis> STRESS_AXIS = BlockStateProperties.AXIS;
+    public static final MapCodec<CreateHomesteadChestBlock> CODEC = simpleCodec(CreateHomesteadChestBlock::new);
 
-    protected AbstractHomesteadBlock(Properties properties) {
+    public CreateHomesteadChestBlock(Properties properties) {
         super(properties);
-        this.registerDefaultState(this.stateDefinition.any()
+        registerDefaultState(stateDefinition.any()
                 .setValue(FACING, Direction.NORTH)
                 .setValue(STRESS_AXIS, Direction.Axis.Z));
+    }
+
+    @Override
+    protected MapCodec<? extends Block> codec() {
+        return CODEC;
     }
 
     @Override
@@ -58,7 +58,7 @@ public abstract class AbstractHomesteadBlock extends BaseEntityBlock {
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {
         Direction front = context.getHorizontalDirection().getOpposite();
-        return this.defaultBlockState()
+        return defaultBlockState()
                 .setValue(FACING, front)
                 .setValue(STRESS_AXIS, front.getAxis());
     }
@@ -72,9 +72,7 @@ public abstract class AbstractHomesteadBlock extends BaseEntityBlock {
     protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
         if (!level.isClientSide) {
             BlockEntity be = level.getBlockEntity(pos);
-            if (be instanceof MenuProvider) {
-                player.openMenu((MenuProvider) be, pos);
-            }
+            if (be instanceof MenuProvider provider) player.openMenu(provider, pos);
         }
         return InteractionResult.SUCCESS;
     }
@@ -86,24 +84,20 @@ public abstract class AbstractHomesteadBlock extends BaseEntityBlock {
 
     @Override
     protected int getAnalogOutputSignal(BlockState state, Level level, BlockPos pos) {
-        return AbstractContainerMenu.getRedstoneSignalFromBlockEntity(level.getBlockEntity(pos));
+        BaseChestBlockEntity chest = HomesteadChestAccess.resolve(level.getBlockEntity(pos));
+        return chest == null ? 0 : AbstractContainerMenu.getRedstoneSignalFromBlockEntity(chest);
     }
 
-    /**
-     * 放置时自动设置所有者UUID并生成默认箱子ID
-     */
     @Override
     public void setPlacedBy(Level level, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack stack) {
         if (placer instanceof Player player && !level.isClientSide) {
-            BlockEntity be = level.getBlockEntity(pos);
-            BaseChestBlockEntity chest = HomesteadChestAccess.resolve(be);
+            BaseChestBlockEntity chest = HomesteadChestAccess.resolve(level.getBlockEntity(pos));
             if (chest != null) {
                 if (chest.getOwnerUUID() == null || chest.getChestId().isEmpty()) {
                     chest.setOwnerUUID(player.getUUID());
                     String autoId = com.pockethomestead.registry.ChestRegistryManager.getInstance().generateNextChestId(player.getUUID());
                     chest.setChestId(autoId);
                 }
-                // onLoad 早于 setPlacedBy，此时 owner/id 才就绪，需在此补注册
                 chest.registerIfReady();
             }
         }
@@ -112,8 +106,7 @@ public abstract class AbstractHomesteadBlock extends BaseEntityBlock {
 
     @Override
     protected List<ItemStack> getDrops(BlockState state, LootParams.Builder params) {
-        BlockEntity blockEntity = params.getOptionalParameter(LootContextParams.BLOCK_ENTITY);
-        BaseChestBlockEntity chest = HomesteadChestAccess.resolve(blockEntity);
+        BaseChestBlockEntity chest = HomesteadChestAccess.resolve(params.getOptionalParameter(LootContextParams.BLOCK_ENTITY));
         if (chest != null) {
             ItemStack packed = new ItemStack(asItem());
             chest.saveToItem(packed, params.getLevel().registryAccess());
@@ -122,14 +115,29 @@ public abstract class AbstractHomesteadBlock extends BaseEntityBlock {
         return super.getDrops(state, params);
     }
 
-    /**
-     * 为箱子BlockEntity提供ticker，驱动物品传输逻辑
-     */
+    @Override
+    public boolean hasShaftTowards(LevelReader level, BlockPos pos, BlockState state, Direction face) {
+        if (face.getAxis() != state.getValue(STRESS_AXIS)) return false;
+        BaseChestBlockEntity chest = HomesteadChestAccess.resolve(level.getBlockEntity(pos));
+        return chest != null && (chest.canStressInput(face) || chest.canStressOutput(face));
+    }
+
+    @Override
+    public Direction.Axis getRotationAxis(BlockState state) {
+        return state.getValue(STRESS_AXIS);
+    }
+
+    @Override
+    public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
+        return new CreateHomesteadChestBlockEntity(pos, state);
+    }
+
     @SuppressWarnings("unchecked")
     @Override
     @Nullable
     public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) {
-        if (level.isClientSide) return null;
-        return (BlockEntityTicker<T>) (BlockEntityTicker<BaseChestBlockEntity>) BaseChestBlockEntity::serverTick;
+        return (tickerLevel, tickerPos, tickerState, blockEntity) -> {
+            if (blockEntity instanceof CreateHomesteadChestBlockEntity chest) chest.tick();
+        };
     }
 }

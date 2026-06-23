@@ -18,7 +18,11 @@ public class ModCreativeTabs {
                     .icon(() -> new ItemStack(ModItems.HOMESTEAD_TABLET.get()))
                     .displayItems((parameters, output) -> {
                         output.accept(ModItems.HOMESTEAD_TABLET.get());
-                        output.accept(ModItems.SUPPLY_CHEST_ITEM.get());
-                        output.accept(ModItems.PICKUP_CHEST_ITEM.get());
+                        output.accept(ModItems.HOMESTEAD_CHEST_ITEM.get());
+                        output.accept(ModItems.STORAGE_UPGRADE.get());
+                        output.accept(ModItems.FLUID_UPGRADE.get());
+                        output.accept(ModItems.NETWORK_UPGRADE.get());
+                        output.accept(ModItems.ENERGY_TRANSFER_UPGRADE.get());
+                        output.accept(ModItems.STRESS_UPGRADE.get());
                     }).build());
 }

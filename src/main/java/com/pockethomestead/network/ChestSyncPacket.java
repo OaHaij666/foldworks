@@ -1,9 +1,8 @@
 package com.pockethomestead.network;
 
-import io.netty.buffer.ByteBuf;
 import net.minecraft.client.Minecraft;
-import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
@@ -16,29 +15,30 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * 服务端→客户端：同步箱子完整配置 + 物品快照（itemId → count）
- * 物品快照用于客户端纯渲染箱子区（1物品=1格，真实数量）。
- * maxCapacity / nextTransferSeconds / syncIntervalSeconds 由服务端权威下发，
- * 避免客户端 config 状态不一致。
- */
 public record ChestSyncPacket(
     String chestId,
-    String boundTargetId,
     boolean transferEnabled,
     boolean voidModeEnabled,
     int transferRateLimit,
-    int syncIntervalSeconds,
     int nextTransferSeconds,
     int maxCapacity,
     int maxFluidCapacityMb,
+    int maxFluidTypes,
+    int maxFluidCapacityPerTypeMb,
+    int energyStored,
+    int maxEnergyStored,
+    int energyTransferLimit,
+    boolean stressUpgradeInstalled,
+    boolean createLoaded,
     boolean productionStatsEnabled,
     String productionGroupId,
-    List<String> availableBindings,
+    List<Integer> upgradeCounts,
+    List<SideConfigEntry> sideConfig,
     List<ItemEntry> items,
     Map<String, Integer> fluids
 ) implements CustomPacketPayload {
     public record ItemEntry(ItemStack stack, int count) {}
+    public record SideConfigEntry(String kind, String side, String mode) {}
 
     public static final Type<ChestSyncPacket> TYPE = new Type<>(
         ResourceLocation.fromNamespaceAndPath("pockethomestead", "chest_sync"));
@@ -47,21 +47,34 @@ public record ChestSyncPacket(
         @Override
         public ChestSyncPacket decode(RegistryFriendlyByteBuf buf) {
             String chestId = ByteBufCodecs.STRING_UTF8.decode(buf);
-            String boundTargetId = ByteBufCodecs.STRING_UTF8.decode(buf);
             boolean transferEnabled = buf.readBoolean();
             boolean voidModeEnabled = buf.readBoolean();
             int transferRateLimit = ByteBufCodecs.VAR_INT.decode(buf);
-            int syncIntervalSeconds = ByteBufCodecs.VAR_INT.decode(buf);
             int nextTransferSeconds = ByteBufCodecs.VAR_INT.decode(buf);
             int maxCapacity = ByteBufCodecs.VAR_INT.decode(buf);
             int maxFluidCapacityMb = ByteBufCodecs.VAR_INT.decode(buf);
+            int maxFluidTypes = ByteBufCodecs.VAR_INT.decode(buf);
+            int maxFluidCapacityPerTypeMb = ByteBufCodecs.VAR_INT.decode(buf);
+            int energyStored = ByteBufCodecs.VAR_INT.decode(buf);
+            int maxEnergyStored = ByteBufCodecs.VAR_INT.decode(buf);
+            int energyTransferLimit = ByteBufCodecs.VAR_INT.decode(buf);
+            boolean stressUpgradeInstalled = buf.readBoolean();
+            boolean createLoaded = buf.readBoolean();
             boolean productionStatsEnabled = buf.readBoolean();
             String productionGroupId = ByteBufCodecs.STRING_UTF8.decode(buf);
 
-            int bindCount = ByteBufCodecs.VAR_INT.decode(buf);
-            List<String> bindings = new ArrayList<>();
-            for (int i = 0; i < bindCount; i++) {
-                bindings.add(ByteBufCodecs.STRING_UTF8.decode(buf));
+            int upgradeCount = ByteBufCodecs.VAR_INT.decode(buf);
+            List<Integer> upgrades = new ArrayList<>();
+            for (int i = 0; i < upgradeCount; i++) upgrades.add(ByteBufCodecs.VAR_INT.decode(buf));
+
+            int sideCount = ByteBufCodecs.VAR_INT.decode(buf);
+            List<SideConfigEntry> sideConfig = new ArrayList<>();
+            for (int i = 0; i < sideCount; i++) {
+                sideConfig.add(new SideConfigEntry(
+                        ByteBufCodecs.STRING_UTF8.decode(buf),
+                        ByteBufCodecs.STRING_UTF8.decode(buf),
+                        ByteBufCodecs.STRING_UTF8.decode(buf)
+                ));
             }
 
             int itemCount = ByteBufCodecs.VAR_INT.decode(buf);
@@ -75,34 +88,44 @@ public record ChestSyncPacket(
             int fluidCount = ByteBufCodecs.VAR_INT.decode(buf);
             Map<String, Integer> fluids = new LinkedHashMap<>();
             for (int i = 0; i < fluidCount; i++) {
-                String id = ByteBufCodecs.STRING_UTF8.decode(buf);
-                int amount = ByteBufCodecs.VAR_INT.decode(buf);
-                fluids.put(id, amount);
+                fluids.put(ByteBufCodecs.STRING_UTF8.decode(buf), ByteBufCodecs.VAR_INT.decode(buf));
             }
 
-            return new ChestSyncPacket(chestId, boundTargetId, transferEnabled, voidModeEnabled,
-                transferRateLimit, syncIntervalSeconds, nextTransferSeconds, maxCapacity, maxFluidCapacityMb,
-                productionStatsEnabled, productionGroupId,
-                Collections.unmodifiableList(bindings), Collections.unmodifiableList(items), Collections.unmodifiableMap(fluids));
+            return new ChestSyncPacket(chestId, transferEnabled, voidModeEnabled, transferRateLimit, nextTransferSeconds,
+                    maxCapacity, maxFluidCapacityMb, maxFluidTypes, maxFluidCapacityPerTypeMb,
+                    energyStored, maxEnergyStored, energyTransferLimit, stressUpgradeInstalled, createLoaded,
+                    productionStatsEnabled, productionGroupId,
+                    Collections.unmodifiableList(upgrades), Collections.unmodifiableList(sideConfig),
+                    Collections.unmodifiableList(items), Collections.unmodifiableMap(fluids));
         }
 
         @Override
         public void encode(RegistryFriendlyByteBuf buf, ChestSyncPacket pkt) {
             ByteBufCodecs.STRING_UTF8.encode(buf, pkt.chestId);
-            ByteBufCodecs.STRING_UTF8.encode(buf, pkt.boundTargetId);
             buf.writeBoolean(pkt.transferEnabled);
             buf.writeBoolean(pkt.voidModeEnabled);
             ByteBufCodecs.VAR_INT.encode(buf, pkt.transferRateLimit);
-            ByteBufCodecs.VAR_INT.encode(buf, pkt.syncIntervalSeconds);
             ByteBufCodecs.VAR_INT.encode(buf, pkt.nextTransferSeconds);
             ByteBufCodecs.VAR_INT.encode(buf, pkt.maxCapacity);
             ByteBufCodecs.VAR_INT.encode(buf, pkt.maxFluidCapacityMb);
+            ByteBufCodecs.VAR_INT.encode(buf, pkt.maxFluidTypes);
+            ByteBufCodecs.VAR_INT.encode(buf, pkt.maxFluidCapacityPerTypeMb);
+            ByteBufCodecs.VAR_INT.encode(buf, pkt.energyStored);
+            ByteBufCodecs.VAR_INT.encode(buf, pkt.maxEnergyStored);
+            ByteBufCodecs.VAR_INT.encode(buf, pkt.energyTransferLimit);
+            buf.writeBoolean(pkt.stressUpgradeInstalled);
+            buf.writeBoolean(pkt.createLoaded);
             buf.writeBoolean(pkt.productionStatsEnabled);
             ByteBufCodecs.STRING_UTF8.encode(buf, pkt.productionGroupId);
 
-            ByteBufCodecs.VAR_INT.encode(buf, pkt.availableBindings.size());
-            for (String binding : pkt.availableBindings) {
-                ByteBufCodecs.STRING_UTF8.encode(buf, binding);
+            ByteBufCodecs.VAR_INT.encode(buf, pkt.upgradeCounts.size());
+            for (Integer count : pkt.upgradeCounts) ByteBufCodecs.VAR_INT.encode(buf, count == null ? 0 : count);
+
+            ByteBufCodecs.VAR_INT.encode(buf, pkt.sideConfig.size());
+            for (SideConfigEntry entry : pkt.sideConfig) {
+                ByteBufCodecs.STRING_UTF8.encode(buf, entry.kind);
+                ByteBufCodecs.STRING_UTF8.encode(buf, entry.side);
+                ByteBufCodecs.STRING_UTF8.encode(buf, entry.mode);
             }
 
             ByteBufCodecs.VAR_INT.encode(buf, pkt.items.size());
@@ -122,9 +145,6 @@ public record ChestSyncPacket(
     @Override
     public Type<? extends CustomPacketPayload> type() { return TYPE; }
 
-    /**
-     * 客户端处理：将同步数据写入当前打开的箱子Screen缓存
-     */
     public static void handle(ChestSyncPacket packet, IPayloadContext context) {
         context.enqueueWork(() -> {
             Minecraft mc = Minecraft.getInstance();

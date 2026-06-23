@@ -2,18 +2,20 @@
   "itemGroup.pockethomestead": "口袋家园",
 
   "item.pockethomestead.homestead_tablet": "尘歌玉盘",
-  "item.pockethomestead.supply_chest": "供货箱",
-  "item.pockethomestead.pickup_chest": "取货箱",
+  "item.pockethomestead.storage_upgrade": "存储升级",
+  "item.pockethomestead.fluid_upgrade": "流体升级",
+  "item.pockethomestead.network_upgrade": "网络升级",
+  "item.pockethomestead.energy_transfer_upgrade": "电力传输升级",
+  "item.pockethomestead.stress_upgrade": "应力升级",
+  "item.pockethomestead.homestead_chest": "传输箱",
   "item.pockethomestead.portal_block": "入口方块",
   "item.pockethomestead.export_block": "出口方块",
 
-  "block.pockethomestead.supply_chest": "供货箱",
-  "block.pockethomestead.pickup_chest": "取货箱",
+  "block.pockethomestead.homestead_chest": "传输箱",
   "block.pockethomestead.portal_block": "入口方块",
   "block.pockethomestead.export_block": "出口方块",
 
-  "container.pockethomestead.supply_chest": "供货箱",
-  "container.pockethomestead.pickup_chest": "取货箱",
+  "container.pockethomestead.homestead_chest": "传输箱",
   "container.pockethomestead.portal": "入口方块",
   "container.pockethomestead.export": "出口方块",
 
@@ -100,11 +102,12 @@
 
   "pockethomestead.chest.id_label": "ID:",
   "pockethomestead.chest.id_hint": "箱子ID",
-  "pockethomestead.chest.bind_label": "→",
-  "pockethomestead.chest.bind_none": "(无)",
   "pockethomestead.chest.rate_label": "速率:",
   "pockethomestead.chest.transfer_on": "传输:开",
   "pockethomestead.chest.transfer_off": "传输:关",
   "pockethomestead.chest.void_on": "虚空:开",
-  "pockethomestead.chest.void_off": "虚空:关"
+  "pockethomestead.chest.void_off": "虚空:关",
+  "pockethomestead.chest.energy": "电力",
+  "pockethomestead.chest.stress": "应力",
+  "pockethomestead.chest.side_config": "面配置"
 }

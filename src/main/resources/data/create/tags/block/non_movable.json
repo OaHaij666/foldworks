@@ -1,11 +1,7 @@
 {
   "values": [
     {
-      "id": "pockethomestead:supply_chest",
-      "required": false
-    },
-    {
-      "id": "pockethomestead:pickup_chest",
+      "id": "pockethomestead:homestead_chest",
       "required": false
     }
   ]

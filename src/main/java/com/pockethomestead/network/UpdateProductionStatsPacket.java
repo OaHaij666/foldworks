@@ -65,7 +65,7 @@ public record UpdateProductionStatsPacket(String action, List<String> values) im
                 BaseChestBlockEntity be = menu.getBlockEntity();
                 if (be == null || be.getOwnerUUID() == null || be.getLevel() == null) yield false;
                 String groupId = v.isEmpty() ? "" : v.get(0);
-                String key = ProductionStatsStorage.chestKey(be.getChestType(), be.getLevel().dimension().location().toString(), be.getBlockPos());
+                String key = ProductionStatsStorage.chestKey(be.getLevel().dimension().location().toString(), be.getBlockPos());
                 yield storage.setChestGroup(be.getOwnerUUID(), key, groupId, itemSnapshot(be));
             }
             case "CREATE_GROUP" -> {
@@ -76,7 +76,7 @@ public record UpdateProductionStatsPacket(String action, List<String> values) im
                         && player.containerMenu instanceof BaseChestMenu menu && menu.getBlockEntity() != null) {
                     BaseChestBlockEntity be = menu.getBlockEntity();
                     if (be.getOwnerUUID() != null && be.getLevel() != null) {
-                        String key = ProductionStatsStorage.chestKey(be.getChestType(), be.getLevel().dimension().location().toString(), be.getBlockPos());
+                        String key = ProductionStatsStorage.chestKey(be.getLevel().dimension().location().toString(), be.getBlockPos());
                         storage.setChestGroup(be.getOwnerUUID(), key, created, itemSnapshot(be));
                     }
                 }

@@ -10,7 +10,6 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
-import com.pockethomestead.registry.ChestRegistryManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -131,7 +130,7 @@ public record SaveTransferGraphPacket(
             TransferGraphStorage storage = TransferGraphStorage.get(player.server);
             TransferGraph graph = toGraph(owner, packet, storage.graphFor(owner));
             List<TransferGraphValidator.Issue> issues = new ArrayList<>(TransferGraphValidator.validate(graph));
-            issues.addAll(validateOwnership(player, graph));
+            issues.addAll(TransferGraphValidator.validateRuntime(graph, player.server, owner));
             if (TransferGraphValidator.hasErrors(issues)) {
                 PacketDistributor.sendToPlayer(player, TransferGraphValidationPacket.from(issues));
                 return;
@@ -150,13 +149,15 @@ public record SaveTransferGraphPacket(
         }
         if (packet.pages.isEmpty()) graph.ensureDefaultPage();
         for (TransferGraphSyncPacket.NodeData node : packet.nodes) {
+            if ("SUPPLY".equals(node.type()) || "PICKUP".equals(node.type())) continue;
             TransferNode.NodeType type;
-            try { type = TransferNode.NodeType.valueOf(node.type()); } catch (Exception e) { type = TransferNode.NodeType.SUPPLY; }
+            try { type = TransferNode.NodeType.valueOf(node.type()); } catch (Exception e) { type = TransferNode.NodeType.CHEST; }
             TransferNode transferNode = new TransferNode(node.id(), node.pageId(), type, node.chestId(), node.dimensionKey(), BlockPos.of(node.pos()), node.x(), node.y(), node.expanded(), node.enabled(), node.filterItemIds());
             if (previousGraph != null) transferNode.copyFlowStatsFrom(previousGraph.getNode(node.id()));
             graph.putNode(transferNode);
         }
         for (TransferGraphSyncPacket.EdgeData edge : packet.edges) {
+            if (graph.getNode(edge.fromNodeId()) == null || graph.getNode(edge.toNodeId()) == null) continue;
             TransferEdge transferEdge = new TransferEdge(edge.id(), edge.pageId(), edge.fromNodeId(), edge.toNodeId(), edge.fromPortKey(), edge.toPortKey(), edge.rateLimitEnabled(), edge.rateLimitSeconds(), edge.rateLimitItems(), edge.enabled());
             for (TransferGraphSyncPacket.EdgeItemRateData row : edge.itemRates()) {
                 if (row.configured()) transferEdge.setItemRate(row.itemId(), row.rateLimitEnabled(), row.rateLimitSeconds(), row.rateLimitItems());
@@ -164,25 +165,6 @@ public record SaveTransferGraphPacket(
             graph.putEdge(transferEdge);
         }
         return graph;
-    }
-
-    private static List<TransferGraphValidator.Issue> validateOwnership(ServerPlayer player, TransferGraph graph) {
-        List<TransferGraphValidator.Issue> issues = new ArrayList<>();
-        for (TransferNode node : graph.getNodes()) {
-            if (node.getNodeType().isVirtual()) continue;
-            ChestRegistryManager.ChestType type = node.getType();
-            boolean owned = false;
-            for (ChestRegistryManager.ChestLocation loc : ChestRegistryManager.getInstance().getChestLocationsByType(player.getUUID(), node.getChestId(), type)) {
-                if (loc.dimensionKey.equals(node.getDimensionKey()) && loc.pos.equals(node.getPos())) {
-                    owned = true;
-                    break;
-                }
-            }
-            if (!owned) {
-                issues.add(new TransferGraphValidator.Issue(TransferGraphValidator.Severity.ERROR, node.getId(), "", "节点引用了不属于当前玩家的箱子"));
-            }
-        }
-        return issues;
     }
 
     private static List<String> decodeStrings(ByteBuf buf) {

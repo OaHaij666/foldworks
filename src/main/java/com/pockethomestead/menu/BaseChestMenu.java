@@ -33,7 +33,8 @@ public abstract class BaseChestMenu extends AbstractContainerMenu {
     public static final int SCROLLBAR_WIDTH = 6;
     public static final int SCROLLBAR_GAP = 2;
     public static final int BOX_PAD = 4; // 存货区内边距
-    public static final int FLUID_SECTION_HEIGHT = 22; // 内容页流体信息区高度
+    public static final int FLUID_SECTION_HEIGHT = 0; // 流体已独立为单页，物品页不再预留流体区
+    public static final int UPGRADE_SECTION_HEIGHT = 24;
 
     public static int calculatePanelWidth() {
         return CHEST_COLS * SLOT_SIZE + 2 * PANEL_PADDING + SCROLLBAR_WIDTH + SCROLLBAR_GAP;
@@ -50,8 +51,7 @@ public abstract class BaseChestMenu extends AbstractContainerMenu {
     }
 
     public static int calculatePlayerLabelY() {
-        int fluidSpace = isCreateLoaded() ? FLUID_SECTION_HEIGHT : 0;
-        return calculateChestSlotStartY() + CHEST_VISIBLE_ROWS * SLOT_SIZE + SECTION_GAP + fluidSpace;
+        return calculateChestSlotStartY() + CHEST_VISIBLE_ROWS * SLOT_SIZE + SECTION_GAP + UPGRADE_SECTION_HEIGHT + SECTION_GAP;
     }
 
     public static boolean isCreateLoaded() {
@@ -68,7 +68,9 @@ public abstract class BaseChestMenu extends AbstractContainerMenu {
 
     public static int calculatePanelHeight() {
         // 第0页（内容页）高度：头部 + 存货区 + 玩家背包 + 快捷栏 + 底边距
-        return calculateHotbarStartY() + SLOT_SIZE + PANEL_PADDING;
+        int itemPageHeight = calculateHotbarStartY() + SLOT_SIZE + PANEL_PADDING;
+        int settingsPageHeight = HEADER_HEIGHT + 20 + 40 + 10 + 78 + 10 + 100 + PANEL_PADDING;
+        return Math.max(itemPageHeight, settingsPageHeight);
     }
 
     protected BaseChestMenu(MenuType<?> menuType, int containerId, Inventory playerInventory, BaseChestBlockEntity blockEntity) {
@@ -134,8 +136,8 @@ public abstract class BaseChestMenu extends AbstractContainerMenu {
             return;
         }
 
-        // 每秒（20tick）推送一次，让客户端倒计时/状态保持新鲜（仅当绑定且启用传输）
-        if (blockEntity.isTransferEnabled() && !blockEntity.getBoundTargetId().isEmpty()) {
+        // 每秒（20tick）推送一次，让客户端倒计时/电力/状态保持新鲜。
+        if (blockEntity.isTransferEnabled()) {
             if (++countdownSyncTick >= 20) {
                 countdownSyncTick = 0;
                 ChestConfigPacket.sendSyncToClient(sp, blockEntity);

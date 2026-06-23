@@ -1,9 +1,16 @@
 package com.pockethomestead.transfer;
 
+import com.pockethomestead.blockentity.BaseChestBlockEntity;
+import com.pockethomestead.blockentity.HomesteadChestAccess;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.material.Fluids;
+import net.neoforged.fml.ModList;
 
 import java.util.*;
 
@@ -47,18 +54,21 @@ public final class TransferGraphValidator {
             if (!validTargetPort(to, edge.getToPortKey())) {
                 issues.add(new Issue(Severity.ERROR, to.getId(), edge.getId(), "输入端口无效"));
             }
+            if (!TransferEdge.sameResourceKind(edge.getFromPortKey(), edge.getToPortKey())) {
+                issues.add(new Issue(Severity.ERROR, to.getId(), edge.getId(), "连线两端资源类型不一致"));
+            }
+            if (to.getNodeType() == TransferNode.NodeType.TRASH
+                    && (edge.getFromPortKey().startsWith(TransferEdge.ENERGY_PREFIX) || edge.getFromPortKey().startsWith(TransferEdge.STRESS_PREFIX))) {
+                issues.add(new Issue(Severity.ERROR, to.getId(), edge.getId(), "销毁节点不能接收电力或应力"));
+            }
         }
 
         for (TransferNode node : nodes.values()) {
             List<TransferEdge> in = incoming.getOrDefault(node.getId(), List.of());
             List<TransferEdge> out = outgoing.getOrDefault(node.getId(), List.of());
             switch (node.getNodeType()) {
-                case SUPPLY -> {
-                    if (!in.isEmpty()) issues.add(new Issue(Severity.ERROR, node.getId(), "", "供货箱不能有输入"));
-                }
-                case PICKUP -> {
-                    if (!out.isEmpty()) issues.add(new Issue(Severity.ERROR, node.getId(), "", "取货箱不能有输出"));
-                    if (in.isEmpty()) issues.add(new Issue(Severity.WARN, node.getId(), "", "取货箱没有输入"));
+                case CHEST -> {
+                    if (in.isEmpty() && out.isEmpty()) issues.add(new Issue(Severity.WARN, node.getId(), "", "箱子节点没有连线"));
                 }
                 case REROUTE -> {
                     if (in.isEmpty()) issues.add(new Issue(Severity.ERROR, node.getId(), "", "中转点不能只有输出，没有输入"));
@@ -81,23 +91,93 @@ public final class TransferGraphValidator {
         return false;
     }
 
+    public static List<Issue> validateRuntime(TransferGraph graph, MinecraftServer server, UUID owner) {
+        List<Issue> issues = new ArrayList<>();
+        if (server == null || owner == null) return issues;
+        boolean createLoaded = ModList.get().isLoaded("create");
+        Map<String, Boolean> stressOutgoing = new HashMap<>();
+        Map<String, Boolean> stressIncoming = new HashMap<>();
+        for (TransferEdge edge : graph.getEdges()) {
+            if (TransferEdge.STRESS_SU.equals(edge.getFromPortKey())) {
+                stressOutgoing.put(edge.getFromNodeId(), true);
+                stressIncoming.put(edge.getToNodeId(), true);
+            }
+        }
+        for (TransferNode node : graph.getNodes()) {
+            if (node.getNodeType().isVirtual()) continue;
+            ResourceLocation dimLoc = ResourceLocation.tryParse(node.getDimensionKey());
+            if (dimLoc == null) {
+                issues.add(new Issue(Severity.ERROR, node.getId(), "", "节点维度无效"));
+                continue;
+            }
+            ServerLevel level = server.getLevel(ResourceKey.create(Registries.DIMENSION, dimLoc));
+            if (level == null) {
+                issues.add(new Issue(Severity.ERROR, node.getId(), "", "节点所在维度未加载"));
+                continue;
+            }
+            BaseChestBlockEntity be = HomesteadChestAccess.resolve(level.getBlockEntity(node.getPos()));
+            if (be == null) {
+                issues.add(new Issue(Severity.ERROR, node.getId(), "", "节点引用的箱子不存在或已被拆除"));
+                continue;
+            }
+            if (!be.getChestId().equals(node.getChestId())) {
+                issues.add(new Issue(Severity.ERROR, node.getId(), "", "节点位置上的箱子已变化"));
+                continue;
+            }
+            if (!owner.equals(be.getOwnerUUID())) {
+                issues.add(new Issue(Severity.ERROR, node.getId(), "", "节点引用了不属于当前玩家的箱子"));
+                continue;
+            }
+            if (!be.hasNetworkUpgrade()) {
+                issues.add(new Issue(Severity.ERROR, node.getId(), "", "箱子缺少网络升级，不能作为可视化传输节点"));
+            }
+            boolean stressOut = stressOutgoing.getOrDefault(node.getId(), false);
+            boolean stressIn = stressIncoming.getOrDefault(node.getId(), false);
+            if (stressOut || stressIn) {
+                if (!createLoaded) {
+                    issues.add(new Issue(Severity.ERROR, node.getId(), "", "Create 未安装，不能使用应力连线"));
+                }
+                if (!be.hasStressUpgrade()) {
+                    issues.add(new Issue(Severity.ERROR, node.getId(), "", "箱子缺少应力升级"));
+                }
+                if (stressOut && stressIn) {
+                    issues.add(new Issue(Severity.ERROR, node.getId(), "", "同一箱子不能同时作为应力输入和应力输出"));
+                }
+                if (stressOut && be.configuredStressInputSides() != 1) {
+                    issues.add(new Issue(Severity.ERROR, node.getId(), "", "应力源箱子必须配置且仅配置一个应力输入面"));
+                }
+                if (stressIn && be.configuredStressOutputSides() != 1) {
+                    issues.add(new Issue(Severity.ERROR, node.getId(), "", "应力目标箱子必须配置且仅配置一个应力输出面"));
+                }
+            }
+        }
+        return issues;
+    }
+
     private static boolean validDirection(TransferNode from, TransferNode to) {
-        if (from.getNodeType() == TransferNode.NodeType.PICKUP || from.getNodeType() == TransferNode.NodeType.TRASH) return false;
-        if (to.getNodeType() == TransferNode.NodeType.SUPPLY) return false;
-        return from.getNodeType() == TransferNode.NodeType.SUPPLY || from.getNodeType() == TransferNode.NodeType.REROUTE;
+        if (from.getNodeType() == TransferNode.NodeType.TRASH) return false;
+        return from.getNodeType() == TransferNode.NodeType.CHEST || from.getNodeType() == TransferNode.NodeType.REROUTE;
     }
 
     private static boolean validPort(TransferNode from, String port) {
-        if (from.getNodeType() == TransferNode.NodeType.REROUTE) return isAll(port) || validItemPort(port) || validFluidPort(port);
-        if (isAll(port) || TransferEdge.FLUID_ALL.equals(port)) return true;
+        if (from.getNodeType() == TransferNode.NodeType.TRASH) return false;
+        if (from.getNodeType() == TransferNode.NodeType.REROUTE) return isAll(port) || validItemPort(port) || validFluidPort(port) || validEnergyPort(port) || validStressPort(port);
+        if (isAll(port) || TransferEdge.FLUID_ALL.equals(port) || TransferEdge.ENERGY_FE.equals(port) || TransferEdge.STRESS_SU.equals(port)) return true;
         if (validFluidPort(port)) return true;
         if (!validItemPort(port)) return false;
         return from.getFilterItemIds().contains(port.substring(TransferEdge.ITEM_PREFIX.length()));
     }
 
     private static boolean validTargetPort(TransferNode to, String port) {
-        return (to.getNodeType() == TransferNode.NodeType.PICKUP || to.getNodeType() == TransferNode.NodeType.REROUTE || to.getNodeType() == TransferNode.NodeType.TRASH)
-                && TransferEdge.PORT_IN.equals(port);
+        if (to.getNodeType() == TransferNode.NodeType.TRASH) {
+            return TransferEdge.ITEM_IN.equals(port) || TransferEdge.FLUID_IN.equals(port) || TransferEdge.PORT_IN.equals(port);
+        }
+        return (to.getNodeType() == TransferNode.NodeType.CHEST || to.getNodeType() == TransferNode.NodeType.REROUTE)
+                && (TransferEdge.PORT_IN.equals(port)
+                || TransferEdge.ITEM_IN.equals(port)
+                || TransferEdge.FLUID_IN.equals(port)
+                || TransferEdge.ENERGY_IN.equals(port)
+                || TransferEdge.STRESS_IN.equals(port));
     }
 
     private static boolean isAll(String port) {
@@ -115,6 +195,14 @@ public final class TransferGraphValidator {
         if (port == null || !port.startsWith(TransferEdge.FLUID_PREFIX)) return false;
         ResourceLocation id = ResourceLocation.tryParse(port.substring(TransferEdge.FLUID_PREFIX.length()));
         return id != null && BuiltInRegistries.FLUID.get(id) != Fluids.EMPTY;
+    }
+
+    private static boolean validEnergyPort(String port) {
+        return TransferEdge.ENERGY_FE.equals(port);
+    }
+
+    private static boolean validStressPort(String port) {
+        return TransferEdge.STRESS_SU.equals(port);
     }
 
     private static void detectCycles(Map<String, TransferNode> nodes, Map<String, List<TransferEdge>> outgoing, List<Issue> issues) {
@@ -140,7 +228,7 @@ public final class TransferGraphValidator {
                                                   List<Issue> issues) {
         Map<String, Set<String>> inputScopes = new HashMap<>();
         for (TransferNode node : nodes.values()) {
-            if (node.getNodeType() == TransferNode.NodeType.SUPPLY) {
+            if (node.getNodeType() == TransferNode.NodeType.CHEST) {
                 for (TransferEdge edge : outgoing.getOrDefault(node.getId(), List.of())) {
                     addScope(inputScopes.computeIfAbsent(edge.getToNodeId(), id -> new LinkedHashSet<>()), edge.getFromPortKey());
                 }
@@ -187,7 +275,7 @@ public final class TransferGraphValidator {
     }
 
     private static void addScope(Set<String> scope, String port) {
-        addScope(scope, port, Set.of("*", TransferEdge.FLUID_ALL));
+        addScope(scope, port, Set.of("*", TransferEdge.FLUID_ALL, TransferEdge.ENERGY_FE, TransferEdge.STRESS_SU));
     }
 
     private static void addScope(Set<String> target, String port, Set<String> allowed) {
@@ -201,12 +289,18 @@ public final class TransferGraphValidator {
             if (allowed.contains("*") || allowed.contains(port)) target.add(port);
         } else if (port != null && port.startsWith(TransferEdge.FLUID_PREFIX)) {
             if (allowed.contains(TransferEdge.FLUID_ALL) || allowed.contains(port)) target.add(port);
+        } else if (TransferEdge.ENERGY_FE.equals(port)) {
+            target.add(port);
+        } else if (TransferEdge.STRESS_SU.equals(port)) {
+            target.add(port);
         }
     }
 
     private static String shortResource(String resourceId) {
         if ("*".equals(resourceId)) return "全部物品";
         if (TransferEdge.FLUID_ALL.equals(resourceId)) return "全部流体";
+        if (TransferEdge.ENERGY_FE.equals(resourceId)) return "电力";
+        if (TransferEdge.STRESS_SU.equals(resourceId)) return "应力";
         String id = resourceId;
         if (id.startsWith(TransferEdge.ITEM_PREFIX)) id = id.substring(TransferEdge.ITEM_PREFIX.length());
         if (id.startsWith(TransferEdge.FLUID_PREFIX)) id = id.substring(TransferEdge.FLUID_PREFIX.length());

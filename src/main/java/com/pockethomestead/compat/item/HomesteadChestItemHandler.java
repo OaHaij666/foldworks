@@ -82,6 +82,6 @@ public class HomesteadChestItemHandler implements IItemHandler {
 
     @Override
     public boolean isItemValid(int slot, ItemStack stack) {
-        return slot >= 0 && slot < getSlots() && !stack.isEmpty();
+        return canInsert && slot >= 0 && slot < getSlots() && !stack.isEmpty();
     }
 }
