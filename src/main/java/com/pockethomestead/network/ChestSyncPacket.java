@@ -1,6 +1,7 @@
 package com.pockethomestead.network;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -17,6 +18,7 @@ import java.util.Map;
 
 public record ChestSyncPacket(
     String chestId,
+    BlockPos blockPos,
     boolean transferEnabled,
     boolean voidModeEnabled,
     int transferRateLimit,
@@ -28,8 +30,13 @@ public record ChestSyncPacket(
     int energyStored,
     int maxEnergyStored,
     int energyTransferLimit,
+    int networkBandwidth,
+    int stressBandwidthUsed,
+    int remainingTransferBandwidth,
     boolean stressUpgradeInstalled,
     boolean createLoaded,
+    int stressOutputSpeedRpm,
+    boolean stressOutputReversed,
     boolean productionStatsEnabled,
     String productionGroupId,
     List<Integer> upgradeCounts,
@@ -47,6 +54,7 @@ public record ChestSyncPacket(
         @Override
         public ChestSyncPacket decode(RegistryFriendlyByteBuf buf) {
             String chestId = ByteBufCodecs.STRING_UTF8.decode(buf);
+            BlockPos blockPos = buf.readBlockPos();
             boolean transferEnabled = buf.readBoolean();
             boolean voidModeEnabled = buf.readBoolean();
             int transferRateLimit = ByteBufCodecs.VAR_INT.decode(buf);
@@ -58,8 +66,13 @@ public record ChestSyncPacket(
             int energyStored = ByteBufCodecs.VAR_INT.decode(buf);
             int maxEnergyStored = ByteBufCodecs.VAR_INT.decode(buf);
             int energyTransferLimit = ByteBufCodecs.VAR_INT.decode(buf);
+            int networkBandwidth = ByteBufCodecs.VAR_INT.decode(buf);
+            int stressBandwidthUsed = ByteBufCodecs.VAR_INT.decode(buf);
+            int remainingTransferBandwidth = ByteBufCodecs.VAR_INT.decode(buf);
             boolean stressUpgradeInstalled = buf.readBoolean();
             boolean createLoaded = buf.readBoolean();
+            int stressOutputSpeedRpm = ByteBufCodecs.VAR_INT.decode(buf);
+            boolean stressOutputReversed = buf.readBoolean();
             boolean productionStatsEnabled = buf.readBoolean();
             String productionGroupId = ByteBufCodecs.STRING_UTF8.decode(buf);
 
@@ -91,9 +104,12 @@ public record ChestSyncPacket(
                 fluids.put(ByteBufCodecs.STRING_UTF8.decode(buf), ByteBufCodecs.VAR_INT.decode(buf));
             }
 
-            return new ChestSyncPacket(chestId, transferEnabled, voidModeEnabled, transferRateLimit, nextTransferSeconds,
+            return new ChestSyncPacket(chestId, blockPos, transferEnabled, voidModeEnabled, transferRateLimit, nextTransferSeconds,
                     maxCapacity, maxFluidCapacityMb, maxFluidTypes, maxFluidCapacityPerTypeMb,
-                    energyStored, maxEnergyStored, energyTransferLimit, stressUpgradeInstalled, createLoaded,
+                    energyStored, maxEnergyStored, energyTransferLimit,
+                    networkBandwidth, stressBandwidthUsed, remainingTransferBandwidth,
+                    stressUpgradeInstalled, createLoaded,
+                    stressOutputSpeedRpm, stressOutputReversed,
                     productionStatsEnabled, productionGroupId,
                     Collections.unmodifiableList(upgrades), Collections.unmodifiableList(sideConfig),
                     Collections.unmodifiableList(items), Collections.unmodifiableMap(fluids));
@@ -102,6 +118,7 @@ public record ChestSyncPacket(
         @Override
         public void encode(RegistryFriendlyByteBuf buf, ChestSyncPacket pkt) {
             ByteBufCodecs.STRING_UTF8.encode(buf, pkt.chestId);
+            buf.writeBlockPos(pkt.blockPos);
             buf.writeBoolean(pkt.transferEnabled);
             buf.writeBoolean(pkt.voidModeEnabled);
             ByteBufCodecs.VAR_INT.encode(buf, pkt.transferRateLimit);
@@ -113,8 +130,13 @@ public record ChestSyncPacket(
             ByteBufCodecs.VAR_INT.encode(buf, pkt.energyStored);
             ByteBufCodecs.VAR_INT.encode(buf, pkt.maxEnergyStored);
             ByteBufCodecs.VAR_INT.encode(buf, pkt.energyTransferLimit);
+            ByteBufCodecs.VAR_INT.encode(buf, pkt.networkBandwidth);
+            ByteBufCodecs.VAR_INT.encode(buf, pkt.stressBandwidthUsed);
+            ByteBufCodecs.VAR_INT.encode(buf, pkt.remainingTransferBandwidth);
             buf.writeBoolean(pkt.stressUpgradeInstalled);
             buf.writeBoolean(pkt.createLoaded);
+            ByteBufCodecs.VAR_INT.encode(buf, pkt.stressOutputSpeedRpm);
+            buf.writeBoolean(pkt.stressOutputReversed);
             buf.writeBoolean(pkt.productionStatsEnabled);
             ByteBufCodecs.STRING_UTF8.encode(buf, pkt.productionGroupId);
 
@@ -148,8 +170,29 @@ public record ChestSyncPacket(
     public static void handle(ChestSyncPacket packet, IPayloadContext context) {
         context.enqueueWork(() -> {
             Minecraft mc = Minecraft.getInstance();
+            com.pockethomestead.blockentity.BaseChestBlockEntity menuChest = null;
             if (mc.screen instanceof com.pockethomestead.client.screen.BaseChestScreen<?> screen) {
                 screen.cacheConfig(packet);
+                menuChest = screen.getMenu().getBlockEntity();
+            }
+            if (menuChest == null
+                    && mc.player != null
+                    && mc.player.containerMenu instanceof com.pockethomestead.menu.BaseChestMenu menu) {
+                menuChest = menu.getBlockEntity();
+            }
+
+            if (menuChest != null) {
+                menuChest.applySideConfigFromSync(packet.sideConfig());
+            }
+            if (mc.level == null) return;
+            net.minecraft.world.level.block.entity.BlockEntity rawBlockEntity = mc.level.getBlockEntity(packet.blockPos());
+            com.pockethomestead.blockentity.BaseChestBlockEntity worldChest =
+                    com.pockethomestead.blockentity.HomesteadChestAccess.resolve(rawBlockEntity);
+            if (worldChest != null) {
+                worldChest.applySideConfigFromSync(packet.sideConfig());
+                if (rawBlockEntity != null) rawBlockEntity.requestModelDataUpdate();
+                net.minecraft.world.level.block.state.BlockState state = mc.level.getBlockState(packet.blockPos());
+                mc.level.sendBlockUpdated(packet.blockPos(), state, state, 8);
             }
         });
     }

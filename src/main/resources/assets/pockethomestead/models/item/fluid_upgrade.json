@@ -1,6 +1,6 @@
 {
-  "parent": "minecraft:item/generated",
+  "parent": "pockethomestead:item/upgrade_card",
   "textures": {
-    "layer0": "pockethomestead:item/jade"
+    "layer0": "pockethomestead:item/fluid_upgrade"
   }
 }

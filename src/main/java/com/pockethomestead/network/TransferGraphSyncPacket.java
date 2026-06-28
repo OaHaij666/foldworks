@@ -34,7 +34,8 @@ public record TransferGraphSyncPacket(
     public record EdgeData(String id, String pageId, String fromNodeId, String toNodeId, String fromPortKey, String toPortKey,
                            boolean enabled, boolean rateLimitEnabled, int rateLimitSeconds, int rateLimitItems,
                            String health, int actualRatePerMinute, List<EdgeItemRateData> itemRates) {}
-    public record ChestData(String chestId, String dimensionKey, long pos) {}
+    public record ChestData(String chestId, String dimensionKey, long pos,
+                            int networkBandwidth, int stressBandwidthUsed, int remainingTransferBandwidth) {}
 
     public static final StreamCodec<ByteBuf, TransferGraphSyncPacket> STREAM_CODEC = new StreamCodec<>() {
         @Override
@@ -206,7 +207,14 @@ public record TransferGraphSyncPacket(
         List<ChestData> chests = new ArrayList<>();
         int count = ByteBufCodecs.VAR_INT.decode(buf);
         for (int i = 0; i < count; i++) {
-            chests.add(new ChestData(ByteBufCodecs.STRING_UTF8.decode(buf), ByteBufCodecs.STRING_UTF8.decode(buf), buf.readLong()));
+            chests.add(new ChestData(
+                    ByteBufCodecs.STRING_UTF8.decode(buf),
+                    ByteBufCodecs.STRING_UTF8.decode(buf),
+                    buf.readLong(),
+                    ByteBufCodecs.VAR_INT.decode(buf),
+                    ByteBufCodecs.VAR_INT.decode(buf),
+                    ByteBufCodecs.VAR_INT.decode(buf)
+            ));
         }
         return chests;
     }
@@ -217,6 +225,9 @@ public record TransferGraphSyncPacket(
             ByteBufCodecs.STRING_UTF8.encode(buf, chest.chestId);
             ByteBufCodecs.STRING_UTF8.encode(buf, chest.dimensionKey);
             buf.writeLong(chest.pos);
+            ByteBufCodecs.VAR_INT.encode(buf, chest.networkBandwidth);
+            ByteBufCodecs.VAR_INT.encode(buf, chest.stressBandwidthUsed);
+            ByteBufCodecs.VAR_INT.encode(buf, chest.remainingTransferBandwidth);
         }
     }
 

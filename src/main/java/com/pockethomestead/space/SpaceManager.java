@@ -91,7 +91,6 @@ public class SpaceManager {
         dimensionIndex.remove(space.getDimensionId());
         SpaceItemRegistry.removeSpace(spaceId);
         SpaceStorage.markDirty();
-        PocketHomestead.LOGGER.debug("删除空间: {}", spaceId);
         return true;
     }
 

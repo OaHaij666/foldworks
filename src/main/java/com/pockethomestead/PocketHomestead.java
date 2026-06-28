@@ -47,6 +47,9 @@ public class PocketHomestead {
 
         // 注册网络数据包
         modEventBus.addListener(PocketHomestead::registerPayloads);
+        if (net.neoforged.fml.loading.FMLEnvironment.dist == net.neoforged.api.distmarker.Dist.CLIENT) {
+            com.pockethomestead.client.ClientEvents.register(modEventBus);
+        }
 
         // 让存档空间在服务器启动时通过 DynamicDimensions 的正式路径创建。
         // 这避免了运行时首次进入才创建维度，把"创建"和"玩家首次进入"分离，

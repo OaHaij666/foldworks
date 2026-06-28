@@ -98,6 +98,10 @@ public record UpdateProductionStatsPacket(String action, List<String> values) im
                 if (v.size() < 2) yield false;
                 yield storage.toggleChild(player.getUUID(), v.get(0), v.get(1));
             }
+            case "TOGGLE_FAVORITE_RESOURCE" -> {
+                if (v.isEmpty()) yield false;
+                yield storage.toggleFavoriteResource(player.getUUID(), v.get(0));
+            }
             default -> false;
         };
     }

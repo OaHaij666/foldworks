@@ -17,7 +17,8 @@ public record ProductionStatsSyncPacket(
         List<GroupData> groups,
         List<BucketData> buckets,
         List<InventoryData> inventories,
-        List<MemberData> members
+        List<MemberData> members,
+        List<String> favoriteResources
 ) implements CustomPacketPayload {
     public static final Type<ProductionStatsSyncPacket> TYPE = new Type<>(
             ResourceLocation.fromNamespaceAndPath("pockethomestead", "production_stats_sync"));
@@ -67,7 +68,8 @@ public record ProductionStatsSyncPacket(
             for (int i = 0; i < memberCount; i++) {
                 members.add(new MemberData(ByteBufCodecs.STRING_UTF8.decode(buf), ByteBufCodecs.STRING_UTF8.decode(buf)));
             }
-            return new ProductionStatsSyncPacket(gameTime, groups, buckets, inventories, members);
+            List<String> favoriteResources = decodeStrings(buf);
+            return new ProductionStatsSyncPacket(gameTime, groups, buckets, inventories, members, favoriteResources);
         }
 
         @Override
@@ -100,6 +102,7 @@ public record ProductionStatsSyncPacket(
                 ByteBufCodecs.STRING_UTF8.encode(buf, member.chestKey);
                 ByteBufCodecs.STRING_UTF8.encode(buf, member.groupId);
             }
+            encodeStrings(buf, pkt.favoriteResources);
         }
     };
 
@@ -123,7 +126,8 @@ public record ProductionStatsSyncPacket(
         for (ProductionStatsStorage.MemberSnapshot member : stats.members()) {
             members.add(new MemberData(member.chestKey(), member.groupId()));
         }
-        return new ProductionStatsSyncPacket(gameTime, groups, buckets, inventories, members);
+        List<String> favoriteResources = new ArrayList<>(stats.favoriteResources());
+        return new ProductionStatsSyncPacket(gameTime, groups, buckets, inventories, members, favoriteResources);
     }
 
     public static void handle(ProductionStatsSyncPacket packet, IPayloadContext context) {

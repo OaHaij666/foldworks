@@ -3,6 +3,7 @@ package com.pockethomestead.transfer;
 import com.pockethomestead.blockentity.BaseChestBlockEntity;
 import com.pockethomestead.blockentity.HomesteadChestAccess;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.resources.ResourceKey;
@@ -18,6 +19,7 @@ public final class TransferGraphValidator {
     private TransferGraphValidator() {}
 
     public enum Severity { ERROR, WARN }
+    private enum ResourceLane { ITEM, FLUID, ENERGY, STRESS }
 
     public record Issue(Severity severity, String nodeId, String edgeId, String message) {}
 
@@ -135,19 +137,29 @@ public final class TransferGraphValidator {
             boolean stressIn = stressIncoming.getOrDefault(node.getId(), false);
             if (stressOut || stressIn) {
                 if (!createLoaded) {
-                    issues.add(new Issue(Severity.ERROR, node.getId(), "", "Create 未安装，不能使用应力连线"));
+                    issues.add(new Issue(Severity.WARN, node.getId(), "", "Create 未安装，应力连线暂不会工作"));
                 }
                 if (!be.hasStressUpgrade()) {
-                    issues.add(new Issue(Severity.ERROR, node.getId(), "", "箱子缺少应力升级"));
+                    issues.add(new Issue(Severity.WARN, node.getId(), "", "箱子缺少应力升级，应力连线暂不会工作"));
                 }
-                if (stressOut && stressIn) {
-                    issues.add(new Issue(Severity.ERROR, node.getId(), "", "同一箱子不能同时作为应力输入和应力输出"));
+                int inputSides = be.configuredStressInputSides();
+                int outputSides = be.configuredStressOutputSides();
+                if (inputSides > 1) {
+                    issues.add(new Issue(Severity.WARN, node.getId(), "", "同一箱子最多只能配置一个应力输入面"));
                 }
-                if (stressOut && be.configuredStressInputSides() != 1) {
-                    issues.add(new Issue(Severity.ERROR, node.getId(), "", "应力源箱子必须配置且仅配置一个应力输入面"));
+                if (outputSides > 1) {
+                    issues.add(new Issue(Severity.WARN, node.getId(), "", "同一箱子最多只能配置一个应力输出面"));
                 }
-                if (stressIn && be.configuredStressOutputSides() != 1) {
-                    issues.add(new Issue(Severity.ERROR, node.getId(), "", "应力目标箱子必须配置且仅配置一个应力输出面"));
+                if (stressIn && outputSides != 1) {
+                    issues.add(new Issue(Severity.WARN, node.getId(), "", "接收图中应力的箱子需要配置一个应力输出面才会对外供能"));
+                }
+                if (stressOut && !stressIn && inputSides != 1) {
+                    issues.add(new Issue(Severity.WARN, node.getId(), "", "应力源箱子需要配置一个应力输入面才会接收外部动力"));
+                }
+                Direction inputSide = be.getConfiguredStressInputWorldSide();
+                Direction outputSide = be.getConfiguredStressOutputWorldSide();
+                if (inputSide != null && outputSide != null && inputSide.getAxis() != outputSide.getAxis()) {
+                    issues.add(new Issue(Severity.WARN, node.getId(), "", "同一箱子的应力输入面和输出面必须在同一轴向才会工作"));
                 }
             }
         }
@@ -206,18 +218,24 @@ public final class TransferGraphValidator {
     }
 
     private static void detectCycles(Map<String, TransferNode> nodes, Map<String, List<TransferEdge>> outgoing, List<Issue> issues) {
-        Set<String> done = new HashSet<>();
-        Set<String> stack = new HashSet<>();
-        for (String nodeId : nodes.keySet()) visitCycle(nodeId, outgoing, done, stack, issues);
+        for (ResourceLane lane : ResourceLane.values()) {
+            Set<String> done = new HashSet<>();
+            Set<String> stack = new HashSet<>();
+            for (String nodeId : nodes.keySet()) visitCycle(nodeId, lane, outgoing, done, stack, issues);
+        }
     }
 
-    private static void visitCycle(String nodeId, Map<String, List<TransferEdge>> outgoing, Set<String> done, Set<String> stack, List<Issue> issues) {
+    private static void visitCycle(String nodeId, ResourceLane lane, Map<String, List<TransferEdge>> outgoing, Set<String> done, Set<String> stack, List<Issue> issues) {
         if (done.contains(nodeId)) return;
         if (!stack.add(nodeId)) {
-            issues.add(new Issue(Severity.ERROR, nodeId, "", "检测到中转环路"));
+            issues.add(new Issue(Severity.ERROR, nodeId, "", "检测到" + laneLabel(lane) + "环路"));
             return;
         }
-        for (TransferEdge edge : outgoing.getOrDefault(nodeId, List.of())) visitCycle(edge.getToNodeId(), outgoing, done, stack, issues);
+        for (TransferEdge edge : outgoing.getOrDefault(nodeId, List.of())) {
+            if (resourceLane(edge.getFromPortKey()) == lane) {
+                visitCycle(edge.getToNodeId(), lane, outgoing, done, stack, issues);
+            }
+        }
         stack.remove(nodeId);
         done.add(nodeId);
     }
@@ -260,14 +278,14 @@ public final class TransferGraphValidator {
                 if (TransferEdge.PORT_ALL.equals(edge.getFromPortKey()) || TransferEdge.FLUID_ALL.equals(edge.getFromPortKey())) hasAllOut = true;
                 if (edge.getFromPortKey().startsWith(TransferEdge.ITEM_PREFIX) || edge.getFromPortKey().startsWith(TransferEdge.FLUID_PREFIX)) {
                     String resource = edge.getFromPortKey();
-                    if (!in.contains("*") && !in.contains(TransferEdge.FLUID_ALL) && !in.contains(resource)) {
+                    if (!scopeCovers(in, resource)) {
                         issues.add(new Issue(Severity.ERROR, node.getId(), edge.getId(), "中转点输出了未接收的 " + shortResource(resource)));
                     }
                 }
             }
             if (in.contains("*") && in.contains(TransferEdge.FLUID_ALL)) continue;
             for (String resource : in) {
-                if (!out.contains(resource) && !out.contains("*") && !out.contains(TransferEdge.FLUID_ALL)) {
+                if (!scopeCovers(out, resource)) {
                     issues.add(new Issue(Severity.ERROR, node.getId(), "", "中转点接收了 " + shortResource(resource) + " 但没有输出"));
                 }
             }
@@ -294,6 +312,32 @@ public final class TransferGraphValidator {
         } else if (TransferEdge.STRESS_SU.equals(port)) {
             target.add(port);
         }
+    }
+
+    private static boolean scopeCovers(Set<String> scope, String resource) {
+        if (TransferEdge.PORT_ALL.equals(resource) || "*".equals(resource)) return scope.contains("*");
+        if (TransferEdge.FLUID_ALL.equals(resource)) return scope.contains(TransferEdge.FLUID_ALL);
+        if (resource != null && resource.startsWith(TransferEdge.ITEM_PREFIX)) return scope.contains("*") || scope.contains(resource);
+        if (resource != null && resource.startsWith(TransferEdge.FLUID_PREFIX)) return scope.contains(TransferEdge.FLUID_ALL) || scope.contains(resource);
+        if (TransferEdge.ENERGY_FE.equals(resource)) return scope.contains(TransferEdge.ENERGY_FE);
+        if (TransferEdge.STRESS_SU.equals(resource)) return scope.contains(TransferEdge.STRESS_SU);
+        return false;
+    }
+
+    private static ResourceLane resourceLane(String port) {
+        if (port != null && port.startsWith(TransferEdge.FLUID_PREFIX)) return ResourceLane.FLUID;
+        if (port != null && port.startsWith(TransferEdge.ENERGY_PREFIX)) return ResourceLane.ENERGY;
+        if (port != null && port.startsWith(TransferEdge.STRESS_PREFIX)) return ResourceLane.STRESS;
+        return ResourceLane.ITEM;
+    }
+
+    private static String laneLabel(ResourceLane lane) {
+        return switch (lane) {
+            case ITEM -> "物品";
+            case FLUID -> "流体";
+            case ENERGY -> "电力";
+            case STRESS -> "应力";
+        };
     }
 
     private static String shortResource(String resourceId) {

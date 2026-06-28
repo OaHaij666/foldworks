@@ -69,8 +69,9 @@ public abstract class BaseChestMenu extends AbstractContainerMenu {
     public static int calculatePanelHeight() {
         // 第0页（内容页）高度：头部 + 存货区 + 玩家背包 + 快捷栏 + 底边距
         int itemPageHeight = calculateHotbarStartY() + SLOT_SIZE + PANEL_PADDING;
-        int settingsPageHeight = HEADER_HEIGHT + 20 + 40 + 10 + 78 + 10 + 100 + PANEL_PADDING;
-        return Math.max(itemPageHeight, settingsPageHeight);
+        int facePageHeight = HEADER_HEIGHT + 10 + 126 + 8 + 78 + PANEL_PADDING;
+        int settingsPageHeight = HEADER_HEIGHT + 10 + 40 + 8 + 50 + 8 + 72 + PANEL_PADDING;
+        return Math.max(itemPageHeight, Math.max(facePageHeight, settingsPageHeight));
     }
 
     protected BaseChestMenu(MenuType<?> menuType, int containerId, Inventory playerInventory, BaseChestBlockEntity blockEntity) {

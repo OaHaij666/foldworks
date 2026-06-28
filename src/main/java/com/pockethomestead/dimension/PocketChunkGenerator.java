@@ -3,7 +3,6 @@ package com.pockethomestead.dimension;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import com.pockethomestead.PocketHomestead;
 import com.pockethomestead.space.SpaceData;
 import com.pockethomestead.space.SpaceManager;
 import com.pockethomestead.util.Constants;
@@ -267,10 +266,6 @@ public class PocketChunkGenerator extends ChunkGenerator {
                     BlockState st = stateAt(space, y, surfaceY);
                     chunk.setBlockState(pos, st, false);
                 }
-                if (Math.abs(x) <= 10 && Math.abs(z) <= 10) {
-                    PocketHomestead.LOGGER.debug("[FILL] chunk({},{}) col({},{}) surfaceY={}",
-                            chunk.getPos().x, chunk.getPos().z, x, z, surfaceY);
-                }
             }
         }
 
@@ -306,23 +301,18 @@ public class PocketChunkGenerator extends ChunkGenerator {
     private void sealChunk(WorldGenLevel level, ChunkAccess chunk, SpaceData space, int chunkMinX, int chunkMinZ) {
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         BlockState air = Blocks.AIR.defaultBlockState();
-        int insideCleared = 0, outsideCleared = 0;
         for (int lx = 0; lx < 16; lx++) {
             int x = chunkMinX + lx;
             for (int lz = 0; lz < 16; lz++) {
                 int z = chunkMinZ + lz;
                 boolean inside = insideSpace(space, x, z);
-                if (inside) { insideCleared++; continue; }
+                if (inside) continue;
                 for (int y = Constants.BEDROCK_LAYER_Y; y <= SEAL_TOP_Y; y++) {
                     pos.set(x, y, z);
                     chunk.setBlockState(pos, air, false);
                 }
-                outsideCleared++;
             }
         }
-        PocketHomestead.LOGGER.debug("[SEAL] chunk({},{}) halfW={} halfD={} insideSkipped={} outsideCleared={}",
-                chunk.getPos().x, chunk.getPos().z, space.getWidth() / 2, space.getDepth() / 2,
-                insideCleared, outsideCleared);
         int topY = Constants.WORLD_MAX_Y;
         for (int lx = 0; lx < 16; lx++) {
             int x = chunkMinX + lx;

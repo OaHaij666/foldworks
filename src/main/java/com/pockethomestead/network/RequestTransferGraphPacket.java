@@ -47,8 +47,16 @@ public record RequestTransferGraphPacket() implements CustomPacketPayload {
         List<TransferGraphSyncPacket.ChestData> result = new ArrayList<>();
         for (String id : ChestRegistryManager.getInstance().getPlayerChestIds(owner)) {
             for (ChestRegistryManager.ChestLocation loc : ChestRegistryManager.getInstance().getChestLocations(owner, id)) {
-                if (!hasNetworkUpgrade(player, loc.dimensionKey, loc.pos)) continue;
-                result.add(new TransferGraphSyncPacket.ChestData(id, loc.dimensionKey, loc.pos.asLong()));
+                BaseChestBlockEntity be = loadedChest(player, loc.dimensionKey, loc.pos);
+                if (be == null || !be.hasNetworkUpgrade()) continue;
+                result.add(new TransferGraphSyncPacket.ChestData(
+                        id,
+                        loc.dimensionKey,
+                        loc.pos.asLong(),
+                        be.getNetworkBandwidthCapacity(),
+                        be.getStressBandwidthUsed(),
+                        be.getRemainingTransferBandwidth()
+                ));
             }
         }
         result.sort((a, b) -> {
@@ -61,14 +69,13 @@ public record RequestTransferGraphPacket() implements CustomPacketPayload {
         return result;
     }
 
-    private static boolean hasNetworkUpgrade(ServerPlayer player, String dimensionKey, net.minecraft.core.BlockPos pos) {
+    private static BaseChestBlockEntity loadedChest(ServerPlayer player, String dimensionKey, net.minecraft.core.BlockPos pos) {
         ResourceLocation dimLoc = ResourceLocation.tryParse(dimensionKey);
-        if (dimLoc == null) return false;
+        if (dimLoc == null) return null;
         ServerLevel level = player.server.getLevel(net.minecraft.resources.ResourceKey.create(
                 net.minecraft.core.registries.Registries.DIMENSION,
                 dimLoc
         ));
-        BaseChestBlockEntity be = level == null ? null : HomesteadChestAccess.resolve(level.getBlockEntity(pos));
-        return be != null && be.hasNetworkUpgrade();
+        return level == null ? null : HomesteadChestAccess.resolve(level.getBlockEntity(pos));
     }
 }

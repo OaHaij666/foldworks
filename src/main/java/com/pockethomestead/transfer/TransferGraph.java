@@ -62,6 +62,20 @@ public class TransferGraph {
         return null;
     }
 
+    public boolean updateChestId(String oldChestId, String newChestId, String dimensionKey, BlockPos pos) {
+        boolean changed = false;
+        for (TransferNode node : nodes.values()) {
+            if (node.getNodeType() == TransferNode.NodeType.CHEST
+                    && node.getChestId().equals(oldChestId)
+                    && node.getDimensionKey().equals(dimensionKey)
+                    && node.getPos().equals(pos)) {
+                node.setChestId(newChestId);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
     public TransferNode addNode(String pageId, String chestId, String dimensionKey, BlockPos pos, int x, int y) {
         if (!pages.containsKey(pageId)) pageId = ensureDefaultPage().getId();
         TransferNode existing = findNode(chestId, dimensionKey, pos);

@@ -17,8 +17,8 @@ public enum RelativeSide {
         if (front == null || front.getAxis().isVertical()) front = Direction.NORTH;
         if (side == front) return FRONT;
         if (side == front.getOpposite()) return BACK;
-        if (side == front.getCounterClockWise()) return LEFT;
-        if (side == front.getClockWise()) return RIGHT;
+        if (side == front.getClockWise()) return LEFT;
+        if (side == front.getCounterClockWise()) return RIGHT;
         return FRONT;
     }
 
@@ -27,8 +27,8 @@ public enum RelativeSide {
         return switch (this) {
             case FRONT -> front;
             case BACK -> front.getOpposite();
-            case LEFT -> front.getCounterClockWise();
-            case RIGHT -> front.getClockWise();
+            case LEFT -> front.getClockWise();
+            case RIGHT -> front.getCounterClockWise();
             case UP -> Direction.UP;
             case DOWN -> Direction.DOWN;
         };

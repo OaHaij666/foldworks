@@ -119,7 +119,13 @@ public class CreateHomesteadChestBlock extends KineticBlock implements EntityBlo
     public boolean hasShaftTowards(LevelReader level, BlockPos pos, BlockState state, Direction face) {
         if (face.getAxis() != state.getValue(STRESS_AXIS)) return false;
         BaseChestBlockEntity chest = HomesteadChestAccess.resolve(level.getBlockEntity(pos));
-        return chest != null && (chest.canStressInput(face) || chest.canStressOutput(face));
+        if (chest == null || !chest.hasStressUpgrade()) return false;
+        return isConfiguredStressAxis(chest.getConfiguredStressInputWorldSide(), face)
+                || isConfiguredStressAxis(chest.getConfiguredStressOutputWorldSide(), face);
+    }
+
+    private boolean isConfiguredStressAxis(@Nullable Direction configuredSide, Direction face) {
+        return configuredSide != null && configuredSide.getAxis() == face.getAxis();
     }
 
     @Override

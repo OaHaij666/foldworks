@@ -28,7 +28,7 @@ public class TransferNode {
     private final String id;
     private String pageId;
     private final NodeType type;
-    private final String chestId;
+    private String chestId;
     private final String dimensionKey;
     private final BlockPos pos;
     private int x;
@@ -67,6 +67,7 @@ public class TransferNode {
     public List<String> getFilterItemIds() { return filterItemIds; }
 
     public void setPageId(String pageId) { this.pageId = pageId; }
+    public void setChestId(String chestId) { this.chestId = chestId == null ? "" : chestId; }
     public void setPosition(int x, int y) { this.x = x; this.y = y; }
     public void setExpanded(boolean expanded) { this.expanded = expanded; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }

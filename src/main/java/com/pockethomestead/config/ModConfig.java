@@ -91,6 +91,26 @@ public class ModConfig {
             .comment("物品传输间隔（tick），20=每秒一次，值越小传输越频繁但服务器开销越大")
             .defineInRange("transferTickInterval", 20, 1, 1200);
 
+    public static final ModConfigSpec.IntValue NETWORK_BANDWIDTH_PER_UPGRADE = BUILDER
+            .comment("每个网络升级在每个传输周期提供的带宽")
+            .defineInRange("networkBandwidthPerUpgrade", 8, 0, 100000000);
+
+    public static final ModConfigSpec.IntValue ITEM_BANDWIDTH_COST = BUILDER
+            .comment("每传输 1 个物品消耗的带宽")
+            .defineInRange("itemBandwidthCost", 1, 1, 1000000);
+
+    public static final ModConfigSpec.IntValue FLUID_MB_PER_BANDWIDTH = BUILDER
+            .comment("每 1 点带宽可传输的流体量（mB）")
+            .defineInRange("fluidMbPerBandwidth", 100, 1, 100000000);
+
+    public static final ModConfigSpec.IntValue ENERGY_FE_PER_BANDWIDTH = BUILDER
+            .comment("每 1 点带宽可传输的电力（FE）")
+            .defineInRange("energyFePerBandwidth", 200, 1, 100000000);
+
+    public static final ModConfigSpec.IntValue STRESS_SU_PER_BANDWIDTH = BUILDER
+            .comment("每 1 点带宽可传输的 Create 应力（SU）")
+            .defineInRange("stressSuPerBandwidth", 4, 1, 100000000);
+
     public static final ModConfigSpec.BooleanValue VOID_ENABLED = BUILDER
             .comment("是否启用虚空产出（关闭时箱子UI中的虚空按钮置灰不可用，传输只在实际目标箱子存在时进行）")
             .define("voidEnabled", false);

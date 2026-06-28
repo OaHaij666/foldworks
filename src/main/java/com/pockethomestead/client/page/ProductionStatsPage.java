@@ -14,6 +14,9 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.material.Fluid;
+import net.minecraft.world.level.material.Fluids;
+import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.ArrayList;
@@ -209,7 +212,8 @@ public class ProductionStatsPage extends Page {
 
     private void renderResourceInfo(GuiGraphics g, ClientProductionStatsCache.ProductionRow row, boolean fluid,
                                     int ix, int iy, int iw, int ih) {
-        textScaled(g, "★", ix + 7, iy + 11, Theme.TEXT_FAINT, 0.82f);
+        boolean favorite = ClientProductionStatsCache.isFavoriteResource(row.itemId());
+        textScaled(g, "★", ix + 7, iy + 11, favorite ? 0xFFD5A21B : Theme.TEXT_FAINT, 0.82f);
         int iconX = ix + 24;
         int iconY = iy + 8;
         g.pose().pushPose();
@@ -473,7 +477,28 @@ public class ProductionStatsPage extends Page {
             rowScroll = 0;
             return true;
         }
+        if (handleFavoriteClick(mx, my)) return true;
         return Theme.inside(mx, my, x, y, w, h);
+    }
+
+    private boolean handleFavoriteClick(double mx, double my) {
+        int innerX = x + 8;
+        int headerY = y + TOOLBAR_H + 4;
+        int listY = headerY + HEADER_H + 4;
+        int maxRows = Math.max(1, (h - (listY - y) - 8) / (ROW_H + ROW_GAP));
+        List<ClientProductionStatsCache.ProductionRow> rows = filteredRows();
+        rowScroll = clamp(rowScroll, 0, Math.max(0, rows.size() - maxRows));
+        for (int i = 0; i < maxRows && i + rowScroll < rows.size(); i++) {
+            int rowY = listY + i * (ROW_H + ROW_GAP);
+            if (Theme.inside(mx, my, innerX + 3, rowY + 5, 20, 20)) {
+                String id = rows.get(i + rowScroll).itemId();
+                ClientProductionStatsCache.setFavoriteResourceLocal(id, !ClientProductionStatsCache.isFavoriteResource(id));
+                PacketDistributor.sendToServer(new UpdateProductionStatsPacket("TOGGLE_FAVORITE_RESOURCE", List.of(id)));
+                rowScroll = 0;
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean handleGroupDropdownClick(double mx, double my) {
@@ -708,7 +733,12 @@ public class ProductionStatsPage extends Page {
             case 4 -> Comparator.comparingInt(ClientProductionStatsCache.ProductionRow::currentCount).reversed();
             default -> Comparator.comparingInt((ClientProductionStatsCache.ProductionRow row) -> Math.abs(row.netRatePerMinute())).reversed();
         };
-        rows.sort(comparator);
+        rows.sort((a, b) -> {
+            boolean af = ClientProductionStatsCache.isFavoriteResource(a.itemId());
+            boolean bf = ClientProductionStatsCache.isFavoriteResource(b.itemId());
+            if (af != bf) return af ? -1 : 1;
+            return comparator.compare(a, b);
+        });
         return rows;
     }
 
@@ -835,12 +865,27 @@ public class ProductionStatsPage extends Page {
         return item == Items.AIR ? null : item;
     }
 
+    private Fluid resolveFluid(String resourceId) {
+        if (resourceId != null && resourceId.startsWith(TransferEdge.FLUID_PREFIX)) resourceId = resourceId.substring(TransferEdge.FLUID_PREFIX.length());
+        ResourceLocation id = ResourceLocation.tryParse(resourceId);
+        if (id == null) return null;
+        Fluid fluid = BuiltInRegistries.FLUID.get(id);
+        return fluid == Fluids.EMPTY ? null : fluid;
+    }
+
     private boolean isFluidResource(String resourceId) {
         return resourceId != null && resourceId.startsWith(TransferEdge.FLUID_PREFIX);
     }
 
     private String shortResource(String resourceId) {
         if (resourceId == null) return "";
+        if (resourceId.startsWith(TransferEdge.FLUID_PREFIX)) {
+            Fluid fluid = resolveFluid(resourceId);
+            if (fluid != null) return new FluidStack(fluid, 1).getHoverName().getString();
+        } else {
+            Item item = resolveItem(resourceId);
+            if (item != null) return new ItemStack(item).getHoverName().getString();
+        }
         String id = resourceId;
         if (id.startsWith(TransferEdge.ITEM_PREFIX)) id = id.substring(TransferEdge.ITEM_PREFIX.length());
         if (id.startsWith(TransferEdge.FLUID_PREFIX)) id = id.substring(TransferEdge.FLUID_PREFIX.length());

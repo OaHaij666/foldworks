@@ -7,6 +7,7 @@ import com.pockethomestead.blockentity.SideMode;
 import com.pockethomestead.menu.BaseChestMenu;
 import com.pockethomestead.production.ProductionStatsStorage;
 import com.pockethomestead.registry.ChestRegistryManager;
+import com.pockethomestead.transfer.TransferGraphStorage;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.RegistryFriendlyByteBuf;
@@ -65,10 +66,17 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
                 case 2 -> {
                     String newId = packet.value.trim();
                     if (!newId.isEmpty() && be.getOwnerUUID() != null) {
+                        String oldId = be.getChestId();
                         ChestRegistryManager.getInstance().updateChestId(
-                            be.getOwnerUUID(), be.getChestId(), newId,
+                            be.getOwnerUUID(), oldId, newId,
                             be.getLevel(), be.getBlockPos());
                         be.setChestId(newId);
+                        if (player.server != null && be.getLevel() != null) {
+                            TransferGraphStorage graphStorage = TransferGraphStorage.get(player.server);
+                            boolean changed = graphStorage.graphFor(be.getOwnerUUID()).updateChestId(
+                                    oldId, newId, be.getLevel().dimension().location().toString(), be.getBlockPos());
+                            if (changed) graphStorage.setDirty();
+                        }
                     }
                     sendSyncToClient(player, be);
                 }
@@ -84,7 +92,9 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
                 case 15 -> putUpgradeFromCarried(menu, be, packet.value, true);
                 case 16 -> takeUpgradeToCarried(player, menu, be, packet.value, false);
                 case 17 -> takeUpgradeToCarried(player, menu, be, packet.value, true);
-                case 18 -> applySideConfig(be, packet.value);
+                case 18 -> applySideFunction(be, packet.value);
+                case 19 -> applyStressOutputSpeed(be, packet.value);
+                case 20 -> applyStressOutputDirection(be, packet.value);
                 default -> {}
             }
 
@@ -205,13 +215,24 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
         };
     }
 
-    private static void applySideConfig(BaseChestBlockEntity be, String value) {
+    private static void applySideFunction(BaseChestBlockEntity be, String value) {
         String[] parts = value.split("\\|");
         if (parts.length != 3) return;
         try {
-            be.setSideMode(ResourceKind.valueOf(parts[0]), RelativeSide.valueOf(parts[1]), SideMode.valueOf(parts[2]));
+            be.setSideFunction(RelativeSide.valueOf(parts[0]), ResourceKind.valueOf(parts[1]), SideMode.valueOf(parts[2]));
         } catch (IllegalArgumentException ignored) {
         }
+    }
+
+    private static void applyStressOutputSpeed(BaseChestBlockEntity be, String value) {
+        try {
+            be.setStressOutputSpeedRpm(Integer.parseInt(value));
+        } catch (NumberFormatException ignored) {
+        }
+    }
+
+    private static void applyStressOutputDirection(BaseChestBlockEntity be, String value) {
+        be.setStressOutputReversed("1".equals(value) || "true".equalsIgnoreCase(value));
     }
 
     private static int parseSlot(String value) {
@@ -246,6 +267,7 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
 
         ChestSyncPacket sync = new ChestSyncPacket(
             be.getChestId(),
+            be.getBlockPos(),
             be.isTransferEnabled(),
             be.isVoidModeEnabled(),
             be.getTransferRateLimit(),
@@ -257,8 +279,13 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
             be.getEnergyStored(),
             be.getMaxEnergyStored(),
             be.getEnergyTransferLimit(),
+            be.getNetworkBandwidthCapacity(),
+            be.getStressBandwidthUsed(),
+            be.getRemainingTransferBandwidth(),
             be.hasStressUpgrade(),
             net.neoforged.fml.ModList.get().isLoaded("create"),
+            be.getStressOutputSpeedRpm(),
+            be.isStressOutputReversed(),
             productionStatsEnabled,
             productionGroupId,
             java.util.Arrays.stream(be.getUpgradeCounts()).boxed().toList(),

@@ -125,10 +125,10 @@ public record UpdateTransferGraphPacket(String action, List<String> values, int 
                 return true;
             }
             case "ADD_FILTER_ITEM" -> {
-                if (v.size() < 2 || !validItem(v.get(1))) return false;
+                if (v.size() < 2 || !validFilterResource(v.get(1))) return false;
                 TransferNode node = graph.getNode(v.get(0));
                 if (node == null || (node.getNodeType() != TransferNode.NodeType.CHEST && node.getNodeType() != TransferNode.NodeType.REROUTE)) return false;
-                node.addFilterItem(v.get(1));
+                node.addFilterItem(normalizeFilterResource(v.get(1)));
                 return true;
             }
             case "REMOVE_FILTER_ITEM" -> {
@@ -239,5 +239,18 @@ public record UpdateTransferGraphPacket(String action, List<String> values, int 
         if (loc == null) return false;
         Fluid fluid = BuiltInRegistries.FLUID.get(loc);
         return fluid != Fluids.EMPTY;
+    }
+
+    private static boolean validFilterResource(String id) {
+        if (id == null || id.isBlank()) return false;
+        if (id.startsWith(TransferEdge.ITEM_PREFIX)) return validItem(id.substring(TransferEdge.ITEM_PREFIX.length()));
+        if (id.startsWith(TransferEdge.FLUID_PREFIX)) return validFluid(id.substring(TransferEdge.FLUID_PREFIX.length()));
+        return validItem(id);
+    }
+
+    private static String normalizeFilterResource(String id) {
+        if (id == null) return "";
+        if (id.startsWith(TransferEdge.ITEM_PREFIX)) return id.substring(TransferEdge.ITEM_PREFIX.length());
+        return id;
     }
 }

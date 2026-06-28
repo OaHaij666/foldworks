@@ -22,6 +22,7 @@ public final class ClientProductionStatsCache {
     private static List<ProductionStatsSyncPacket.BucketData> buckets = List.of();
     private static List<ProductionStatsSyncPacket.InventoryData> inventories = List.of();
     private static List<ProductionStatsSyncPacket.MemberData> members = List.of();
+    private static Set<String> favoriteResources = Set.of();
 
     public static void update(ProductionStatsSyncPacket packet) {
         serverGameTime = packet.serverGameTime();
@@ -29,6 +30,7 @@ public final class ClientProductionStatsCache {
         buckets = List.copyOf(packet.buckets());
         inventories = List.copyOf(packet.inventories());
         members = List.copyOf(packet.members());
+        favoriteResources = new LinkedHashSet<>(packet.favoriteResources());
     }
 
     public static long serverGameTime() { return serverGameTime; }
@@ -36,6 +38,19 @@ public final class ClientProductionStatsCache {
     public static List<ProductionStatsSyncPacket.BucketData> buckets() { return buckets; }
     public static List<ProductionStatsSyncPacket.InventoryData> inventories() { return inventories; }
     public static List<ProductionStatsSyncPacket.MemberData> members() { return members; }
+    public static Set<String> favoriteResources() { return Set.copyOf(favoriteResources); }
+
+    public static boolean isFavoriteResource(String itemId) {
+        return itemId != null && favoriteResources.contains(itemId);
+    }
+
+    public static void setFavoriteResourceLocal(String itemId, boolean favorite) {
+        if (itemId == null || itemId.isBlank()) return;
+        LinkedHashSet<String> next = new LinkedHashSet<>(favoriteResources);
+        if (favorite) next.add(itemId);
+        else next.remove(itemId);
+        favoriteResources = next;
+    }
 
     public static ProductionStatsSyncPacket.GroupData group(String groupId) {
         for (ProductionStatsSyncPacket.GroupData group : groups) if (group.id().equals(groupId)) return group;

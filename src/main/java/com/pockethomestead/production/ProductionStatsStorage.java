@@ -125,6 +125,15 @@ public class ProductionStatsStorage extends SavedData {
         return false;
     }
 
+    public boolean toggleFavoriteResource(UUID owner, String itemId) {
+        PlayerStats stats = statsFor(owner);
+        if (stats.toggleFavoriteResource(itemId)) {
+            setDirty();
+            return true;
+        }
+        return false;
+    }
+
     public static ProductionStatsStorage load(CompoundTag tag, HolderLookup.Provider reg) {
         ProductionStatsStorage storage = new ProductionStatsStorage();
         ListTag list = tag.getList("Players", Tag.TAG_COMPOUND);
@@ -161,6 +170,7 @@ public class ProductionStatsStorage extends SavedData {
         private final Map<String, Map<String, Integer>> chestInventories = new LinkedHashMap<>();
         private final Map<String, Map<String, Integer>> groupInventories = new LinkedHashMap<>();
         private final Map<String, Map<String, LinkedHashMap<Long, Bucket>>> buckets = new LinkedHashMap<>();
+        private final Set<String> favoriteResources = new LinkedHashSet<>();
 
         private PlayerStats() {
             ensureDefaultGroup();
@@ -210,6 +220,10 @@ public class ProductionStatsStorage extends SavedData {
             List<MemberSnapshot> rows = new ArrayList<>();
             for (Map.Entry<String, String> entry : chestGroups.entrySet()) rows.add(new MemberSnapshot(entry.getKey(), entry.getValue()));
             return rows;
+        }
+
+        public Collection<String> favoriteResources() {
+            return List.copyOf(favoriteResources);
         }
 
         private boolean setChestGroup(String chestKey, String groupId, Map<String, Integer> currentItems) {
@@ -279,6 +293,13 @@ public class ProductionStatsStorage extends SavedData {
                 parent.childIds.remove(childId);
                 return false;
             }
+            return true;
+        }
+
+        private boolean toggleFavoriteResource(String itemId) {
+            String normalized = itemId == null ? "" : itemId.trim();
+            if (normalized.isEmpty()) return false;
+            if (!favoriteResources.remove(normalized)) favoriteResources.add(normalized);
             return true;
         }
 
@@ -428,6 +449,14 @@ public class ProductionStatsStorage extends SavedData {
                 }
             }
             tag.put("Buckets", bucketTag);
+
+            ListTag favoritesTag = new ListTag();
+            for (String itemId : favoriteResources) {
+                CompoundTag favorite = new CompoundTag();
+                favorite.putString("Id", itemId);
+                favoritesTag.add(favorite);
+            }
+            tag.put("FavoriteResources", favoritesTag);
             return tag;
         }
 
@@ -471,6 +500,12 @@ public class ProductionStatsStorage extends SavedData {
                 stats.buckets.computeIfAbsent(groupId, id -> new LinkedHashMap<>())
                         .computeIfAbsent(itemId, id -> new LinkedHashMap<>())
                         .put(bucket.start, bucket);
+            }
+
+            ListTag favorites = tag.getList("FavoriteResources", Tag.TAG_COMPOUND);
+            for (int i = 0; i < favorites.size(); i++) {
+                String id = favorites.getCompound(i).getString("Id").trim();
+                if (!id.isEmpty()) stats.favoriteResources.add(id);
             }
             return stats;
         }

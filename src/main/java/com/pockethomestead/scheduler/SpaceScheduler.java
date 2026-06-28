@@ -1,6 +1,5 @@
 package com.pockethomestead.scheduler;
 
-import com.pockethomestead.PocketHomestead;
 import com.pockethomestead.config.ModConfig;
 import com.pockethomestead.space.SpaceData;
 import com.pockethomestead.space.SpaceManager;
@@ -74,7 +73,6 @@ public class SpaceScheduler {
             if (space == null) continue;
             currentlyTicking.add(spaceId);
             sessionTicksRemaining.put(spaceId, budget.getTicksPerSession());
-            PocketHomestead.LOGGER.debug("调度空间开始: {}", spaceId);
         }
     }
 
@@ -91,7 +89,6 @@ public class SpaceScheduler {
             if (remaining <= 0) {
                 it.remove();
                 sessionTicksRemaining.remove(spaceId);
-                PocketHomestead.LOGGER.debug("空间会话结束: {}", spaceId);
             } else {
                 sessionTicksRemaining.put(spaceId, remaining);
             }
