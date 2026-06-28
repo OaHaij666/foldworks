@@ -54,6 +54,14 @@ public class TransferTeamStorage extends SavedData {
         return team != null && team.can(playerId, required);
     }
 
+    public boolean deleteTeam(UUID teamId, UUID requesterId) {
+        TransferTeam team = teams.get(teamId);
+        if (team == null || requesterId == null || !requesterId.equals(team.owner())) return false;
+        teams.remove(teamId);
+        setDirty();
+        return true;
+    }
+
     public static TransferTeamStorage load(CompoundTag tag, HolderLookup.Provider reg) {
         TransferTeamStorage storage = new TransferTeamStorage();
         ListTag list = tag.getList("Teams", Tag.TAG_COMPOUND);

@@ -31,7 +31,8 @@ public record TransferGraphSyncPacket(
             ResourceLocation.fromNamespaceAndPath("pockethomestead", "transfer_graph_sync"));
 
     public record GraphOptionData(String kind, String id, String label, boolean writable) {}
-    public record TeamData(String id, String name, String ownerId, String selfLevel) {}
+    public record TeamMemberData(String id, String level) {}
+    public record TeamData(String id, String name, String ownerId, String selfLevel, List<TeamMemberData> members) {}
     public record PageData(String id, String name, boolean enabled, int order) {}
     public record NodeFlowData(String itemId, int inputRatePerMinute, int outputRatePerMinute, long inputTotal, long outputTotal) {}
     public record ReplenishRuleData(String itemId, int targetCount) {}
@@ -45,7 +46,8 @@ public record TransferGraphSyncPacket(
                            String health, int actualRatePerMinute, List<EdgeItemRateData> itemRates) {}
     public record ChestData(String chestId, String dimensionKey, long pos,
                             int networkBandwidth, int stressBandwidthUsed, int remainingTransferBandwidth,
-                            String graphKind, String graphId) {}
+                            String graphKind, String graphId, String status, long lastSimulatedGameTime,
+                            String statusMessage, boolean offlineSnapshotEnabled) {}
 
     public static final StreamCodec<ByteBuf, TransferGraphSyncPacket> STREAM_CODEC = new StreamCodec<>() {
         @Override
@@ -213,7 +215,8 @@ public record TransferGraphSyncPacket(
                     ByteBufCodecs.STRING_UTF8.decode(buf),
                     ByteBufCodecs.STRING_UTF8.decode(buf),
                     ByteBufCodecs.STRING_UTF8.decode(buf),
-                    ByteBufCodecs.STRING_UTF8.decode(buf)
+                    ByteBufCodecs.STRING_UTF8.decode(buf),
+                    decodeTeamMembers(buf)
             ));
         }
         return rows;
@@ -226,6 +229,28 @@ public record TransferGraphSyncPacket(
             ByteBufCodecs.STRING_UTF8.encode(buf, row.name);
             ByteBufCodecs.STRING_UTF8.encode(buf, row.ownerId);
             ByteBufCodecs.STRING_UTF8.encode(buf, row.selfLevel);
+            encodeTeamMembers(buf, row.members);
+        }
+    }
+
+    private static List<TeamMemberData> decodeTeamMembers(ByteBuf buf) {
+        List<TeamMemberData> rows = new ArrayList<>();
+        int count = ByteBufCodecs.VAR_INT.decode(buf);
+        for (int i = 0; i < count; i++) {
+            rows.add(new TeamMemberData(
+                    ByteBufCodecs.STRING_UTF8.decode(buf),
+                    ByteBufCodecs.STRING_UTF8.decode(buf)
+            ));
+        }
+        return rows;
+    }
+
+    private static void encodeTeamMembers(ByteBuf buf, List<TeamMemberData> rows) {
+        if (rows == null) rows = List.of();
+        ByteBufCodecs.VAR_INT.encode(buf, rows.size());
+        for (TeamMemberData row : rows) {
+            ByteBufCodecs.STRING_UTF8.encode(buf, row.id);
+            ByteBufCodecs.STRING_UTF8.encode(buf, row.level);
         }
     }
 
@@ -314,7 +339,11 @@ public record TransferGraphSyncPacket(
                     ByteBufCodecs.VAR_INT.decode(buf),
                     ByteBufCodecs.VAR_INT.decode(buf),
                     ByteBufCodecs.STRING_UTF8.decode(buf),
-                    ByteBufCodecs.STRING_UTF8.decode(buf)
+                    ByteBufCodecs.STRING_UTF8.decode(buf),
+                    ByteBufCodecs.STRING_UTF8.decode(buf),
+                    buf.readLong(),
+                    ByteBufCodecs.STRING_UTF8.decode(buf),
+                    buf.readBoolean()
             ));
         }
         return chests;
@@ -331,6 +360,10 @@ public record TransferGraphSyncPacket(
             ByteBufCodecs.VAR_INT.encode(buf, chest.remainingTransferBandwidth);
             ByteBufCodecs.STRING_UTF8.encode(buf, chest.graphKind);
             ByteBufCodecs.STRING_UTF8.encode(buf, chest.graphId);
+            ByteBufCodecs.STRING_UTF8.encode(buf, chest.status);
+            buf.writeLong(chest.lastSimulatedGameTime);
+            ByteBufCodecs.STRING_UTF8.encode(buf, chest.statusMessage);
+            buf.writeBoolean(chest.offlineSnapshotEnabled);
         }
     }
 

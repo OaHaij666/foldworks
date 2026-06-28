@@ -3,9 +3,11 @@ package com.pockethomestead.compat.create;
 import com.mojang.serialization.MapCodec;
 import com.pockethomestead.blockentity.BaseChestBlockEntity;
 import com.pockethomestead.blockentity.HomesteadChestAccess;
+import com.pockethomestead.permission.AccessControl;
 import com.simibubi.create.content.kinetics.base.KineticBlock;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.LivingEntity;
@@ -72,6 +74,11 @@ public class CreateHomesteadChestBlock extends KineticBlock implements EntityBlo
     protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
         if (!level.isClientSide) {
             BlockEntity be = level.getBlockEntity(pos);
+            BaseChestBlockEntity chest = HomesteadChestAccess.resolve(be);
+            if (chest != null && player instanceof ServerPlayer serverPlayer && !AccessControl.canUseChest(serverPlayer, chest)) {
+                AccessControl.deny(serverPlayer);
+                return InteractionResult.SUCCESS;
+            }
             if (be instanceof MenuProvider provider) player.openMenu(provider, pos);
         }
         return InteractionResult.SUCCESS;

@@ -40,6 +40,11 @@ public class TransferGraphStorage extends SavedData {
         setDirty();
     }
 
+    public void removeGraph(GraphKey key) {
+        if (key == null) return;
+        if (graphs.remove(key) != null) setDirty();
+    }
+
     public Collection<TransferGraph> getGraphs() { return graphs.values(); }
 
     public boolean updateChestId(String oldChestId, String newChestId, String dimensionKey, net.minecraft.core.BlockPos pos) {

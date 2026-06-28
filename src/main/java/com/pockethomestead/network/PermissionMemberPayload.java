@@ -4,6 +4,7 @@ import com.pockethomestead.PocketHomestead;
 import com.pockethomestead.space.SpaceData;
 import com.pockethomestead.space.SpaceManager;
 import com.pockethomestead.space.SpaceStorage;
+import com.pockethomestead.space.SpacePermission;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.UUIDUtil;
@@ -17,10 +18,13 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.util.UUID;
 
-/** C→S：向白/黑名单增删玩家。add=true 时按 name 解析；否则按 targetId 移除。 */
-public record PermissionMemberPayload(UUID spaceId, boolean add, String name, UUID targetId) implements CustomPacketPayload {
+/** C→S：新增/更新/删除空间成员。add=true 时按 name 解析；否则按 targetId 移除。 */
+public record PermissionMemberPayload(UUID spaceId, boolean add, String name, UUID targetId,
+                                      SpacePermission.MemberRole role,
+                                      SpacePermission.AccessLevel overrideLevel) implements CustomPacketPayload {
     public static final CustomPacketPayload.Type<PermissionMemberPayload> TYPE =
             new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(PocketHomestead.MODID, "permission_member"));
+    private static final UUID EMPTY_UUID = new UUID(0, 0);
 
     public static final StreamCodec<ByteBuf, PermissionMemberPayload> STREAM_CODEC = StreamCodec.of(
         (buf, p) -> {
@@ -28,21 +32,38 @@ public record PermissionMemberPayload(UUID spaceId, boolean add, String name, UU
             ByteBufCodecs.BOOL.encode(buf, p.add());
             ByteBufCodecs.STRING_UTF8.encode(buf, p.name());
             UUIDUtil.STREAM_CODEC.encode(buf, p.targetId());
+            ByteBufCodecs.VAR_INT.encode(buf, p.role().ordinal());
+            ByteBufCodecs.VAR_INT.encode(buf, p.overrideLevel() == null ? -1 : p.overrideLevel().ordinal());
         },
-        buf -> new PermissionMemberPayload(
-            UUIDUtil.STREAM_CODEC.decode(buf),
-            ByteBufCodecs.BOOL.decode(buf),
-            ByteBufCodecs.STRING_UTF8.decode(buf),
-            UUIDUtil.STREAM_CODEC.decode(buf)
-        )
+        buf -> {
+            UUID spaceId = UUIDUtil.STREAM_CODEC.decode(buf);
+            boolean add = ByteBufCodecs.BOOL.decode(buf);
+            String name = ByteBufCodecs.STRING_UTF8.decode(buf);
+            UUID targetId = UUIDUtil.STREAM_CODEC.decode(buf);
+            int roleOrdinal = ByteBufCodecs.VAR_INT.decode(buf);
+            int overrideOrdinal = ByteBufCodecs.VAR_INT.decode(buf);
+            SpacePermission.MemberRole[] roles = SpacePermission.MemberRole.values();
+            SpacePermission.AccessLevel[] levels = SpacePermission.AccessLevel.values();
+            SpacePermission.MemberRole role = roleOrdinal >= 0 && roleOrdinal < roles.length ? roles[roleOrdinal] : SpacePermission.MemberRole.MEMBER;
+            SpacePermission.AccessLevel override = overrideOrdinal >= 0 && overrideOrdinal < levels.length ? levels[overrideOrdinal] : null;
+            return new PermissionMemberPayload(spaceId, add, name, targetId, role, override);
+        }
     );
 
     public static PermissionMemberPayload addByName(UUID spaceId, String name) {
-        return new PermissionMemberPayload(spaceId, true, name, new UUID(0, 0));
+        return addByName(spaceId, name, SpacePermission.MemberRole.MEMBER, null);
+    }
+
+    public static PermissionMemberPayload addByName(UUID spaceId, String name, SpacePermission.MemberRole role, SpacePermission.AccessLevel overrideLevel) {
+        return new PermissionMemberPayload(spaceId, true, name, EMPTY_UUID, role, overrideLevel);
+    }
+
+    public static PermissionMemberPayload updateById(UUID spaceId, UUID targetId, SpacePermission.MemberRole role, SpacePermission.AccessLevel overrideLevel) {
+        return new PermissionMemberPayload(spaceId, true, "", targetId, role, overrideLevel);
     }
 
     public static PermissionMemberPayload remove(UUID spaceId, UUID targetId) {
-        return new PermissionMemberPayload(spaceId, false, "", targetId);
+        return new PermissionMemberPayload(spaceId, false, "", targetId, SpacePermission.MemberRole.MEMBER, null);
     }
 
     @Override
@@ -52,25 +73,29 @@ public record PermissionMemberPayload(UUID spaceId, boolean add, String name, UU
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer player)) return;
             SpaceData space = SpaceManager.getInstance().getSpace(payload.spaceId());
-            if (space == null || !space.isOwner(player.getUUID())) return;
+            if (space == null || !space.can(player.getUUID(), SpacePermission.AccessLevel.MANAGE)) return;
 
             if (payload.add()) {
-                String name = payload.name().trim();
-                if (name.isEmpty()) return;
-                var profileOpt = player.server.getProfileCache() != null
-                        ? player.server.getProfileCache().get(name)
-                        : java.util.Optional.<com.mojang.authlib.GameProfile>empty();
-                if (profileOpt.isEmpty()) {
-                    player.sendSystemMessage(Component.translatable("pockethomestead.permission.player_not_found", name)
-                            .withStyle(ChatFormatting.RED));
-                    return;
+                if (!EMPTY_UUID.equals(payload.targetId())) {
+                    space.getPermission().setMember(payload.targetId(), payload.role(), payload.overrideLevel());
+                } else {
+                    String name = payload.name().trim();
+                    if (name.isEmpty()) return;
+                    var profileOpt = player.server.getProfileCache() != null
+                            ? player.server.getProfileCache().get(name)
+                            : java.util.Optional.<com.mojang.authlib.GameProfile>empty();
+                    if (profileOpt.isEmpty()) {
+                        player.sendSystemMessage(Component.translatable("pockethomestead.permission.player_not_found", name)
+                                .withStyle(ChatFormatting.RED));
+                        return;
+                    }
+                    space.getPermission().setMember(profileOpt.get().getId(), payload.role(), payload.overrideLevel());
                 }
-                space.getPermission().addMember(profileOpt.get().getId());
             } else {
                 space.getPermission().removeMember(payload.targetId());
             }
             SpaceStorage.markDirty();
-            SpaceListPayload.sendTo(player);
+            SpaceListPayload.sendToAll(player.server);
         });
     }
 }

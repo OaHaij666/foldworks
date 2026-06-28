@@ -3,6 +3,7 @@ package com.pockethomestead.network;
 import com.pockethomestead.space.SpacePermission;
 import com.pockethomestead.transfer.GraphKey;
 import com.pockethomestead.transfer.TransferGraphAccess;
+import com.pockethomestead.transfer.TransferGraphStorage;
 import com.pockethomestead.transfer.TransferTeam;
 import com.pockethomestead.transfer.TransferTeamStorage;
 import io.netty.buffer.ByteBuf;
@@ -41,7 +42,7 @@ public record TransferTeamPacket(String action, String teamId, String value) imp
             if (!(context.player() instanceof ServerPlayer player)) return;
             TransferTeamStorage storage = TransferTeamStorage.get(player.server);
             if ("CREATE".equals(packet.action)) {
-                TransferTeam team = storage.createTeam(player.getUUID(), packet.value == null || packet.value.isBlank() ? player.getName().getString() + " Team" : packet.value);
+                TransferTeam team = storage.createTeam(player.getUUID(), packet.value == null || packet.value.isBlank() ? player.getName().getString() + "的团队" : packet.value);
                 RequestTransferGraphPacket.sendGraphTo(player, GraphKey.protectedGraph(team.id()));
                 return;
             }
@@ -49,6 +50,13 @@ public record TransferTeamPacket(String action, String teamId, String value) imp
             if (teamId == null || !TransferGraphAccess.canManage(player, GraphKey.protectedGraph(teamId))) return;
             TransferTeam team = storage.getTeam(teamId);
             if (team == null) return;
+            if ("DELETE".equals(packet.action)) {
+                if (storage.deleteTeam(teamId, player.getUUID())) {
+                    TransferGraphStorage.get(player.server).removeGraph(GraphKey.protectedGraph(teamId));
+                    RequestTransferGraphPacket.sendGraphTo(player, GraphKey.privateGraph(player.getUUID()));
+                }
+                return;
+            }
             if ("RENAME".equals(packet.action)) {
                 team.setName(packet.value);
                 storage.setDirty();

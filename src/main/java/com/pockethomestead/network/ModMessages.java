@@ -49,6 +49,12 @@ public class ModMessages {
         );
 
         registrar.playToServer(
+                UpdateOfflineSimulationPayload.TYPE,
+                UpdateOfflineSimulationPayload.STREAM_CODEC,
+                UpdateOfflineSimulationPayload::handleOnServer
+        );
+
+        registrar.playToServer(
                 PermissionMemberPayload.TYPE,
                 PermissionMemberPayload.STREAM_CODEC,
                 PermissionMemberPayload::handleOnServer

@@ -236,7 +236,7 @@ public class TransferEdge {
     public boolean isStressPort() { return fromPortKey.startsWith(STRESS_PREFIX); }
     public String itemId() { return isItemPort() ? fromPortKey.substring(ITEM_PREFIX.length()) : ""; }
     public String fluidId() { return isFluidPort() ? fromPortKey.substring(FLUID_PREFIX.length()) : ""; }
-    public String resourceId() { return isItemPort() || isFluidPort() ? fromPortKey : ""; }
+    public String resourceId() { return isItemPort() || isFluidPort() || isEnergyPort() || isStressPort() ? fromPortKey : ""; }
 
     public static String itemPort(String itemId) { return ITEM_PREFIX + itemId; }
     public static String fluidPort(String fluidId) { return FLUID_PREFIX + fluidId; }
@@ -311,11 +311,12 @@ public class TransferEdge {
     }
 
     private String syntheticItemId() {
-        return isItemPort() || isFluidPort() ? resourceId() : "";
+        return isItemPort() || isFluidPort() || isEnergyPort() || isStressPort() ? resourceId() : "";
     }
 
     private boolean validItemId(String itemId) {
         if (itemId == null) return false;
+        if (ENERGY_FE.equals(itemId) || STRESS_SU.equals(itemId)) return true;
         if (itemId.startsWith(ITEM_PREFIX)) {
             ResourceLocation id = ResourceLocation.tryParse(itemId.substring(ITEM_PREFIX.length()));
             return id != null && BuiltInRegistries.ITEM.get(id) != Items.AIR;

@@ -1,6 +1,7 @@
 package com.pockethomestead.scheduler;
 
 import com.pockethomestead.config.ModConfig;
+import com.pockethomestead.offline.OfflineChestSnapshotStorage;
 import com.pockethomestead.space.SpaceData;
 import com.pockethomestead.space.SpaceManager;
 import net.minecraft.server.MinecraftServer;
@@ -36,6 +37,7 @@ public class SpaceScheduler {
         checkVerification(server);
         processSchedulingQueue(server);
         tickActiveSessions(server);
+        OfflineChestSnapshotStorage.get(server).tick(server);
     }
 
     private void rebuildQueue() {

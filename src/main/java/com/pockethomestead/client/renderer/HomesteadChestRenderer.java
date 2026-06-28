@@ -7,6 +7,7 @@ import com.pockethomestead.blockentity.HomesteadChestAccess;
 import com.pockethomestead.blockentity.RelativeSide;
 import com.pockethomestead.blockentity.ResourceKind;
 import com.pockethomestead.blockentity.SideMode;
+import com.pockethomestead.compat.create.client.CreateChestShaftRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderer;
 import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
@@ -15,14 +16,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.fml.ModList;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-
 public class HomesteadChestRenderer implements BlockEntityRenderer<BlockEntity> {
-    private static final String CREATE_SHAFT_RENDERER = "com.pockethomestead.compat.create.client.CreateChestShaftRenderer";
-    private static Method createShaftRenderMethod;
-    private static boolean createShaftRendererUnavailable;
-
     public HomesteadChestRenderer(BlockEntityRendererProvider.Context context) {
     }
 
@@ -51,21 +45,10 @@ public class HomesteadChestRenderer implements BlockEntityRenderer<BlockEntity> 
     }
 
     private boolean renderCreateStressShaft(BlockEntity be, Direction side, PoseStack pose, MultiBufferSource buffers, int packedLight) {
-        if (createShaftRendererUnavailable || !ModList.get().isLoaded("create")) return false;
+        if (!ModList.get().isLoaded("create")) return false;
         try {
-            Method method = createShaftRenderMethod;
-            if (method == null) {
-                Class<?> renderer = Class.forName(CREATE_SHAFT_RENDERER);
-                method = renderer.getMethod("render", BlockEntity.class, Direction.class, PoseStack.class, MultiBufferSource.class, int.class);
-                createShaftRenderMethod = method;
-            }
-            Object rendered = method.invoke(null, be, side, pose, buffers, packedLight);
-            return rendered instanceof Boolean result && result;
-        } catch (ClassNotFoundException | NoSuchMethodException | IllegalAccessException | LinkageError ex) {
-            createShaftRendererUnavailable = true;
-            return false;
-        } catch (InvocationTargetException ex) {
-            createShaftRendererUnavailable = true;
+            return CreateChestShaftRenderer.render(be, side, pose, buffers, packedLight);
+        } catch (LinkageError ex) {
             return false;
         }
     }

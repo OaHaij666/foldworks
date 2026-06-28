@@ -189,17 +189,29 @@ public class TransferGraphScreen extends Screen {
         g.fill(0, HEADER_H - 2, width, HEADER_H, 0x12000000);
         Theme.hLine(g, 0, HEADER_H - 1, width, Theme.BORDER);
         text(g, "可视化传输图", 10, 10, Theme.TEXT);
-        chip(g, 302, 6, 150, 18, Theme.SURFACE, Theme.BORDER);
-        text(g, Theme.ellipsize(font, currentGraphLabel(), 134), 310, 11, Theme.PRIMARY_PRESS);
 
         int statusColor = hasValidationErrors() ? Theme.DANGER : dirty ? Theme.PRIMARY_PRESS : Theme.SUCCESS;
-        String status = hasValidationErrors() ? "有错误，保存会被拒绝" : dirty ? "未保存" : "已保存";
-        text(g, status, 122, 10, statusColor);
-        if (!validationStale && !ClientTransferGraphCache.validationIssues().isEmpty()) {
-            text(g, "问题 " + ClientTransferGraphCache.validationIssues().size(), 232, 10, statusColor);
+        String status = headerStatusLabel();
+        String issue = "问题 " + ClientTransferGraphCache.validationIssues().size();
+        boolean hasIssueCount = !validationStale && !ClientTransferGraphCache.validationIssues().isEmpty();
+        int graphX = headerGraphX();
+        int graphW = headerGraphW();
+        int saveX = headerSaveX();
+        if (graphW >= 64) {
+            chip(g, graphX, 6, graphW, 18, Theme.SURFACE, Theme.BORDER);
+            text(g, Theme.ellipsize(font, currentGraphLabel(), graphW - 16), graphX + 8, 11, Theme.PRIMARY_PRESS);
+            int cursor = graphX + graphW + 8;
+            if (cursor + Theme.styledWidth(font, status) <= saveX - 4) {
+                text(g, status, cursor, 10, statusColor);
+                cursor += Theme.styledWidth(font, status) + 8;
+                if (hasIssueCount && cursor + Theme.styledWidth(font, issue) <= saveX - 4) {
+                    text(g, issue, cursor, 10, statusColor);
+                }
+            }
+        } else if (122 + Theme.styledWidth(font, status) <= saveX - 4) {
+            text(g, status, 122, 10, statusColor);
         }
 
-        int saveX = width - 214;
         chip(g, saveX, 6, 54, 18, dirty ? Theme.PRIMARY_SOFT : Theme.SURFACE_ALT, dirty ? Theme.PRIMARY : Theme.BORDER);
         text(g, savePending ? "保存中" : "保存", saveX + 13, 11, dirty ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED);
         chip(g, saveX + 62, 6, 54, 18, Theme.SURFACE, Theme.BORDER);
@@ -208,6 +220,31 @@ public class TransferGraphScreen extends Screen {
         chip(g, helpX, 6, 20, 18, popupMode == PopupMode.HELP ? Theme.PRIMARY_SOFT : Theme.SURFACE, popupMode == PopupMode.HELP ? Theme.PRIMARY : Theme.BORDER);
         text(g, "?", helpX + 7, 11, Theme.PRIMARY_PRESS);
         textRight(g, Math.round(zoom * 100) + "%", width - 10, 10, Theme.PRIMARY_PRESS);
+    }
+
+    private String headerStatusLabel() {
+        if (hasValidationErrors()) return "配置错误";
+        return dirty ? "未保存" : "已保存";
+    }
+
+    private int headerGraphX() {
+        return 118;
+    }
+
+    private int headerGraphW() {
+        int saveX = headerSaveX();
+        int graphX = headerGraphX();
+        int statusW = Theme.styledWidth(font, headerStatusLabel());
+        boolean hasIssueCount = !validationStale && !ClientTransferGraphCache.validationIssues().isEmpty();
+        int issueW = hasIssueCount ? Theme.styledWidth(font, "问题 " + ClientTransferGraphCache.validationIssues().size()) : 0;
+        int reserved = 8 + statusW + (hasIssueCount ? 8 + issueW : 0);
+        int w = Math.min(126, saveX - graphX - reserved - 8);
+        if (w < 72) w = Math.min(108, saveX - graphX - 8);
+        return Math.max(0, w);
+    }
+
+    private int headerSaveX() {
+        return width - 214;
     }
 
     private void renderTabs(GuiGraphics g, int mx, int my) {
@@ -295,6 +332,7 @@ public class TransferGraphScreen extends Screen {
             text(g, (node.enabled() ? "" : "⊘ ") + "传输箱 " + node.chestId(), 8, 7, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
             drawExpandButton(g, node, NODE_W);
             text(g, shortPos(node.pos()), 8, 30, Theme.TEXT_MUTED);
+            drawChestStatusMarker(g, node, 72, 34);
             renderBandwidthStatus(g, node, 82, 29);
             renderChestNode(g, node, 0, 0);
             g.pose().popPose();
@@ -377,11 +415,11 @@ public class TransferGraphScreen extends Screen {
         Theme.shadow(g, 0, 0, TRASH_W, h, CARD_RADIUS);
         Theme.panel(g, 0, 0, TRASH_W, h, CARD_RADIUS, node.enabled() ? Theme.SURFACE : 0xFFE9EDF2, border);
         Theme.fillRound(g, 2, 2, TRASH_W - 4, 24, CARD_RADIUS - 1, node.enabled() ? 0xFFEAF6FF : 0xFFDDE3EA);
-        text(g, (node.enabled() ? "" : "⊘ ") + "玩家背包", 10, 8, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
+        text(g, Theme.ellipsize(font, (node.enabled() ? "" : "⊘ ") + playerInventoryTitle(node), TRASH_W - 36), 10, 8, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
         drawExpandButton(g, node, TRASH_W);
         drawPort(g, inputPortLocalX(), h / 2, node.enabled() ? Theme.SUCCESS : Theme.TEXT_FAINT);
         text(g, "补货目标", 12, 36, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
-        String playerLabel = node.targetPlayerId() == null || node.targetPlayerId().isBlank() ? "自己" : node.targetPlayerId().substring(0, Math.min(8, node.targetPlayerId().length()));
+        String playerLabel = playerInventoryLabel(node);
         text(g, playerLabel, 82, 36, Theme.TEXT_MUTED);
         if (isExpanded(node)) {
             text(g, "+ 补货项", 12, 54, node.enabled() ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED);
@@ -403,6 +441,20 @@ public class TransferGraphScreen extends Screen {
         Theme.hLine(g, 8, h - 28, TRASH_W - 16, Theme.DIVIDER);
         text(g, node.enabled() ? "禁用" : "启用", 10, h - 18, Theme.PRIMARY_PRESS);
         text(g, "删除", 62, h - 18, Theme.DANGER);
+    }
+
+    private String playerInventoryTitle(TransferGraphSyncPacket.NodeData node) {
+        return "玩家" + playerInventoryLabel(node) + "的背包";
+    }
+
+    private String playerInventoryLabel(TransferGraphSyncPacket.NodeData node) {
+        String target = node.targetPlayerId();
+        if (target == null || target.isBlank()) return "自己";
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null && target.equals(mc.player.getUUID().toString())) {
+            return mc.player.getGameProfile().getName();
+        }
+        return target.substring(0, Math.min(8, target.length()));
     }
 
     private void renderChestNode(GuiGraphics g, TransferGraphSyncPacket.NodeData node, int x, int y) {
@@ -439,6 +491,21 @@ public class TransferGraphScreen extends Screen {
         String label = "带宽 " + remaining + "/" + total;
         if (chest.stressBandwidthUsed() > 0) label += " 力-" + chest.stressBandwidthUsed();
         textRight(g, Theme.ellipsize(font, label, NODE_W - x - 6), NODE_W - 8, y, node.enabled() ? color : Theme.TEXT_FAINT);
+    }
+
+    private void drawChestStatusMarker(GuiGraphics g, TransferGraphSyncPacket.NodeData node, int x, int y) {
+        TransferGraphSyncPacket.ChestData chest = chestDataFor(node);
+        if (chest == null) {
+            Theme.fillRound(g, x - 3, y - 3, 6, 6, 3, Theme.DANGER);
+            return;
+        }
+        int color = switch (chest.status()) {
+            case "OFFLINE_SIMULATED" -> 0xFFE0B43A;
+            case "OFFLINE_DISABLED" -> Theme.TEXT_FAINT;
+            case "MISSING" -> Theme.DANGER;
+            default -> 0;
+        };
+        if (color != 0) Theme.fillRound(g, x - 3, y - 3, 6, 6, 3, color);
     }
 
     private void renderBandwidthBar(GuiGraphics g, TransferGraphSyncPacket.NodeData node, int x, int y, int w) {
@@ -669,7 +736,7 @@ public class TransferGraphScreen extends Screen {
             List<TransferGraphSyncPacket.GraphOptionData> options = ClientTransferGraphCache.graphOptions();
             int h = 34 + Math.max(1, options.size()) * 18 + 22 + ("PROTECTED".equals(currentGraphKind()) ? 18 : 0);
             crispPanel(g, menuX, menuY, 214, h, Theme.SURFACE, Theme.BORDER_STRONG);
-            text(g, "连线图", menuX + 8, menuY + 8, Theme.TEXT);
+            text(g, "选择传输图", menuX + 8, menuY + 8, Theme.TEXT);
             int y = menuY + 28;
             for (TransferGraphSyncPacket.GraphOptionData option : options) {
                 boolean active = option.kind().equals(currentGraphKind()) && option.id().equals(currentGraphId());
@@ -677,15 +744,15 @@ public class TransferGraphScreen extends Screen {
                 text(g, Theme.ellipsize(font, option.label(), 150), menuX + 28, y, option.writable() ? Theme.TEXT : Theme.TEXT_MUTED);
                 y += 18;
             }
-            text(g, "+ 新建 Team 图", menuX + 8, y + 2, Theme.PRIMARY_PRESS);
-            if ("PROTECTED".equals(currentGraphKind())) text(g, "+ 添加成员 WRITE", menuX + 8, y + 20, Theme.PRIMARY_PRESS);
+            text(g, "+ 新建团队图", menuX + 8, y + 2, Theme.PRIMARY_PRESS);
+            if ("PROTECTED".equals(currentGraphKind())) text(g, "+ 添加可编辑成员", menuX + 8, y + 20, Theme.PRIMARY_PRESS);
             return;
         }
         if (menuMode == MenuMode.TEAM_MEMBER_ADD) {
             crispPanel(g, menuX, menuY, 214, 56, Theme.SURFACE, Theme.BORDER_STRONG);
-            text(g, "添加 Team 成员 UUID", menuX + 8, menuY + 8, Theme.TEXT);
+            text(g, "添加团队成员 UUID", menuX + 8, menuY + 8, Theme.TEXT);
             if (pageNameEdit != null) pageNameEdit.render(g, 0, 0, 0);
-            text(g, "Enter 添加 WRITE", menuX + 8, menuY + 39, Theme.TEXT_MUTED);
+            text(g, "Enter 添加为可编辑", menuX + 8, menuY + 39, Theme.TEXT_MUTED);
             return;
         }
         if (menuMode == MenuMode.PAGE_ACTION) {
@@ -736,7 +803,8 @@ public class TransferGraphScreen extends Screen {
         }
         for (int i = 0; i < Math.min(10, chests.size()); i++) {
             TransferGraphSyncPacket.ChestData chest = chests.get(i);
-            text(g, chest.chestId() + "  " + shortPos(chest.pos()), menuX + 8, menuY + 10 + i * 18, Theme.TEXT);
+            String status = "OFFLINE_SIMULATED".equals(chest.status()) ? " 离线" : "OFFLINE_DISABLED".equals(chest.status()) ? " 未加载" : "";
+            text(g, chest.chestId() + "  " + shortPos(chest.pos()) + status, menuX + 8, menuY + 10 + i * 18, Theme.TEXT);
         }
     }
 
@@ -793,7 +861,8 @@ public class TransferGraphScreen extends Screen {
         if (node.type().equals("REROUTE")) return;
         int h = node.type().equals("CHEST") || node.type().equals("PLAYER_INVENTORY") ? 82 : 62;
         crispPanel(g, popupX, popupY, 150, h, Theme.SURFACE, hasIssueForNode(node.id()) ? Theme.DANGER : Theme.BORDER_STRONG);
-        text(g, node.type().equals("TRASH") ? "销毁节点" : node.type().equals("PLAYER_INVENTORY") ? "玩家背包" : node.chestId(), popupX + 9, popupY + 9, Theme.TEXT);
+        String title = node.type().equals("TRASH") ? "销毁节点" : node.type().equals("PLAYER_INVENTORY") ? playerInventoryTitle(node) : node.chestId();
+        text(g, Theme.ellipsize(font, title, 132), popupX + 9, popupY + 9, Theme.TEXT);
         text(g, node.enabled() ? "禁用节点" : "启用节点", popupX + 9, popupY + 28, Theme.PRIMARY_PRESS);
         if (node.type().equals("CHEST")) text(g, "添加过滤", popupX + 9, popupY + 46, Theme.PRIMARY_PRESS);
         if (node.type().equals("PLAYER_INVENTORY")) text(g, "添加补货", popupX + 9, popupY + 46, Theme.PRIMARY_PRESS);
@@ -1069,14 +1138,16 @@ public class TransferGraphScreen extends Screen {
 
     private boolean handleHeaderClick(double mx, double my) {
         if (my < 0 || my >= HEADER_H) return false;
-        if (inside(mx, my, 302, 6, 150, 18)) {
+        int graphX = headerGraphX();
+        int graphW = headerGraphW();
+        if (graphW >= 64 && inside(mx, my, graphX, 6, graphW, 18)) {
             menuMode = MenuMode.GRAPH_ACTION;
-            menuX = 302;
+            menuX = clamp(graphX, 4, Math.max(4, width - 218));
             menuY = HEADER_H + 4;
             popupMode = PopupMode.NONE;
             return true;
         }
-        int saveX = width - 214;
+        int saveX = headerSaveX();
         if (inside(mx, my, saveX, 6, 54, 18)) {
             saveDraft();
             return true;
@@ -1140,7 +1211,7 @@ public class TransferGraphScreen extends Screen {
             } else {
                 int createY = menuY + 30 + options.size() * 18;
                 if (mx >= menuX && mx < menuX + 214 && my >= createY && my < createY + 20) {
-                    PacketDistributor.sendToServer(new TransferTeamPacket("CREATE", "", "Team"));
+                    PacketDistributor.sendToServer(new TransferTeamPacket("CREATE", "", "团队"));
                     dirty = false;
                     savePending = false;
                 } else if ("PROTECTED".equals(currentGraphKind()) && mx >= menuX && mx < menuX + 214 && my >= createY + 18 && my < createY + 38) {
@@ -2532,9 +2603,9 @@ public class TransferGraphScreen extends Screen {
             if (option.kind().equals(currentGraphKind()) && option.id().equals(currentGraphId())) return option.label();
         }
         return switch (currentGraphKind()) {
-            case "PUBLIC" -> "Public 图";
-            case "PROTECTED" -> "Team 图";
-            default -> "我的 Private 图";
+            case "PUBLIC" -> "公开图";
+            case "PROTECTED" -> "团队图";
+            default -> "我的私有图";
         };
     }
 

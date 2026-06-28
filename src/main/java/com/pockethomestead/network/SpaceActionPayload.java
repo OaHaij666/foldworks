@@ -2,6 +2,7 @@ package com.pockethomestead.network;
 
 import com.pockethomestead.PocketHomestead;
 import com.pockethomestead.dimension.PocketDimensionManager;
+import com.pockethomestead.permission.AccessControl;
 import com.pockethomestead.space.SpaceData;
 import com.pockethomestead.space.SpaceManager;
 import io.netty.buffer.ByteBuf;
@@ -59,20 +60,26 @@ public class SpaceActionPayload implements CustomPacketPayload {
 
     public static void handleOnServer(SpaceActionPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
-            PocketHomestead.LOGGER.info("收到空间操作请求: action={}, spaceId={}", payload.action(), payload.spaceId());
             try {
                 if (!(context.player() instanceof ServerPlayer player)) return;
                 switch (payload.action()) {
                     case ENTER -> {
                         SpaceData space = SpaceManager.getInstance().getSpace(payload.spaceId());
-                        if (space != null) {
-                            PocketDimensionManager.getInstance().teleportToSpace(player, space);
+                        if (space == null || !AccessControl.canEnterSpace(player, space)) {
+                            AccessControl.deny(player);
+                            return;
                         }
+                        PocketDimensionManager.getInstance().teleportToSpace(player, space);
                     }
                     case EXIT -> PocketDimensionManager.getInstance().exitToReturnPosition(player);
                     case DELETE -> {
+                        SpaceData space = SpaceManager.getInstance().getSpace(payload.spaceId());
+                        if (space == null || !space.isOwner(player.getUUID())) {
+                            AccessControl.deny(player);
+                            return;
+                        }
                         SpaceManager.getInstance().deleteSpace(player.server, payload.spaceId(), player.getUUID());
-                        SpaceListPayload.sendTo(player);
+                        SpaceListPayload.sendToAll(player.server);
                     }
                 }
             } catch (Exception e) {

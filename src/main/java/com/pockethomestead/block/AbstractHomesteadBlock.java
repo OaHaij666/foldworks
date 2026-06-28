@@ -2,8 +2,10 @@ package com.pockethomestead.block;
 
 import com.pockethomestead.blockentity.BaseChestBlockEntity;
 import com.pockethomestead.blockentity.HomesteadChestAccess;
+import com.pockethomestead.permission.AccessControl;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.LivingEntity;
@@ -72,6 +74,11 @@ public abstract class AbstractHomesteadBlock extends BaseEntityBlock {
     protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
         if (!level.isClientSide) {
             BlockEntity be = level.getBlockEntity(pos);
+            BaseChestBlockEntity chest = HomesteadChestAccess.resolve(be);
+            if (chest != null && player instanceof ServerPlayer serverPlayer && !AccessControl.canUseChest(serverPlayer, chest)) {
+                AccessControl.deny(serverPlayer);
+                return InteractionResult.SUCCESS;
+            }
             if (be instanceof MenuProvider) {
                 player.openMenu((MenuProvider) be, pos);
             }

@@ -64,9 +64,18 @@ public class SpaceStorage extends SavedData {
         t.putBoolean("Infinite", s.isInfinite());
         t.putFloat("TerrainAmplitude", s.getTerrainAmplitude());
         t.putString("Name", s.getName());
+        t.putBoolean("OfflineSimulationEnabled", s.isOfflineSimulationEnabled());
         t.putString("PermMode", s.getPermission().getMode().name());
+        t.putString("ProtectedLevel", s.getPermission().getProtectedLevel().name());
+        t.putString("PublicLevel", s.getPermission().getPublicLevel().name());
         ListTag members = new ListTag();
-        for (UUID id : s.getPermission().getMembers()) { CompoundTag e = new CompoundTag(); e.putUUID("Id", id); members.add(e); }
+        for (SpacePermission.MemberRule rule : s.getPermission().getMemberRules().values()) {
+            CompoundTag e = new CompoundTag();
+            e.putUUID("Id", rule.id());
+            e.putString("Role", rule.role().name());
+            if (rule.overrideLevel() != null) e.putString("OverrideLevel", rule.overrideLevel().name());
+            members.add(e);
+        }
         t.put("Members", members);
         return t;
     }
@@ -94,6 +103,7 @@ public class SpaceStorage extends SavedData {
             SpaceData sd = new SpaceData(sid, oid, dimensionId, w, h, d, terrain, biome, sourceDim, mob, struct, infinite, amplitude);
             if (t.contains("Name")) sd.setName(t.getString("Name"));
             loadPermission(t, sd.getPermission());
+            sd.setOfflineSimulationEnabled(t.getBoolean("OfflineSimulationEnabled"));
             return sd;
         } catch (Exception e) { PocketHomestead.LOGGER.error("反序列化空间数据失败", e); return null; }
     }
@@ -102,8 +112,24 @@ public class SpaceStorage extends SavedData {
     private static void loadPermission(CompoundTag t, SpacePermission perm) {
         if (t.contains("PermMode")) {
             perm.setMode(SpacePermission.AccessMode.valueOf(t.getString("PermMode")));
+            if (t.contains("ProtectedLevel")) {
+                perm.setProtectedLevel(SpacePermission.AccessLevel.valueOf(t.getString("ProtectedLevel")));
+            }
+            if (t.contains("PublicLevel")) {
+                perm.setPublicLevel(SpacePermission.AccessLevel.valueOf(t.getString("PublicLevel")));
+            }
             ListTag members = t.getList("Members", ListTag.TAG_COMPOUND);
-            for (int i = 0; i < members.size(); i++) perm.addMember(members.getCompound(i).getUUID("Id"));
+            for (int i = 0; i < members.size(); i++) {
+                CompoundTag member = members.getCompound(i);
+                UUID id = member.getUUID("Id");
+                SpacePermission.MemberRole role = member.contains("Role")
+                        ? SpacePermission.MemberRole.valueOf(member.getString("Role"))
+                        : SpacePermission.MemberRole.MEMBER;
+                SpacePermission.AccessLevel override = member.contains("OverrideLevel")
+                        ? SpacePermission.AccessLevel.valueOf(member.getString("OverrideLevel"))
+                        : null;
+                perm.setMember(id, role, override);
+            }
             return;
         }
         // 旧格式迁移
@@ -114,7 +140,9 @@ public class SpaceStorage extends SavedData {
             perm.setMode(SpacePermission.AccessMode.PRIVATE);
         } else if (!bl.isEmpty()) {
             perm.setMode(SpacePermission.AccessMode.BLACKLIST);
-            for (int i = 0; i < bl.size(); i++) perm.addMember(bl.getCompound(i).getUUID("Id"));
+            for (int i = 0; i < bl.size(); i++) {
+                perm.setMember(bl.getCompound(i).getUUID("Id"), SpacePermission.MemberRole.BLOCKED, SpacePermission.AccessLevel.NONE);
+            }
         } else if (!wl.isEmpty()) {
             perm.setMode(SpacePermission.AccessMode.WHITELIST);
             for (int i = 0; i < wl.size(); i++) perm.addMember(wl.getCompound(i).getUUID("Id"));

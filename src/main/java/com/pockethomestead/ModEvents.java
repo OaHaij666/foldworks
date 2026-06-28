@@ -2,16 +2,23 @@ package com.pockethomestead;
 
 import com.pockethomestead.command.PocketHomesteadCommand;
 import com.pockethomestead.dimension.PocketDimensionManager;
+import com.pockethomestead.offline.OfflineChestSnapshotStorage;
+import com.pockethomestead.permission.AccessControl;
 import com.pockethomestead.scheduler.SpaceScheduler;
 import com.pockethomestead.space.SpaceData;
 import com.pockethomestead.space.SpaceItemRegistry;
 import com.pockethomestead.space.SpaceManager;
+import com.pockethomestead.space.SpacePermission;
 import com.pockethomestead.space.SpaceStorage;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.level.Level;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
+import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.server.ServerStartedEvent;
@@ -85,6 +92,59 @@ public class ModEvents {
         PocketDimensionManager.getInstance().onServerTick(event.getServer());
     }
 
+    @SubscribeEvent
+    public static void onBlockBreak(BlockEvent.BreakEvent event) {
+        if (event.getLevel() instanceof Level level
+                && event.getPlayer() instanceof ServerPlayer player
+                && !canModifySpace(player, level)) {
+            event.setCanceled(true);
+            AccessControl.deny(player);
+            return;
+        }
+        if (event.getLevel() instanceof Level level && !level.isClientSide) {
+            var chest = HomesteadChestAccess.resolve(level.getBlockEntity(event.getPos()));
+            if (chest != null) {
+                chest.markDestroyedForOfflineSnapshot();
+                if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+                    OfflineChestSnapshotStorage.get(serverLevel.getServer())
+                            .deleteSnapshot(level.dimension().location().toString(), event.getPos());
+                }
+            }
+        }
+    }
+
+    @SubscribeEvent
+    public static void onBlockPlace(BlockEvent.EntityPlaceEvent event) {
+        if (event.getLevel() instanceof Level level
+                && event.getEntity() instanceof ServerPlayer player
+                && !canModifySpace(player, level)) {
+            event.setCanceled(true);
+            AccessControl.deny(player);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onBlockToolModification(BlockEvent.BlockToolModificationEvent event) {
+        if (event.isSimulated()) return;
+        if (event.getLevel() instanceof Level level
+                && event.getPlayer() instanceof ServerPlayer player
+                && !canModifySpace(player, level)) {
+            event.setCanceled(true);
+            AccessControl.deny(player);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
+        if (event.getLevel().isClientSide) return;
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        SpaceData space = AccessControl.containingSpace(event.getLevel());
+        if (space == null || space.can(player.getUUID(), SpacePermission.AccessLevel.USE)) return;
+        event.setCanceled(true);
+        event.setCancellationResult(InteractionResult.SUCCESS);
+        AccessControl.deny(player);
+    }
+
     /**
      * NeoForge 内置钩子：LevelEvent.PotentialSpawns
      * 在 NaturalSpawner.mobsAt() 中计算某位置的潜在可生成生物时触发。
@@ -104,5 +164,10 @@ public class ModEvents {
         if (!space.isMobSpawning()) {
             event.setCanceled(true);
         }
+    }
+
+    private static boolean canModifySpace(ServerPlayer player, Level level) {
+        SpaceData space = AccessControl.containingSpace(level);
+        return space == null || space.can(player.getUUID(), SpacePermission.AccessLevel.WRITE);
     }
 }

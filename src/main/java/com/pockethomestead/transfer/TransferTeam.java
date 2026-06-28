@@ -17,7 +17,7 @@ public class TransferTeam {
 
     public TransferTeam(UUID id, String name, UUID owner) {
         this.id = id == null ? UUID.randomUUID() : id;
-        this.name = name == null || name.isBlank() ? "Team" : name;
+        this.name = name == null || name.isBlank() ? "团队" : name;
         this.owner = owner;
         if (owner != null) members.put(owner, SpacePermission.AccessLevel.MANAGE);
     }

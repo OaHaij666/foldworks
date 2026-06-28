@@ -21,6 +21,8 @@ public record ChestSyncPacket(
     BlockPos blockPos,
     boolean transferEnabled,
     boolean voidModeEnabled,
+    boolean offlineSnapshotEnabled,
+    boolean spaceOfflineSimulationEnabled,
     int transferRateLimit,
     int nextTransferSeconds,
     int maxCapacity,
@@ -59,6 +61,8 @@ public record ChestSyncPacket(
             BlockPos blockPos = buf.readBlockPos();
             boolean transferEnabled = buf.readBoolean();
             boolean voidModeEnabled = buf.readBoolean();
+            boolean offlineSnapshotEnabled = buf.readBoolean();
+            boolean spaceOfflineSimulationEnabled = buf.readBoolean();
             int transferRateLimit = ByteBufCodecs.VAR_INT.decode(buf);
             int nextTransferSeconds = ByteBufCodecs.VAR_INT.decode(buf);
             int maxCapacity = ByteBufCodecs.VAR_INT.decode(buf);
@@ -108,7 +112,8 @@ public record ChestSyncPacket(
                 fluids.put(ByteBufCodecs.STRING_UTF8.decode(buf), ByteBufCodecs.VAR_INT.decode(buf));
             }
 
-            return new ChestSyncPacket(chestId, blockPos, transferEnabled, voidModeEnabled, transferRateLimit, nextTransferSeconds,
+            return new ChestSyncPacket(chestId, blockPos, transferEnabled, voidModeEnabled, offlineSnapshotEnabled, spaceOfflineSimulationEnabled,
+                    transferRateLimit, nextTransferSeconds,
                     maxCapacity, maxFluidCapacityMb, maxFluidTypes, maxFluidCapacityPerTypeMb,
                     energyStored, maxEnergyStored, energyTransferLimit,
                     networkBandwidth, stressBandwidthUsed, remainingTransferBandwidth,
@@ -126,6 +131,8 @@ public record ChestSyncPacket(
             buf.writeBlockPos(pkt.blockPos);
             buf.writeBoolean(pkt.transferEnabled);
             buf.writeBoolean(pkt.voidModeEnabled);
+            buf.writeBoolean(pkt.offlineSnapshotEnabled);
+            buf.writeBoolean(pkt.spaceOfflineSimulationEnabled);
             ByteBufCodecs.VAR_INT.encode(buf, pkt.transferRateLimit);
             ByteBufCodecs.VAR_INT.encode(buf, pkt.nextTransferSeconds);
             ByteBufCodecs.VAR_INT.encode(buf, pkt.maxCapacity);

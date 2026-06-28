@@ -17,12 +17,22 @@ import java.util.UUID;
 public record SpaceInfo(UUID spaceId, UUID ownerId, String name, int width, int depth,
                         String biome, SpaceData.TerrainType terrain, String dimensionId,
                         boolean infinite, float amplitude,
-                        SpacePermission.AccessMode mode, List<Member> members) {
+                        SpacePermission.AccessMode mode,
+                        SpacePermission.AccessLevel protectedLevel,
+                        SpacePermission.AccessLevel publicLevel,
+                        boolean offlineSimulationEnabled,
+                        List<Member> members) {
 
-    public record Member(UUID id, String name) {}
+    public record Member(UUID id, String name, SpacePermission.MemberRole role, SpacePermission.AccessLevel overrideLevel) {
+        public SpacePermission.AccessLevel effectiveLevel() {
+            return overrideLevel == null ? role.defaultLevel() : overrideLevel;
+        }
+    }
 
     private static final SpaceData.TerrainType[] TERRAIN_VALUES = SpaceData.TerrainType.values();
     private static final SpacePermission.AccessMode[] MODE_VALUES = SpacePermission.AccessMode.values();
+    private static final SpacePermission.AccessLevel[] LEVEL_VALUES = SpacePermission.AccessLevel.values();
+    private static final SpacePermission.MemberRole[] ROLE_VALUES = SpacePermission.MemberRole.values();
 
     private static SpaceData.TerrainType safeTerrain(int ordinal) {
         if (ordinal < 0 || ordinal >= TERRAIN_VALUES.length)
@@ -34,6 +44,18 @@ public record SpaceInfo(UUID spaceId, UUID ownerId, String name, int width, int 
         if (ordinal < 0 || ordinal >= MODE_VALUES.length)
             throw new DecoderException("Invalid access mode ordinal: " + ordinal);
         return MODE_VALUES[ordinal];
+    }
+
+    private static SpacePermission.AccessLevel safeLevel(int ordinal) {
+        if (ordinal < 0 || ordinal >= LEVEL_VALUES.length)
+            throw new DecoderException("Invalid access level ordinal: " + ordinal);
+        return LEVEL_VALUES[ordinal];
+    }
+
+    private static SpacePermission.MemberRole safeRole(int ordinal) {
+        if (ordinal < 0 || ordinal >= ROLE_VALUES.length)
+            throw new DecoderException("Invalid member role ordinal: " + ordinal);
+        return ROLE_VALUES[ordinal];
     }
 
     public static final StreamCodec<ByteBuf, SpaceInfo> STREAM_CODEC = StreamCodec.of(
@@ -49,10 +71,15 @@ public record SpaceInfo(UUID spaceId, UUID ownerId, String name, int width, int 
             ByteBufCodecs.BOOL.encode(buf, s.infinite());
             ByteBufCodecs.FLOAT.encode(buf, s.amplitude());
             ByteBufCodecs.VAR_INT.encode(buf, s.mode().ordinal());
+            ByteBufCodecs.VAR_INT.encode(buf, s.protectedLevel().ordinal());
+            ByteBufCodecs.VAR_INT.encode(buf, s.publicLevel().ordinal());
+            ByteBufCodecs.BOOL.encode(buf, s.offlineSimulationEnabled());
             ByteBufCodecs.VAR_INT.encode(buf, s.members().size());
             for (Member m : s.members()) {
                 UUIDUtil.STREAM_CODEC.encode(buf, m.id());
                 ByteBufCodecs.STRING_UTF8.encode(buf, m.name());
+                ByteBufCodecs.VAR_INT.encode(buf, m.role().ordinal());
+                ByteBufCodecs.VAR_INT.encode(buf, m.overrideLevel() == null ? -1 : m.overrideLevel().ordinal());
             }
         },
         buf -> {
@@ -67,15 +94,21 @@ public record SpaceInfo(UUID spaceId, UUID ownerId, String name, int width, int 
             boolean infinite = ByteBufCodecs.BOOL.decode(buf);
             float amplitude = ByteBufCodecs.FLOAT.decode(buf);
             SpacePermission.AccessMode mode = safeMode(ByteBufCodecs.VAR_INT.decode(buf));
+            SpacePermission.AccessLevel protectedLevel = safeLevel(ByteBufCodecs.VAR_INT.decode(buf));
+            SpacePermission.AccessLevel publicLevel = safeLevel(ByteBufCodecs.VAR_INT.decode(buf));
+            boolean offlineSimulationEnabled = ByteBufCodecs.BOOL.decode(buf);
             int n = ByteBufCodecs.VAR_INT.decode(buf);
             List<Member> members = new ArrayList<>(n);
             for (int i = 0; i < n; i++) {
                 UUID id = UUIDUtil.STREAM_CODEC.decode(buf);
                 String mname = ByteBufCodecs.STRING_UTF8.decode(buf);
-                members.add(new Member(id, mname));
+                SpacePermission.MemberRole role = safeRole(ByteBufCodecs.VAR_INT.decode(buf));
+                int overrideOrdinal = ByteBufCodecs.VAR_INT.decode(buf);
+                SpacePermission.AccessLevel override = overrideOrdinal < 0 ? null : safeLevel(overrideOrdinal);
+                members.add(new Member(id, mname, role, override));
             }
             return new SpaceInfo(spaceId, ownerId, name, width, depth, biome, terrain, dimensionId,
-                    infinite, amplitude, mode, List.copyOf(members));
+                    infinite, amplitude, mode, protectedLevel, publicLevel, offlineSimulationEnabled, List.copyOf(members));
         }
     );
 
@@ -83,14 +116,14 @@ public record SpaceInfo(UUID spaceId, UUID ownerId, String name, int width, int 
     public static SpaceInfo from(MinecraftServer server, SpaceData d) {
         SpacePermission perm = d.getPermission();
         List<Member> members = new ArrayList<>();
-        for (UUID id : perm.getMembers()) {
-            String name = resolveName(server, id);
-            members.add(new Member(id, name));
+        for (SpacePermission.MemberRule rule : perm.getMemberRules().values()) {
+            String name = resolveName(server, rule.id());
+            members.add(new Member(rule.id(), name, rule.role(), rule.overrideLevel()));
         }
         return new SpaceInfo(d.getSpaceId(), d.getOwnerId(), d.getName(),
                 d.getWidth(), d.getDepth(), d.getBiome(), d.getTerrainType(),
                 d.getDimensionId().toString(), d.isInfinite(), d.getTerrainAmplitude(),
-                perm.getMode(), List.copyOf(members));
+                perm.getMode(), perm.getProtectedLevel(), perm.getPublicLevel(), d.isOfflineSimulationEnabled(), List.copyOf(members));
     }
 
     private static String resolveName(MinecraftServer server, UUID id) {
@@ -105,5 +138,24 @@ public record SpaceInfo(UUID spaceId, UUID ownerId, String name, int width, int 
 
     public boolean isOwner(UUID playerId) {
         return ownerId.equals(playerId);
+    }
+
+    public SpacePermission.AccessLevel effectiveLevel(UUID playerId) {
+        if (playerId == null) return SpacePermission.AccessLevel.NONE;
+        if (isOwner(playerId)) return SpacePermission.AccessLevel.MANAGE;
+        for (Member member : members) {
+            if (member.id().equals(playerId)) {
+                if (member.role() == SpacePermission.MemberRole.BLOCKED) return SpacePermission.AccessLevel.NONE;
+                if (member.overrideLevel() != null) return member.overrideLevel();
+                if (member.role() == SpacePermission.MemberRole.MEMBER && mode == SpacePermission.AccessMode.WHITELIST) {
+                    return protectedLevel;
+                }
+                return member.role().defaultLevel();
+            }
+        }
+        return switch (mode) {
+            case PRIVATE, WHITELIST -> SpacePermission.AccessLevel.NONE;
+            case PUBLIC, BLACKLIST -> publicLevel;
+        };
     }
 }

@@ -8,6 +8,7 @@ import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
@@ -42,6 +43,13 @@ public record SpaceListPayload(List<SpaceInfo> spaces) implements CustomPacketPa
                 .getAccessibleSpaces(player.getUUID())
                 .stream().map(s -> SpaceInfo.from(player.server, s)).toList();
         PacketDistributor.sendToPlayer(player, new SpaceListPayload(infos));
+    }
+
+    public static void sendToAll(MinecraftServer server) {
+        if (server == null) return;
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            sendTo(player);
+        }
     }
 
     public static void handleOnClient(SpaceListPayload payload, IPayloadContext context) {

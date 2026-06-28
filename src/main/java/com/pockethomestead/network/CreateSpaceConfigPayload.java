@@ -30,7 +30,6 @@ public record CreateSpaceConfigPayload(ResourceLocation sourceDimension) impleme
 
     public static void handleOnServer(CreateSpaceConfigPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
-            PocketHomestead.LOGGER.info("收到空间配置: sourceDim={}", payload.sourceDimension());
             try {
                 if (!(context.player() instanceof ServerPlayer player)) return;
 
@@ -57,7 +56,7 @@ public record CreateSpaceConfigPayload(ResourceLocation sourceDimension) impleme
                 PocketDimensionManager.getInstance().queueTeleportToSpace(player, space);
 
                 // 推送最新列表
-                SpaceListPayload.sendTo(player);
+                SpaceListPayload.sendToAll(player.server);
             } catch (Exception e) {
                 PocketHomestead.LOGGER.error("创建空间失败", e);
             }

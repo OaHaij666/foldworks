@@ -73,6 +73,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
     private int currentPage = 0;
 
     private int localScrollRow = 0;
+    private int settingsScroll = 0;
     private RelativeSide selectedSide = RelativeSide.FRONT;
     private double faceYaw = -34.0;
     private double facePitch = 24.0;
@@ -102,6 +103,8 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
     private String cacheGraphTeamId = "";
     private boolean cacheProductionStatsEnabled;
     private String cacheProductionGroupId = "";
+    private boolean cacheOfflineSnapshotEnabled;
+    private boolean cacheSpaceOfflineSimulationEnabled;
     private final int[] cacheUpgradeCounts = new int[BaseChestBlockEntity.UPGRADE_SLOT_COUNT];
     private final EnumMap<ResourceKind, EnumMap<RelativeSide, SideMode>> cacheSideConfig = new EnumMap<>(ResourceKind.class);
 
@@ -189,6 +192,8 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         this.cacheChestId = p.chestId();
         this.cacheGraphKind = p.graphKind();
         this.cacheGraphTeamId = p.graphTeamId();
+        this.cacheOfflineSnapshotEnabled = p.offlineSnapshotEnabled();
+        this.cacheSpaceOfflineSimulationEnabled = p.spaceOfflineSimulationEnabled();
         syncChestIdEdit(false);
         this.cacheProductionStatsEnabled = p.productionStatsEnabled();
         this.cacheProductionGroupId = p.productionGroupId();
@@ -302,6 +307,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
     /** 切换页面 */
     private void switchPage() {
         currentPage = (currentPage + 1) % (settingsPageIndex() + 1);
+        if (!isSettingsPage()) settingsScroll = 0;
         rebuildPageWidgets();
     }
 
@@ -321,10 +327,10 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         if (isSettingsPage()) {
             PacketDistributor.sendToServer(new RequestProductionStatsPacket());
             int cardX = leftPos + BaseChestMenu.PANEL_PADDING;
-            int cardY = topPos + BaseChestMenu.HEADER_HEIGHT + 10;
+            int cardY = topPos + BaseChestMenu.HEADER_HEIGHT + 8;
             int cardW = panelW - BaseChestMenu.PANEL_PADDING * 2;
             graphButton = new UiButton("打开", UiButton.Variant.PRIMARY)
-                    .bounds(cardX + cardW - 58, cardY + 11, 48, 18)
+                    .bounds(cardX + cardW - 58, cardY + 9, 48, 18)
                     .onClick(() -> Minecraft.getInstance().setScreen(new TransferGraphScreen()));
         }
     }
@@ -562,19 +568,24 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
     /** 配置页渲染 */
     private void renderConfigPage(GuiGraphics g, int mx, int my, float partialTick) {
         int cardX = leftPos + BaseChestMenu.PANEL_PADDING;
-        int graphY = topPos + BaseChestMenu.HEADER_HEIGHT + 10;
         int cardW = panelW - BaseChestMenu.PANEL_PADDING * 2;
-        int graphH = 40;
+        int gap = 6;
+        int graphH = 36;
+        int viewportTop = settingsViewportTop();
+        int viewportBottom = settingsViewportBottom();
+        settingsScroll = Math.max(0, Math.min(maxSettingsScroll(), settingsScroll));
+        int graphY = viewportTop + 4 - settingsScroll;
 
+        g.enableScissor(leftPos + 1, viewportTop, leftPos + panelW - 1, viewportBottom);
         Theme.panel(g, cardX, graphY, cardW, graphH, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
-        Theme.text(g, font, "可视化节点", cardX + 10, graphY + 9, Theme.TEXT);
-        Theme.text(g, font, "编辑连线", cardX + 10, graphY + 23, Theme.TEXT_MUTED);
-        if (graphButton != null) graphButton.render(g, mx, my, partialTick);
+        Theme.text(g, font, "可视化节点", cardX + 10, graphY + 7, Theme.TEXT);
+        Theme.text(g, font, "编辑连线", cardX + 10, graphY + 20, Theme.TEXT_MUTED);
+        if (graphButton != null) graphButton.bounds(cardX + cardW - 58, graphY + 9, 48, 18).render(g, mx, my, partialTick);
 
-        int renameY = graphY + graphH + 8;
-        int renameH = 50;
+        int renameY = graphY + graphH + gap;
+        int renameH = 48;
         Theme.panel(g, cardX, renameY, cardW, renameH, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
-        Theme.text(g, font, "箱子标识", cardX + 10, renameY + 9, Theme.TEXT);
+        Theme.text(g, font, "箱子标识", cardX + 10, renameY + 7, Theme.TEXT);
         layoutChestIdEdit(cardX, renameY, cardW);
         if (chestIdEdit != null) chestIdEdit.render(g, mx, my, partialTick);
         int saveX = renameSaveX(cardX, cardW);
@@ -583,26 +594,67 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         Theme.panel(g, saveX, renameY + 25, 42, 18, 5, changed ? Theme.PRIMARY_SOFT : Theme.SURFACE_SUNK, saveHover && changed ? Theme.PRIMARY : Theme.BORDER);
         Theme.textCentered(g, font, "保存", saveX + 21, renameY + 31, changed ? Theme.PRIMARY_PRESS : Theme.TEXT_FAINT);
 
-        int accessY = renameY + renameH + 8;
-        int accessH = 42;
+        int accessY = renameY + renameH + gap;
+        int accessH = 38;
 
         Theme.panel(g, cardX, accessY, cardW, accessH, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
-        Theme.text(g, font, "连线图层级", cardX + 10, accessY + 9, Theme.TEXT);
-        renderGraphTierButton(g, mx, my, cardX + 10, accessY + 24, 58, "Private", "PRIVATE");
-        renderGraphTierButton(g, mx, my, cardX + 74, accessY + 24, 74, "Protected", "PROTECTED");
-        renderGraphTierButton(g, mx, my, cardX + 154, accessY + 24, 52, "Public", "PUBLIC");
+        Theme.text(g, font, "箱子权限", cardX + 10, accessY + 7, Theme.TEXT);
+        renderGraphTierButton(g, mx, my, graphTierButtonX(cardX, cardW, 0), accessY + 22, graphTierButtonW(cardW, 0), "私有", "PRIVATE");
+        renderGraphTierButton(g, mx, my, graphTierButtonX(cardX, cardW, 1), accessY + 22, graphTierButtonW(cardW, 1), "团队", "PROTECTED");
+        renderGraphTierButton(g, mx, my, graphTierButtonX(cardX, cardW, 2), accessY + 22, graphTierButtonW(cardW, 2), "公开", "PUBLIC");
 
-        int cardY = accessY + accessH + 8;
-        int cardH = 72;
+        int offlineY = accessY + accessH + gap;
+        int offlineH = 50;
+        Theme.panel(g, cardX, offlineY, cardW, offlineH, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
+        Theme.text(g, font, "离线模拟（实验）", cardX + 10, offlineY + 7, Theme.TEXT);
+        Theme.text(g, font, "箱子卸载后由快照顶替运行", cardX + 10, offlineY + 22,
+                cacheOfflineSnapshotEnabled || cacheSpaceOfflineSimulationEnabled ? Theme.TEXT_MUTED : Theme.TEXT_FAINT);
+        if (cacheSpaceOfflineSimulationEnabled && !cacheOfflineSnapshotEnabled) {
+            Theme.textRight(g, font, "空间已启用", cardX + cardW - 52, offlineY + 9, Theme.PRIMARY_PRESS);
+        }
+        drawStatsSwitch(g, statsToggleX(cardX, cardW), offlineY + 18, cacheOfflineSnapshotEnabled);
+
+        int cardY = offlineY + offlineH + gap;
+        int cardH = Math.max(58, topPos + panelH - cardY - BaseChestMenu.PANEL_PADDING);
 
         Theme.panel(g, cardX, cardY, cardW, cardH, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
-        Theme.text(g, font, "产率统计", cardX + 10, cardY + 10, Theme.TEXT);
-        Theme.text(g, font, "加入统计", cardX + 10, cardY + 27, cacheProductionStatsEnabled ? Theme.TEXT : Theme.TEXT_MUTED);
-        drawStatsSwitch(g, statsToggleX(cardX, cardW), cardY + 23, cacheProductionStatsEnabled);
+        Theme.text(g, font, "产率统计", cardX + 10, cardY + 7, Theme.TEXT);
+        Theme.text(g, font, "加入统计", cardX + 10, cardY + 22, cacheProductionStatsEnabled ? Theme.TEXT : Theme.TEXT_MUTED);
+        drawStatsSwitch(g, statsToggleX(cardX, cardW), cardY + 18, cacheProductionStatsEnabled);
 
-        Theme.text(g, font, "分组", cardX + 10, cardY + 50, Theme.TEXT_MUTED);
-        drawGroupSelector(g, mx, my, groupSelectorX(cardX), cardY + 44, groupSelectorW(cardW), 18);
-        if (statsGroupDropdownOpen) renderGroupDropdown(g, mx, my, groupSelectorX(cardX), cardY + 63, groupSelectorW(cardW));
+        Theme.text(g, font, "分组", cardX + 10, cardY + 43, Theme.TEXT_MUTED);
+        drawGroupSelector(g, mx, my, groupSelectorX(cardX), cardY + 37, groupSelectorW(cardW), 18);
+        if (statsGroupDropdownOpen) renderGroupDropdown(g, mx, my, groupSelectorX(cardX), cardY + 56, groupSelectorW(cardW));
+        g.disableScissor();
+        renderSettingsScrollbar(g);
+    }
+
+    private int settingsViewportTop() {
+        return topPos + BaseChestMenu.HEADER_HEIGHT + 4;
+    }
+
+    private int settingsViewportBottom() {
+        return topPos + panelH - BaseChestMenu.PANEL_PADDING;
+    }
+
+    private int settingsContentHeight() {
+        return 4 + 36 + 6 + 48 + 6 + 38 + 6 + 50 + 6 + 72 + 8;
+    }
+
+    private int maxSettingsScroll() {
+        return Math.max(0, settingsContentHeight() - Math.max(1, settingsViewportBottom() - settingsViewportTop()));
+    }
+
+    private void renderSettingsScrollbar(GuiGraphics g) {
+        int max = maxSettingsScroll();
+        if (max <= 0) return;
+        int trackX = leftPos + panelW - BaseChestMenu.PANEL_PADDING - 4;
+        int trackY = settingsViewportTop() + 4;
+        int trackH = settingsViewportBottom() - settingsViewportTop() - 8;
+        Theme.fillRound(g, trackX, trackY, 3, trackH, 2, Theme.SURFACE_SUNK);
+        int thumbH = Math.max(14, trackH * (settingsViewportBottom() - settingsViewportTop()) / settingsContentHeight());
+        int thumbY = trackY + (trackH - thumbH) * settingsScroll / max;
+        Theme.fillRound(g, trackX, thumbY, 3, thumbH, 2, Theme.PRIMARY);
     }
 
     private void renderGraphTierButton(GuiGraphics g, int mx, int my, int x, int y, int w, String label, String kind) {
@@ -612,6 +664,19 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         int border = Theme.inside(mx, my, x, y, w, 16) && enabled ? Theme.PRIMARY : selected ? Theme.PRIMARY : Theme.BORDER;
         Theme.panel(g, x, y, w, 16, 5, fill, border);
         Theme.textCentered(g, font, label, x + w / 2, y + 5, enabled ? selected ? Theme.PRIMARY_PRESS : Theme.TEXT : Theme.TEXT_FAINT);
+    }
+
+    private int graphTierButtonX(int cardX, int cardW, int index) {
+        int gap = 6;
+        int buttonW = graphTierButtonW(cardW, 0);
+        return cardX + 10 + index * (buttonW + gap);
+    }
+
+    private int graphTierButtonW(int cardW, int index) {
+        int gap = 6;
+        int total = Math.max(72, cardW - 20);
+        int base = Math.max(22, (total - gap * 2) / 3);
+        return index == 2 ? Math.max(22, total - (base + gap) * 2) : base;
     }
 
     private String firstVisibleTeamId() {
@@ -1147,6 +1212,11 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
                 return true;
             }
         }
+        if (isSettingsPage() && mx >= leftPos && mx < leftPos + panelW
+                && my >= settingsViewportTop() && my < settingsViewportBottom()) {
+            settingsScroll = Math.max(0, Math.min(maxSettingsScroll(), settingsScroll - (int) Math.signum(sy) * 18));
+            return true;
+        }
         return super.mouseScrolled(mx, my, sx, sy);
     }
 
@@ -1264,13 +1334,16 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
 
     private boolean handleConfigPageClick(double mx, double my, int button) {
         int cardX = leftPos + BaseChestMenu.PANEL_PADDING;
-        int graphY = topPos + BaseChestMenu.HEADER_HEIGHT + 10;
-        int renameY = graphY + 40 + 8;
-        int accessY = renameY + 50 + 8;
-        int cardY = accessY + 42 + 8;
+        if (my < settingsViewportTop() || my >= settingsViewportBottom()) return true;
+        settingsScroll = Math.max(0, Math.min(maxSettingsScroll(), settingsScroll));
+        int graphY = settingsViewportTop() + 4 - settingsScroll;
+        int renameY = graphY + 36 + 6;
+        int accessY = renameY + 48 + 6;
+        int offlineY = accessY + 38 + 6;
+        int cardY = offlineY + 50 + 6;
         int cardW = panelW - BaseChestMenu.PANEL_PADDING * 2;
         int selectorX = groupSelectorX(cardX);
-        int selectorY = cardY + 44;
+        int selectorY = cardY + 37;
         int selectorW = groupSelectorW(cardW);
         if (button != 0) return true;
 
@@ -1294,13 +1367,13 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             setFocused(null);
         }
 
-        if (Theme.inside(mx, my, cardX + 10, accessY + 24, 58, 16)) {
+        if (Theme.inside(mx, my, graphTierButtonX(cardX, cardW, 0), accessY + 22, graphTierButtonW(cardW, 0), 16)) {
             send(21, "PRIVATE|");
             cacheGraphKind = "PRIVATE";
             cacheGraphTeamId = "";
             return true;
         }
-        if (Theme.inside(mx, my, cardX + 74, accessY + 24, 74, 16)) {
+        if (Theme.inside(mx, my, graphTierButtonX(cardX, cardW, 1), accessY + 22, graphTierButtonW(cardW, 1), 16)) {
             String teamId = firstVisibleTeamId();
             if (teamId != null) {
                 send(21, "PROTECTED|" + teamId);
@@ -1309,17 +1382,24 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             }
             return true;
         }
-        if (Theme.inside(mx, my, cardX + 154, accessY + 24, 52, 16)) {
+        if (Theme.inside(mx, my, graphTierButtonX(cardX, cardW, 2), accessY + 22, graphTierButtonW(cardW, 2), 16)) {
             send(21, "PUBLIC|");
             cacheGraphKind = "PUBLIC";
             cacheGraphTeamId = "";
             return true;
         }
 
+        if (Theme.inside(mx, my, statsToggleX(cardX, cardW), offlineY + 18, 34, 14)) {
+            statsGroupDropdownOpen = false;
+            send(22, "");
+            cacheOfflineSnapshotEnabled = !cacheOfflineSnapshotEnabled;
+            return true;
+        }
+
         if (statsGroupDropdownOpen) {
             List<com.pockethomestead.network.ProductionStatsSyncPacket.GroupData> groups = ClientProductionStatsCache.atomicGroups();
             int rowH = 17;
-            int listY = cardY + 63;
+            int listY = cardY + 56;
             int visible = Math.min(6, groups.size());
             for (int i = 0; i < visible; i++) {
                 int rowY = listY + 3 + i * rowH;
@@ -1332,7 +1412,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             if (!Theme.inside(mx, my, selectorX, listY, selectorW, visible * rowH + 6)) statsGroupDropdownOpen = false;
         }
 
-        if (Theme.inside(mx, my, statsToggleX(cardX, cardW), cardY + 23, 34, 14)) {
+        if (Theme.inside(mx, my, statsToggleX(cardX, cardW), cardY + 18, 34, 14)) {
             statsGroupDropdownOpen = false;
             toggleProductionStats();
             return true;

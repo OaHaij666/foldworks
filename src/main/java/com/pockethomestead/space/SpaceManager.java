@@ -38,11 +38,17 @@ public class SpaceManager {
                 : biome;
         SpaceData space = new SpaceData(spaceId, ownerId, width, height, depth,
                 terrainType, resolvedBiome, sourceDimension, mobSpawning, structureGeneration, infinite, terrainAmplitude);
+        inheritedPermission(ownerId).ifPresent(template -> space.getPermission().copyFrom(template.getPermission()));
         spaces.put(spaceId, space);
         dimensionIndex.put(space.getDimensionId(), space);
         SpaceDimensionService.getInstance().loadOrCreate(server, space);
         SpaceStorage.markDirty();
         return space;
+    }
+
+    private Optional<SpaceData> inheritedPermission(UUID ownerId) {
+        if (ownerId == null) return Optional.empty();
+        return spaces.values().stream().filter(s -> s.isOwner(ownerId)).findFirst();
     }
 
     private String randomBiomeFromDimension(MinecraftServer server, ResourceLocation sourceDimension) {
@@ -64,7 +70,7 @@ public class SpaceManager {
     }
 
     public SpaceData getSpace(UUID spaceId) { return spaces.get(spaceId); }
-    public List<SpaceData> getAccessibleSpaces(UUID playerId) { return spaces.values().stream().filter(s -> s.canAccess(playerId)).toList(); }
+    public List<SpaceData> getAccessibleSpaces(UUID playerId) { return spaces.values().stream().filter(s -> s.canView(playerId)).toList(); }
     public List<SpaceData> getOwnedSpaces(UUID playerId) { return spaces.values().stream().filter(s -> s.isOwner(playerId)).toList(); }
     public Collection<SpaceData> getAllSpaces() { return spaces.values(); }
 

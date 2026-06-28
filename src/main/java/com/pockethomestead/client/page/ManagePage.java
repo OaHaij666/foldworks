@@ -10,15 +10,23 @@ import com.pockethomestead.network.PermissionMemberPayload;
 import com.pockethomestead.network.RequestSpaceListPayload;
 import com.pockethomestead.network.SpaceActionPayload;
 import com.pockethomestead.network.SpaceInfo;
+import com.pockethomestead.network.UpdateOfflineSimulationPayload;
 import com.pockethomestead.network.UpdatePermissionPayload;
 import com.pockethomestead.space.SpacePermission;
+import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.EnumSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 /** 管理页：列表 + 进入/退出/删除（二次确认）+ 权限编辑模态。 */
@@ -27,6 +35,7 @@ public class ManagePage extends Page {
     private enum Modal { NONE, CONFIRM_DELETE, PERMISSION }
 
     private final List<SpaceInfo> spaces = new ArrayList<>();
+    private final List<SpaceInfo> filteredSpaces = new ArrayList<>();
     private boolean inPocketDim;
 
     private UiScrollList<SpaceInfo> list;
@@ -35,18 +44,34 @@ public class ManagePage extends Page {
     private Modal modal = Modal.NONE;
     private SpaceInfo target;
     private EditBox permNameInput;
+    private EditBox ownerFilterInput;
 
-    private static final int ROW_H = 46;
+    private static final int ROW_H = 60;
     private static final int ROW_GAP = 6;
     private static final int BTN = 20;
     private static final int PILL_W = 50;
     private static final int CUR_W = 54;
+    private static final int OFFLINE_W = 36;
     private static final int PILL_H = 22;
+    private static final int FILTER_H = 48;
     private static final SpacePermission.AccessMode[] MODES = SpacePermission.AccessMode.values();
+    private static final SpacePermission.AccessLevel[] FILTER_LEVELS = {
+            SpacePermission.AccessLevel.VIEW,
+            SpacePermission.AccessLevel.USE,
+            SpacePermission.AccessLevel.WRITE,
+            SpacePermission.AccessLevel.MANAGE
+    };
+    private final EnumSet<SpacePermission.AccessLevel> selectedLevels = EnumSet.noneOf(SpacePermission.AccessLevel.class);
+    private final Set<UUID> selectedOwnerIds = new LinkedHashSet<>();
+    private boolean ownerSelfFilter;
+    private boolean ownerDropdownOpen;
+    private int ownerDropdownScroll;
+    private int onlineX, onlineY, onlineW, onlineH;
 
     // 卡片右侧按钮命中区（由 computeCardRects 写入）
     private boolean hasDelete, hasSettings;
-    private int delX, setX, pillX, btnY, pillY;
+    private boolean hasOfflineToggle;
+    private int delX, setX, offlineX, pillX, btnY, pillY;
 
     @Override public String id() { return "manage"; }
     @Override public String navTitle() { return Component.translatable("pockethomestead.ui.nav.manage").getString(); }
@@ -85,6 +110,10 @@ public class ManagePage extends Page {
                 UiButton.Variant.PRIMARY).onClick(() -> { if (router != null) router.setActive("create"); });
         exitBtn = new UiButton(Component.translatable("pockethomestead.space.list.exit").getString(),
                 UiButton.Variant.SECONDARY).onClick(this::exitSpace);
+        ownerFilterInput = new EditBox(font, 0, 0, 80, 14, Component.literal("Owner UUID"));
+        ownerFilterInput.setMaxLength(36);
+        ownerFilterInput.setBordered(false);
+        ownerFilterInput.setTextColor(Theme.TEXT);
     }
 
     // ------------------------------------------------------------------
@@ -104,9 +133,14 @@ public class ManagePage extends Page {
         g.drawString(font, Theme.styled(sub), listX, listY, Theme.TEXT_MUTED, false);
         listY += 16; listH -= 16;
 
+        renderFilters(g, mouseX, mouseY, partialTick, listX, listY, listW);
+        listY += FILTER_H;
+        listH -= FILTER_H;
+
+        rebuildFilteredSpaces();
         list.bounds(listX, listY, listW, listH);
-        list.setItems(spaces);
-        if (spaces.isEmpty()) drawEmptyState(g, listX, listY, listW, listH);
+        list.setItems(filteredSpaces);
+        if (filteredSpaces.isEmpty()) drawEmptyState(g, listX, listY, listW, listH);
         else list.render(g, mouseX, mouseY, partialTick);
 
         int formBottom = y + h - footerH;
@@ -124,18 +158,71 @@ public class ManagePage extends Page {
     private void drawEmptyState(GuiGraphics g, int x, int y, int w, int h) {
         Theme.panel(g, x, y, w, h, Theme.RADIUS, Theme.SURFACE_ALT, Theme.BORDER);
         Theme.textCentered(g, font, "❖", x + w / 2, y + h / 2 - 24, Theme.BORDER_STRONG);
-        Theme.textCentered(g, font, Component.translatable("pockethomestead.space.list.no_homesteads").getString(), x + w / 2, y + h / 2 - 6, Theme.TEXT);
-        Theme.textCentered(g, font, Component.translatable("pockethomestead.space.list.create_first").getString(), x + w / 2, y + h / 2 + 8, Theme.TEXT_MUTED);
+        String title = spaces.isEmpty()
+                ? Component.translatable("pockethomestead.space.list.no_homesteads").getString()
+                : "没有符合筛选的空间";
+        String body = spaces.isEmpty()
+                ? Component.translatable("pockethomestead.space.list.create_first").getString()
+                : "调整权限或 owner 筛选后再试";
+        Theme.textCentered(g, font, title, x + w / 2, y + h / 2 - 6, Theme.TEXT);
+        Theme.textCentered(g, font, body, x + w / 2, y + h / 2 + 8, Theme.TEXT_MUTED);
+    }
+
+    private void renderFilters(GuiGraphics g, int mouseX, int mouseY, float partialTick, int fx, int fy, int fw) {
+        Theme.panel(g, fx, fy, fw, FILTER_H - 6, Theme.RADIUS, 0xFFF8FCFF, Theme.DIVIDER);
+        int row1 = fy + 5;
+        Theme.text(g, font, "权限", fx + 8, row1 + 5, Theme.TEXT_MUTED);
+        int cx = fx + 38;
+        for (SpacePermission.AccessLevel level : FILTER_LEVELS) {
+            int chipW = level == SpacePermission.AccessLevel.MANAGE ? 38 : 34;
+            drawFilterChip(g, cx, row1, chipW, 17, levelLabel(level), selectedLevels.contains(level), mouseX, mouseY);
+            cx += chipW + 4;
+        }
+
+        int row2 = fy + 25;
+        Theme.text(g, font, "Owner", fx + 8, row2 + 5, Theme.TEXT_MUTED);
+        int selfX = fx + 45;
+        drawFilterChip(g, selfX, row2, 36, 17, "自己", ownerSelfFilter, mouseX, mouseY);
+
+        int clearW = 34;
+        onlineW = 38;
+        int inputX = selfX + 40;
+        int inputW = Math.max(68, fw - (inputX - fx) - onlineW - clearW - 20);
+        Theme.panel(g, inputX, row2, inputW, 17, 5, Theme.SURFACE_SUNK, ownerFilterInput != null && ownerFilterInput.isFocused() ? Theme.PRIMARY : Theme.BORDER);
+        if (ownerFilterInput == null) buildWidgets();
+        ownerFilterInput.setX(inputX + 5);
+        ownerFilterInput.setY(row2 + 5);
+        ownerFilterInput.setWidth(inputW - 10);
+        ownerFilterInput.render(g, mouseX, mouseY, partialTick);
+
+        onlineX = inputX + inputW + 4;
+        onlineY = row2;
+        onlineH = 17;
+        drawFilterChip(g, onlineX, onlineY, onlineW, onlineH, "在线", ownerDropdownOpen || !selectedOwnerIds.isEmpty(), mouseX, mouseY);
+
+        int clearX = onlineX + onlineW + 4;
+        drawFilterChip(g, clearX, row2, clearW, 17, "清除", hasAnyFilter(), mouseX, mouseY);
+    }
+
+    private void drawFilterChip(GuiGraphics g, int x, int y, int w, int h, String label, boolean active, int mouseX, int mouseY) {
+        boolean hover = Theme.inside(mouseX, mouseY, x, y, w, h);
+        int fill = active ? Theme.PRIMARY_SOFT : (hover ? Theme.SURFACE_ALT : Theme.SURFACE_SUNK);
+        int border = active ? Theme.PRIMARY : Theme.BORDER;
+        int color = active ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED;
+        Theme.panel(g, x, y, w, h, Math.min(5, h / 2), fill, border);
+        Theme.textInBox(g, font, label, x, y, w, h, color);
     }
 
     private void computeCardRects(int rx, int ry, int rw, int rh, boolean owner, boolean current) {
         int rightEdge = rx + rw - 12;
-        btnY = ry + (rh - BTN) / 2;
-        pillY = ry + (rh - PILL_H) / 2;
+        btnY = ry + rh - BTN - 8;
+        pillY = ry + rh - PILL_H - 7;
         hasDelete = owner && !current;
         hasSettings = owner;
+        hasOfflineToggle = owner;
         if (hasDelete) { delX = rightEdge - BTN; rightEdge = delX - 6; }
         if (hasSettings) { setX = rightEdge - BTN; rightEdge = setX - 6; }
+        if (hasOfflineToggle) { offlineX = rightEdge - OFFLINE_W; rightEdge = offlineX - 6; }
         pillX = rightEdge - (current ? CUR_W : PILL_W);
     }
 
@@ -155,7 +242,12 @@ public class ManagePage extends Page {
                 : space.width() + "×" + space.depth();
         String biome = space.biome().contains(":") ? space.biome().substring(space.biome().indexOf(':') + 1) : space.biome();
         String meta = tag + "   " + pretty(space.terrain().name()) + "   " + pretty(biome) + "   " + modeLabel(space.mode());
-        g.drawString(font, Theme.styled(Theme.ellipsize(font, meta, textRight - (rx + 12))), rx + 12, ry + 26, Theme.TEXT_MUTED, false);
+        g.drawString(font, Theme.styled(Theme.ellipsize(font, meta, textRight - (rx + 12))), rx + 12, ry + 23, Theme.TEXT_MUTED, false);
+        String permission = "权限 " + levelLabel(selfLevel(space));
+        int permissionW = Theme.styledWidth(font, permission);
+        int ownerW = Math.max(34, textRight - (rx + 12) - permissionW - 8);
+        Theme.text(g, font, Theme.ellipsize(font, "Owner " + space.ownerId(), ownerW), rx + 12, ry + 39, Theme.TEXT_FAINT);
+        Theme.textRight(g, font, permission, textRight, ry + 39, Theme.TEXT_FAINT);
 
         // 进入 / 当前 药丸
         if (current) {
@@ -171,6 +263,15 @@ public class ManagePage extends Page {
             boolean sh = Theme.inside(mouseX, mouseY, setX, btnY, BTN, BTN);
             Theme.fillRound(g, setX, btnY, BTN, BTN, Theme.RADIUS, sh ? Theme.PRIMARY_SOFT : Theme.SURFACE_SUNK);
             Theme.textInBox(g, font, "⚙", setX, btnY, BTN, BTN, Theme.TEXT_MUTED);
+        }
+        if (hasOfflineToggle) {
+            boolean allowed = offlineAllowed(space);
+            boolean oh = Theme.inside(mouseX, mouseY, offlineX, btnY, OFFLINE_W, BTN) && allowed;
+            int offlineFill = !allowed ? Theme.SURFACE_SUNK : space.offlineSimulationEnabled() ? Theme.PRIMARY_SOFT : (oh ? Theme.SURFACE_ALT : Theme.SURFACE_SUNK);
+            int offlineBorder = space.offlineSimulationEnabled() ? Theme.PRIMARY : Theme.BORDER;
+            int color = !allowed ? Theme.TEXT_FAINT : space.offlineSimulationEnabled() ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED;
+            Theme.panel(g, offlineX, btnY, OFFLINE_W, BTN, Theme.RADIUS, offlineFill, offlineBorder);
+            Theme.textInBox(g, font, "离线", offlineX, btnY, OFFLINE_W, BTN, color);
         }
         // 删除 ✕
         if (hasDelete) {
@@ -188,6 +289,12 @@ public class ManagePage extends Page {
 
         if (hasDelete && Theme.inside(mx, my, delX, btnY, BTN, BTN)) { openDeleteConfirm(space); return true; }
         if (hasSettings && Theme.inside(mx, my, setX, btnY, BTN, BTN)) { openPermission(space); return true; }
+        if (hasOfflineToggle && Theme.inside(mx, my, offlineX, btnY, OFFLINE_W, BTN)) {
+            if (offlineAllowed(space)) {
+                PacketDistributor.sendToServer(new UpdateOfflineSimulationPayload(space.spaceId(), !space.offlineSimulationEnabled()));
+            }
+            return true;
+        }
         if (!current && Theme.inside(mx, my, pillX, pillY, PILL_W, PILL_H)) { enterSpace(space); return true; }
         if (!current) { enterSpace(space); return true; }
         return false;
@@ -198,10 +305,41 @@ public class ManagePage extends Page {
     // ------------------------------------------------------------------
     @Override
     public void renderOverlay(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        if (modal == Modal.NONE) return;
+        if (modal == Modal.NONE) {
+            if (ownerDropdownOpen) renderOwnerDropdown(g, mouseX, mouseY);
+            return;
+        }
         g.fill(x, y, x + w, y + h, 0x990C1626); // 内容区遮罩
         if (modal == Modal.CONFIRM_DELETE) renderConfirm(g, mouseX, mouseY);
         else if (modal == Modal.PERMISSION) renderPermission(g, mouseX, mouseY, partialTick);
+    }
+
+    private void renderOwnerDropdown(GuiGraphics g, int mouseX, int mouseY) {
+        List<OnlinePlayer> players = onlinePlayers();
+        int rows = Math.min(6, Math.max(1, players.size()));
+        int rowH = 18;
+        int dw = 158;
+        int dx = Math.min(x + w - dw - 8, Math.max(x + 8, onlineX + onlineW - dw));
+        int dy = onlineY + onlineH + 3;
+        int dh = rows * rowH + 10;
+        Theme.shadow(g, dx, dy, dw, dh, Theme.RADIUS);
+        Theme.panel(g, dx, dy, dw, dh, Theme.RADIUS, Theme.SURFACE, Theme.BORDER_STRONG);
+
+        if (players.isEmpty()) {
+            Theme.textCentered(g, font, "无在线玩家", dx + dw / 2, dy + 9, Theme.TEXT_FAINT);
+            return;
+        }
+
+        ownerDropdownScroll = clamp(ownerDropdownScroll, 0, Math.max(0, players.size() - rows));
+        for (int i = 0; i < rows && i + ownerDropdownScroll < players.size(); i++) {
+            OnlinePlayer player = players.get(i + ownerDropdownScroll);
+            int ry = dy + 5 + i * rowH;
+            boolean selected = selectedOwnerIds.contains(player.id());
+            boolean hover = Theme.inside(mouseX, mouseY, dx + 5, ry, dw - 10, rowH - 2);
+            if (selected || hover) Theme.fillRound(g, dx + 5, ry, dw - 10, rowH - 2, 4, selected ? Theme.PRIMARY_SOFT : Theme.SURFACE_ALT);
+            Theme.text(g, font, selected ? "✓" : "+", dx + 10, ry + 5, selected ? Theme.PRIMARY_PRESS : Theme.TEXT_FAINT);
+            Theme.text(g, font, Theme.ellipsize(font, player.name(), dw - 44), dx + 24, ry + 5, selected ? Theme.PRIMARY_PRESS : Theme.TEXT);
+        }
     }
 
     private void renderConfirm(GuiGraphics g, int mouseX, int mouseY) {
@@ -302,10 +440,43 @@ public class ManagePage extends Page {
 
     @Override
     public boolean overlayMouseClicked(double mx, double my, int button) {
+        if (modal == Modal.NONE && ownerDropdownOpen) {
+            return ownerDropdownClick(mx, my, button);
+        }
         if (modal == Modal.NONE) return false;
         if (button != 0) return true;
         if (modal == Modal.CONFIRM_DELETE) { confirmClick(mx, my); return true; }
         if (modal == Modal.PERMISSION) { permissionClick(mx, my); return true; }
+        return true;
+    }
+
+    private boolean ownerDropdownClick(double mx, double my, int button) {
+        if (button != 0) return true;
+        List<OnlinePlayer> players = onlinePlayers();
+        int rows = Math.min(6, Math.max(1, players.size()));
+        int rowH = 18;
+        int dw = 158;
+        int dx = Math.min(x + w - dw - 8, Math.max(x + 8, onlineX + onlineW - dw));
+        int dy = onlineY + onlineH + 3;
+        int dh = rows * rowH + 10;
+        if (!Theme.inside(mx, my, dx, dy, dw, dh) && !Theme.inside(mx, my, onlineX, onlineY, onlineW, onlineH)) {
+            ownerDropdownOpen = false;
+            return true;
+        }
+        if (Theme.inside(mx, my, onlineX, onlineY, onlineW, onlineH)) {
+            ownerDropdownOpen = false;
+            return true;
+        }
+        if (players.isEmpty()) return true;
+        ownerDropdownScroll = clamp(ownerDropdownScroll, 0, Math.max(0, players.size() - rows));
+        for (int i = 0; i < rows && i + ownerDropdownScroll < players.size(); i++) {
+            int ry = dy + 5 + i * rowH;
+            if (Theme.inside(mx, my, dx + 5, ry, dw - 10, rowH - 2)) {
+                UUID id = players.get(i + ownerDropdownScroll).id();
+                if (!selectedOwnerIds.remove(id)) selectedOwnerIds.add(id);
+                return true;
+            }
+        }
         return true;
     }
 
@@ -336,11 +507,13 @@ public class ManagePage extends Page {
         for (int i = 0; i < MODES.length; i++) {
             int cx = mx0 + 12 + i * (chipW + 4);
             if (Theme.inside(mx, my, cx, chipsY, chipW, 22)) {
-                PacketDistributor.sendToServer(new UpdatePermissionPayload(target.spaceId(), MODES[i]));
+                PacketDistributor.sendToServer(new UpdatePermissionPayload(target.spaceId(), MODES[i], target.protectedLevel(), target.publicLevel()));
                 // 乐观更新本地 target 模式
                 target = new SpaceInfo(target.spaceId(), target.ownerId(), target.name(), target.width(), target.depth(),
                         target.biome(), target.terrain(), target.dimensionId(), target.infinite(), target.amplitude(),
-                        MODES[i], target.members());
+                        MODES[i], target.protectedLevel(), target.publicLevel(),
+                        target.offlineSimulationEnabled() && (MODES[i] == SpacePermission.AccessMode.PRIVATE || MODES[i] == SpacePermission.AccessMode.WHITELIST),
+                        target.members());
                 return;
             }
         }
@@ -390,6 +563,14 @@ public class ManagePage extends Page {
             if (permNameInput.keyPressed(keyCode, scanCode, modifiers)) return true;
             return permNameInput.isFocused();
         }
+        if (modal == Modal.NONE && ownerFilterInput != null && ownerFilterInput.isFocused()) {
+            if (keyCode == 256) {
+                ownerFilterInput.setFocused(false);
+                return true;
+            }
+            if (ownerFilterInput.keyPressed(keyCode, scanCode, modifiers)) return true;
+            return true;
+        }
         return false;
     }
 
@@ -399,21 +580,87 @@ public class ManagePage extends Page {
             if (permNameInput.charTyped(codePoint, modifiers)) return true;
             return permNameInput.isFocused();
         }
+        if (modal == Modal.NONE && ownerFilterInput != null && ownerFilterInput.isFocused()) {
+            return ownerFilterInput.charTyped(codePoint, modifiers);
+        }
         return false;
     }
 
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
         if (modal != Modal.NONE) return false; // 模态时点击走 overlayMouseClicked
-        if (list != null && !spaces.isEmpty() && list.mouseClicked(mx, my, button)) return true;
+        if (button == 0 && handleFilterClick(mx, my)) return true;
+        if (ownerFilterInput != null) ownerFilterInput.setFocused(false);
+        ownerDropdownOpen = false;
+        if (list != null && !filteredSpaces.isEmpty() && list.mouseClicked(mx, my, button)) return true;
         if (createCta != null && createCta.mouseClicked(mx, my, button)) return true;
         if (inPocketDim && exitBtn != null && exitBtn.mouseClicked(mx, my, button)) return true;
         return false;
     }
 
+    private boolean handleFilterClick(double mx, double my) {
+        int pad = Theme.PAD;
+        int fx = x + pad;
+        int fy = y + pad + 16;
+        int fw = w - pad * 2;
+        if (!Theme.inside(mx, my, fx, fy, fw, FILTER_H - 6)) return false;
+        if (ownerFilterInput != null) ownerFilterInput.setFocused(false);
+
+        int row1 = fy + 5;
+        int cx = fx + 38;
+        for (SpacePermission.AccessLevel level : FILTER_LEVELS) {
+            int chipW = level == SpacePermission.AccessLevel.MANAGE ? 38 : 34;
+            if (Theme.inside(mx, my, cx, row1, chipW, 17)) {
+                if (!selectedLevels.remove(level)) selectedLevels.add(level);
+                return true;
+            }
+            cx += chipW + 4;
+        }
+
+        int row2 = fy + 25;
+        int selfX = fx + 45;
+        if (Theme.inside(mx, my, selfX, row2, 36, 17)) {
+            ownerSelfFilter = !ownerSelfFilter;
+            return true;
+        }
+
+        int clearW = 34;
+        int inputX = selfX + 40;
+        int inputW = Math.max(68, fw - (inputX - fx) - onlineW - clearW - 20);
+        if (Theme.inside(mx, my, inputX, row2, inputW, 17)) {
+            if (ownerFilterInput != null) ownerFilterInput.setFocused(true);
+            ownerDropdownOpen = false;
+            return true;
+        }
+
+        if (Theme.inside(mx, my, onlineX, onlineY, onlineW, onlineH)) {
+            ownerDropdownOpen = !ownerDropdownOpen;
+            return true;
+        }
+
+        int clearX = onlineX + onlineW + 4;
+        if (Theme.inside(mx, my, clearX, row2, clearW, 17)) {
+            clearFilters();
+            return true;
+        }
+        return true;
+    }
+
     @Override
     public boolean mouseScrolled(double mx, double my, double sx, double sy) {
         if (modal != Modal.NONE) return true;
+        if (ownerDropdownOpen) {
+            List<OnlinePlayer> players = onlinePlayers();
+            int rows = Math.min(6, Math.max(1, players.size()));
+            int dw = 158;
+            int dx = Math.min(x + w - dw - 8, Math.max(x + 8, onlineX + onlineW - dw));
+            int dy = onlineY + onlineH + 3;
+            int dh = rows * 18 + 10;
+            if (Theme.inside(mx, my, dx, dy, dw, dh)) {
+                ownerDropdownScroll = clamp(ownerDropdownScroll - (int) Math.signum(sy), 0, Math.max(0, players.size() - rows));
+                return true;
+            }
+        }
         return list != null && list.mouseScrolled(mx, my, sy);
     }
 
@@ -421,7 +668,15 @@ public class ManagePage extends Page {
     // 动作
     // ------------------------------------------------------------------
     private void openDeleteConfirm(SpaceInfo space) { target = space; modal = Modal.CONFIRM_DELETE; }
-    private void openPermission(SpaceInfo space) { target = space; modal = Modal.PERMISSION; if (permNameInput != null) permNameInput.setValue(""); }
+    private void openPermission(SpaceInfo space) {
+        if (router != null) {
+            router.setActive("permissions");
+            return;
+        }
+        target = space;
+        modal = Modal.PERMISSION;
+        if (permNameInput != null) permNameInput.setValue("");
+    }
     private void closePermission() { modal = Modal.NONE; target = null; if (permNameInput != null) permNameInput.setFocused(false); }
 
     private boolean isCurrent(SpaceInfo space) {
@@ -439,6 +694,76 @@ public class ManagePage extends Page {
         mc.setScreen(null);
     }
 
+    private void rebuildFilteredSpaces() {
+        filteredSpaces.clear();
+        for (SpaceInfo space : spaces) {
+            if (matchesPermissionFilter(space) && matchesOwnerFilter(space)) filteredSpaces.add(space);
+        }
+    }
+
+    private boolean matchesPermissionFilter(SpaceInfo space) {
+        return selectedLevels.isEmpty() || selectedLevels.contains(selfLevel(space));
+    }
+
+    private boolean matchesOwnerFilter(SpaceInfo space) {
+        if (!hasOwnerFilter()) return true;
+        UUID self = mc.player == null ? null : mc.player.getUUID();
+        if (ownerSelfFilter && self != null && space.ownerId().equals(self)) return true;
+        if (selectedOwnerIds.contains(space.ownerId())) return true;
+
+        String query = ownerFilterInput == null ? "" : ownerFilterInput.getValue().trim().toLowerCase(Locale.ROOT);
+        if (query.isEmpty()) return false;
+        return space.ownerId().toString().toLowerCase(Locale.ROOT).contains(query);
+    }
+
+    private boolean hasOwnerFilter() {
+        return ownerSelfFilter
+                || !selectedOwnerIds.isEmpty()
+                || (ownerFilterInput != null && !ownerFilterInput.getValue().trim().isEmpty());
+    }
+
+    private boolean hasAnyFilter() {
+        return !selectedLevels.isEmpty() || hasOwnerFilter();
+    }
+
+    private void clearFilters() {
+        selectedLevels.clear();
+        selectedOwnerIds.clear();
+        ownerSelfFilter = false;
+        ownerDropdownOpen = false;
+        ownerDropdownScroll = 0;
+        if (ownerFilterInput != null) {
+            ownerFilterInput.setValue("");
+            ownerFilterInput.setFocused(false);
+        }
+    }
+
+    private SpacePermission.AccessLevel selfLevel(SpaceInfo space) {
+        return mc.player == null ? SpacePermission.AccessLevel.NONE : space.effectiveLevel(mc.player.getUUID());
+    }
+
+    private List<OnlinePlayer> onlinePlayers() {
+        if (mc.getConnection() == null) return List.of();
+        Collection<PlayerInfo> infos = mc.getConnection().getOnlinePlayers();
+        return infos.stream()
+                .map(info -> new OnlinePlayer(info.getProfile().getId(), info.getProfile().getName()))
+                .filter(player -> player.id() != null && player.name() != null)
+                .sorted(Comparator.comparing(OnlinePlayer::name, String.CASE_INSENSITIVE_ORDER))
+                .toList();
+    }
+
+    private record OnlinePlayer(UUID id, String name) {}
+
+    private String levelLabel(SpacePermission.AccessLevel level) {
+        return switch (level) {
+            case NONE -> "拒绝";
+            case VIEW -> "可见";
+            case USE -> "使用";
+            case WRITE -> "编辑";
+            case MANAGE -> "管理";
+        };
+    }
+
     private String modeLabel(SpacePermission.AccessMode mode) {
         return switch (mode) {
             case PRIVATE -> Component.translatable("pockethomestead.permission.private").getString();
@@ -448,6 +773,10 @@ public class ManagePage extends Page {
         };
     }
 
+    private boolean offlineAllowed(SpaceInfo space) {
+        return space.mode() == SpacePermission.AccessMode.PRIVATE || space.mode() == SpacePermission.AccessMode.WHITELIST;
+    }
+
     private static String pretty(String id) {
         String lower = id.toLowerCase().replace('_', ' ');
         StringBuilder out = new StringBuilder();
@@ -455,5 +784,9 @@ public class ManagePage extends Page {
             if (!part.isEmpty()) out.append(Character.toUpperCase(part.charAt(0))).append(part.substring(1)).append(' ');
         }
         return out.toString().trim();
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 }

@@ -102,6 +102,7 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
                 case 19 -> applyStressOutputSpeed(be, packet.value);
                 case 20 -> applyStressOutputDirection(be, packet.value);
                 case 21 -> applyGraphAccess(be, packet.value);
+                case 22 -> { be.setOfflineSnapshotEnabled(!be.isOfflineSnapshotEnabled()); sendSyncToClient(player, be); }
                 default -> {}
             }
 
@@ -114,7 +115,7 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
 
     private static SpacePermission.AccessLevel requiredLevel(int action) {
         return switch (action) {
-            case 0, 1, 2, 5, 6, 14, 15, 16, 17, 18, 19, 20 -> SpacePermission.AccessLevel.WRITE;
+            case 0, 1, 2, 5, 6, 14, 15, 16, 17, 18, 19, 20, 22 -> SpacePermission.AccessLevel.WRITE;
             case 21 -> SpacePermission.AccessLevel.MANAGE;
             case 7, 8, 9, 10, 11, 12 -> SpacePermission.AccessLevel.USE;
             default -> null;
@@ -296,6 +297,9 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
         String productionKey = be.productionChestKey();
         boolean productionStatsEnabled = be.getOwnerUUID() != null && productionStats.isChestEnabled(be.getOwnerUUID(), productionKey);
         String productionGroupId = be.getOwnerUUID() == null ? "" : productionStats.chestGroup(be.getOwnerUUID(), productionKey);
+        com.pockethomestead.space.SpaceData space = com.pockethomestead.space.SpaceManager.getInstance()
+                .getSpaceByDimension(be.getLevel().dimension().location());
+        boolean spaceOfflineSimulationEnabled = space != null && space.isOfflineSimulationEnabled();
 
         java.util.List<ChestSyncPacket.SideConfigEntry> sideEntries = new java.util.ArrayList<>();
         for (ResourceKind kind : ResourceKind.values()) {
@@ -309,6 +313,8 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
             be.getBlockPos(),
             be.isTransferEnabled(),
             be.isVoidModeEnabled(),
+            be.isOfflineSnapshotEnabled(),
+            spaceOfflineSimulationEnabled,
             be.getTransferRateLimit(),
             be.getNextTransferSeconds(),
             be.getMaxItemCapacity(),

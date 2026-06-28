@@ -123,5 +123,21 @@ public class ModConfig {
             .comment("传输tick偏移（分散不同箱子的传输时刻，减少卡顿）")
             .defineInRange("tickOffset", 3, 1, 19);
 
+    public static final ModConfigSpec.IntValue OFFLINE_SIMULATION_MAX_CATCH_UP_SECONDS = BUILDER
+            .comment("离线模拟单次最多追赶的秒数，限制长时间卸载后的瞬时计算量")
+            .defineInRange("offlineSimulationMaxCatchUpSeconds", 3600, 10, 86400);
+
+    public static final ModConfigSpec.IntValue OFFLINE_SIMULATION_RATE_WINDOW_SECONDS = BUILDER
+            .comment("离线模拟估算外部机器进出的历史速率窗口（秒）")
+            .defineInRange("offlineSimulationRateWindowSeconds", 600, 30, 7200);
+
+    public static final ModConfigSpec.IntValue OFFLINE_SIMULATION_MIN_SAMPLE_SECONDS = BUILDER
+            .comment("离线模拟启用历史速率前需要的最少有效采样时长（秒）")
+            .defineInRange("offlineSimulationMinSampleSeconds", 30, 10, 1200);
+
+    public static final ModConfigSpec.IntValue OFFLINE_SIMULATION_SNAPSHOTS_PER_SECOND = BUILDER
+            .comment("每秒最多推进的离线箱子快照数量")
+            .defineInRange("offlineSimulationSnapshotsPerSecond", 64, 1, 4096);
+
     public static final ModConfigSpec SPEC = BUILDER.build();
 }

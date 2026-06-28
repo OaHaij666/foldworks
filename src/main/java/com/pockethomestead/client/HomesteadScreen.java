@@ -2,6 +2,7 @@ package com.pockethomestead.client;
 
 import com.pockethomestead.client.page.CreatePage;
 import com.pockethomestead.client.page.ManagePage;
+import com.pockethomestead.client.page.PermissionsPage;
 import com.pockethomestead.client.page.ProductionStatsPage;
 import com.pockethomestead.client.ui.Page;
 import com.pockethomestead.client.ui.Router;
@@ -42,6 +43,7 @@ public class HomesteadScreen extends Screen {
         super(Component.translatable("pockethomestead.ui.title"));
         router.register(new CreatePage());
         router.register(new ManagePage());
+        router.register(new PermissionsPage());
         router.register(new ProductionStatsPage());
         router.selectInitial(initialPageId != null ? initialPageId : lastPageId);
     }
@@ -203,6 +205,12 @@ public class HomesteadScreen extends Screen {
                         Theme.fillRound(g, startX + col * (cell + gap), startY + row * (cell + gap), cell, cell, 1, color);
                     }
                 }
+            }
+            case "permissions" -> {
+                Theme.fillRound(g, cx - 7, cy - 1, 14, 10, 3, color);
+                Theme.fillRound(g, cx - 4, cy - 8, 8, 9, 4, color);
+                Theme.fillRound(g, cx - 2, cy - 6, 4, 7, 2, Theme.SURFACE);
+                Theme.fillRound(g, cx - 1, cy + 3, 2, 4, 1, Theme.SURFACE);
             }
             default -> {
                 String icon = page.navIcon();

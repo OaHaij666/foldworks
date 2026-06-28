@@ -2,6 +2,7 @@ package com.pockethomestead.transfer;
 
 import com.pockethomestead.blockentity.BaseChestBlockEntity;
 import com.pockethomestead.blockentity.HomesteadChestAccess;
+import com.pockethomestead.offline.OfflineChestSnapshotStorage;
 import com.pockethomestead.space.SpacePermission;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.Direction;
@@ -128,12 +129,16 @@ public final class TransferGraphValidator {
             }
             ServerLevel level = server.getLevel(ResourceKey.create(Registries.DIMENSION, dimLoc));
             if (level == null) {
-                issues.add(new Issue(Severity.ERROR, node.getId(), "", "节点所在维度未加载"));
+                validateSnapshotRuntime(node, server, key, createLoaded,
+                        stressOutgoing.getOrDefault(node.getId(), false),
+                        stressIncoming.getOrDefault(node.getId(), false), issues);
                 continue;
             }
             BaseChestBlockEntity be = HomesteadChestAccess.resolve(level.getBlockEntity(node.getPos()));
             if (be == null) {
-                issues.add(new Issue(Severity.ERROR, node.getId(), "", "节点引用的箱子不存在或已被拆除"));
+                validateSnapshotRuntime(node, server, key, createLoaded,
+                        stressOutgoing.getOrDefault(node.getId(), false),
+                        stressIncoming.getOrDefault(node.getId(), false), issues);
                 continue;
             }
             if (!be.getChestId().equals(node.getChestId())) {
@@ -180,9 +185,54 @@ public final class TransferGraphValidator {
         return issues;
     }
 
+    private static void validateSnapshotRuntime(TransferNode node, MinecraftServer server, GraphKey key, boolean createLoaded,
+                                                boolean stressOut, boolean stressIn, List<Issue> issues) {
+        OfflineChestSnapshotStorage.Snapshot snapshot = OfflineChestSnapshotStorage.get(server)
+                .findSnapshot(node.getDimensionKey(), node.getPos(), node.getChestId());
+        if (snapshot == null) {
+            issues.add(new Issue(Severity.ERROR, node.getId(), "", "节点引用的箱子未加载，且没有可用快照"));
+            return;
+        }
+        if (!snapshot.matchesGraph(key)) {
+            issues.add(new Issue(Severity.ERROR, node.getId(), "", "箱子的图层级与当前连线图不一致"));
+            return;
+        }
+        if (!snapshot.hasNetworkUpgrade()) {
+            issues.add(new Issue(Severity.ERROR, node.getId(), "", "箱子缺少网络升级，不能作为可视化传输节点"));
+            return;
+        }
+        if (!snapshot.shouldSimulate(server)) {
+            issues.add(new Issue(Severity.ERROR, node.getId(), "", "箱子未加载，且未启用离线模拟"));
+            return;
+        }
+        issues.add(new Issue(Severity.WARN, node.getId(), "", "箱子未加载，正在使用离线快照模拟"));
+        if (stressOut || stressIn) {
+            if (!createLoaded) {
+                issues.add(new Issue(Severity.WARN, node.getId(), "", "Create 未安装，应力连线暂不会工作"));
+            }
+            if (!snapshot.hasStressUpgrade()) {
+                issues.add(new Issue(Severity.WARN, node.getId(), "", "箱子缺少应力升级，应力连线暂不会工作"));
+            }
+            int inputSides = snapshot.configuredStressInputSides();
+            int outputSides = snapshot.configuredStressOutputSides();
+            if (inputSides > 1) {
+                issues.add(new Issue(Severity.WARN, node.getId(), "", "同一箱子最多只能配置一个应力输入面"));
+            }
+            if (outputSides > 1) {
+                issues.add(new Issue(Severity.WARN, node.getId(), "", "同一箱子最多只能配置一个应力输出面"));
+            }
+            if (stressIn && outputSides != 1) {
+                issues.add(new Issue(Severity.WARN, node.getId(), "", "接收图中应力的箱子需要配置一个应力输出面才会对外供能"));
+            }
+            if (stressOut && !stressIn && inputSides != 1) {
+                issues.add(new Issue(Severity.WARN, node.getId(), "", "应力源箱子需要配置一个应力输入面才会接收外部动力"));
+            }
+        }
+    }
+
     private static void validatePlayerInventoryRuntime(TransferNode node, MinecraftServer server, GraphKey key, List<Issue> issues) {
         if (key.kind() == GraphKey.Kind.PUBLIC) {
-            issues.add(new Issue(Severity.ERROR, node.getId(), "", "Public 图不能包含玩家背包节点"));
+            issues.add(new Issue(Severity.ERROR, node.getId(), "", "公开图不能包含玩家背包节点"));
             return;
         }
         UUID target = node.getTargetPlayerId();
@@ -191,13 +241,13 @@ public final class TransferGraphValidator {
             return;
         }
         if (key.kind() == GraphKey.Kind.PRIVATE && !target.equals(key.id())) {
-            issues.add(new Issue(Severity.ERROR, node.getId(), "", "Private 图只能包含自己的背包节点"));
+            issues.add(new Issue(Severity.ERROR, node.getId(), "", "私有图只能包含自己的背包节点"));
             return;
         }
         if (key.kind() == GraphKey.Kind.PROTECTED) {
             TransferTeam team = TransferTeamStorage.get(server).getTeam(key.id());
             if (team == null || !team.can(target, SpacePermission.AccessLevel.VIEW)) {
-                issues.add(new Issue(Severity.ERROR, node.getId(), "", "玩家背包节点目标不在当前 Team 中"));
+                issues.add(new Issue(Severity.ERROR, node.getId(), "", "玩家背包节点目标不在当前团队中"));
                 return;
             }
         }

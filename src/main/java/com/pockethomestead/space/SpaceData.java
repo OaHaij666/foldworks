@@ -29,6 +29,7 @@ public class SpaceData {
     private final float terrainAmplitude; // 0=平缓 .. 1=陡峭（缩放自然地形噪声振幅）
     private SpacePermission permission;
     private String name;
+    private boolean offlineSimulationEnabled;
 
     public SpaceData(UUID spaceId, UUID ownerId, int width, int height, int depth,
                      TerrainType terrainType, String biome, ResourceLocation sourceDimension,
@@ -74,10 +75,20 @@ public class SpaceData {
     public float getTerrainAmplitude() { return terrainAmplitude; }
     public SpacePermission getPermission() { return permission; }
     public String getName() { return name; }
+    public boolean isOfflineSimulationEnabled() { return offlineSimulationEnabled; }
 
     public void setName(String name) { this.name = name; }
+    public boolean canEnableOfflineSimulation() {
+        SpacePermission.AccessMode mode = permission.getMode();
+        return mode == SpacePermission.AccessMode.PRIVATE || mode == SpacePermission.AccessMode.WHITELIST;
+    }
+    public void setOfflineSimulationEnabled(boolean enabled) {
+        this.offlineSimulationEnabled = enabled && canEnableOfflineSimulation();
+    }
     public boolean isOwner(UUID playerId) { return ownerId.equals(playerId); }
-    public boolean canAccess(UUID playerId) { return permission.canAccess(playerId, isOwner(playerId)); }
+    public boolean canAccess(UUID playerId) { return can(playerId, SpacePermission.AccessLevel.USE); }
+    public boolean canView(UUID playerId) { return can(playerId, SpacePermission.AccessLevel.VIEW); }
+    public boolean can(UUID playerId, SpacePermission.AccessLevel required) { return permission.can(playerId, isOwner(playerId), required); }
 
     public static ResourceLocation defaultDimensionId(UUID spaceId) {
         return ResourceLocation.fromNamespaceAndPath(PocketHomestead.MODID, "space_" + spaceId.toString().replace('-', '_'));

@@ -662,38 +662,73 @@ def generate_stress_upgrade() -> Image.Image:
     return make_upgrade_strip(stress_upgrade_frame)
 
 
-def generate_tablet() -> Image.Image:
+def generate_tablet_frame(phase: int) -> Image.Image:
     image = img((64, 64))
     d = ImageDraw.Draw(image)
-    poly(d, [(12, 3), (51, 3), (60, 12), (60, 51), (51, 60), (12, 60), (3, 51), (3, 12)], "brass_shadow")
-    poly(d, [(13, 5), (50, 5), (58, 13), (58, 50), (50, 58), (13, 58), (5, 50), (5, 13)], "brass")
-    poly(d, [(16, 9), (47, 9), (54, 16), (54, 47), (47, 54), (16, 54), (9, 47), (9, 16)], "black")
-    rect(d, (14, 14, 49, 44), "jade_dark", "cyan")
-    rect(d, (17, 17, 46, 41), (7, 29, 34, 255))
-    for y in range(20, 40, 5):
-        line(d, (18, y, 45, y), (14, 83, 91, 255))
-    for x in range(21, 45, 6):
-        line(d, (x, 18, x, 40), (13, 63, 69, 255))
-    ellipse(d, (24, 20, 39, 35), (11, 88, 74, 255), "jade")
-    ellipse(d, (28, 24, 35, 31), "jade")
-    line(d, (31, 18, 31, 37), "cyan", 1)
-    line(d, (22, 28, 42, 28), "cyan", 1)
-    for angle in range(0, 360, 60):
-        x = 32 + int(math.cos(math.radians(angle)) * 12)
-        y = 28 + int(math.sin(math.radians(angle)) * 8)
-        line(d, (32, 28, x, y), "jade", 1)
-    rect(d, (16, 48, 21, 52), "cyan", "black")
-    rect(d, (25, 48, 30, 52), "green", "black")
-    rect(d, (34, 48, 39, 52), "amber", "black")
-    rect(d, (43, 48, 48, 52), "red", "black")
-    draw_brass_corner(d, 13, 13, 1, 1)
-    draw_brass_corner(d, 50, 13, -1, 1)
-    draw_brass_corner(d, 13, 50, 1, -1)
-    draw_brass_corner(d, 50, 50, -1, -1)
-    line(d, (13, 5, 50, 5), "brass_hi")
-    line(d, (5, 13, 5, 50), "brass_hi")
-    add_noise(image, 5, 3)
+
+    # Flat generated-item sprite. Keep the silhouette simple so the vanilla
+    # first-person item transform reads as a handheld tablet instead of a block.
+    shadow = [(11, 15), (53, 15), (57, 19), (57, 45), (53, 49), (11, 49), (7, 45), (7, 19)]
+    body = [(10, 13), (54, 13), (58, 17), (58, 46), (54, 50), (10, 50), (6, 46), (6, 17)]
+    deck = [(12, 15), (52, 15), (55, 18), (55, 44), (52, 47), (12, 47), (9, 44), (9, 18)]
+
+    poly(d, shadow, (0, 0, 0, 150))
+    poly(d, body, (42, 44, 43, 255))
+    poly(d, deck, (13, 15, 16, 255))
+    line(d, (13, 14, 51, 14), (92, 94, 87, 255))
+    line(d, (10, 47, 54, 47), (4, 5, 6, 255))
+    line(d, (8, 18, 8, 44), (28, 30, 30, 255))
+    line(d, (56, 18, 56, 44), (5, 6, 7, 255))
+
+    # Thin brass accents: enough identity, not enough to dominate the item.
+    line(d, (15, 16, 49, 16), (213, 153, 78, 255))
+    image.putpixel((11, 15), (236, 184, 100, 255))
+    image.putpixel((53, 15), (236, 184, 100, 255))
+    image.putpixel((10, 48), (95, 61, 35, 255))
+    image.putpixel((54, 48), (95, 61, 35, 255))
+
+    # Main glass.
+    rect(d, (13, 19, 51, 43), (1, 11, 13, 255))
+    for y in range(20, 43):
+        t = (y - 20) / 22
+        base = blend((4, 38, 40, 255), (8, 86, 73, 255), t)
+        line(d, (14, y, 50, y), base)
+    line(d, (14, 20, 50, 20), (40, 153, 133, 255))
+    line(d, (14, 42, 50, 42), (2, 30, 28, 255))
+
+    scan_y = 22 + (phase * 3) % 17
+    line(d, (16, scan_y, 48, scan_y), (78, 245, 205, 185))
+
+    pulse = phase % 4
+    glyph = (54, 220, 156, 155 + pulse * 20)
+    dim = (54, 220, 156, 105 + pulse * 10)
+    line(d, (25, 32, 32, 26, 39, 32), dim)
+    line(d, (27, 33, 27, 39, 37, 39, 37, 33), glyph)
+    rect(d, (31, 36, 33, 39), (54, 180, 137, 120))
+
+    line(d, (17, 25, 28, 25), (63, 231, 184, 210))
+    line(d, (17, 29, 25, 29), (63, 231, 184, 145))
+    line(d, (39, 25, 47, 25), (204, 148, 74, 220))
+    line(d, (39, 39, 47, 39), (63, 231, 184, 145))
+
+    # Small side key and bottom status light.
+    rect(d, (56, 28, 57, 34), (178, 116, 57, 255))
+    rect(d, (30, 45, 34, 46), (54, 220, 156, 255) if phase % 2 == 0 else (69, 238, 241, 255))
+    px = image.load()
+    for y in range(image.height):
+        for x in range(image.width):
+            r, g, b, a = px[x, y]
+            if a:
+                px[x, y] = (r, g, b, 255)
     return image
+
+
+def generate_tablet() -> Image.Image:
+    frames = [generate_tablet_frame(i) for i in range(8)]
+    strip = img((64, 64 * len(frames)))
+    for i, frame in enumerate(frames):
+        strip.alpha_composite(frame, (0, i * 64))
+    return strip
 
 
 def face(texture: str, uv=None):
@@ -798,6 +833,10 @@ def write_mcmeta() -> None:
             json.dumps({"animation": {"frametime": 7, "frames": [0, 1, 2, 3]}}, indent=2) + "\n",
             encoding="utf-8",
         )
+    (ITEM / "homestead_tablet.png.mcmeta").write_text(
+        json.dumps({"animation": {"frametime": 7, "frames": list(range(8))}}, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def make_preview(paths: list[Path]) -> None:
