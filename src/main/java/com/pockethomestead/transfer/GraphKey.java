@@ -9,6 +9,7 @@ public record GraphKey(Kind kind, UUID id) {
     public enum Kind {
         PRIVATE,
         PROTECTED,
+        SPACE,
         PUBLIC
     }
 
@@ -25,6 +26,10 @@ public record GraphKey(Kind kind, UUID id) {
 
     public static GraphKey protectedGraph(UUID teamId) {
         return new GraphKey(Kind.PROTECTED, teamId);
+    }
+
+    public static GraphKey spaceGraph(UUID spaceId) {
+        return new GraphKey(Kind.SPACE, spaceId);
     }
 
     public static GraphKey publicGraph() {

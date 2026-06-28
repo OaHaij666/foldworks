@@ -3,6 +3,8 @@ package com.pockethomestead.transfer;
 import com.pockethomestead.blockentity.BaseChestBlockEntity;
 import com.pockethomestead.blockentity.HomesteadChestAccess;
 import com.pockethomestead.offline.OfflineChestSnapshotStorage;
+import com.pockethomestead.space.SpaceData;
+import com.pockethomestead.space.SpaceManager;
 import com.pockethomestead.space.SpacePermission;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.Direction;
@@ -107,6 +109,11 @@ public final class TransferGraphValidator {
     public static List<Issue> validateRuntime(TransferGraph graph, MinecraftServer server, GraphKey key) {
         List<Issue> issues = new ArrayList<>();
         if (server == null || key == null || !key.isValid()) return issues;
+        SpaceData spaceGraph = key.kind() == GraphKey.Kind.SPACE ? SpaceManager.getInstance().getSpace(key.id()) : null;
+        if (key.kind() == GraphKey.Kind.SPACE && spaceGraph == null) {
+            issues.add(new Issue(Severity.ERROR, "", "", "空间图绑定的小世界不存在"));
+            return issues;
+        }
         boolean createLoaded = ModList.get().isLoaded("create");
         Map<String, Boolean> stressOutgoing = new HashMap<>();
         Map<String, Boolean> stressIncoming = new HashMap<>();
@@ -122,6 +129,10 @@ public final class TransferGraphValidator {
                 continue;
             }
             if (node.getNodeType().isVirtual()) continue;
+            if (spaceGraph != null && !spaceGraph.getDimensionId().toString().equals(node.getDimensionKey())) {
+                issues.add(new Issue(Severity.ERROR, node.getId(), "", "空间图只能包含本空间维度内的箱子节点"));
+                continue;
+            }
             ResourceLocation dimLoc = ResourceLocation.tryParse(node.getDimensionKey());
             if (dimLoc == null) {
                 issues.add(new Issue(Severity.ERROR, node.getId(), "", "节点维度无效"));
@@ -231,8 +242,10 @@ public final class TransferGraphValidator {
     }
 
     private static void validatePlayerInventoryRuntime(TransferNode node, MinecraftServer server, GraphKey key, List<Issue> issues) {
-        if (key.kind() == GraphKey.Kind.PUBLIC) {
-            issues.add(new Issue(Severity.ERROR, node.getId(), "", "公开图不能包含玩家背包节点"));
+        if (key.kind() == GraphKey.Kind.PUBLIC || key.kind() == GraphKey.Kind.SPACE) {
+            issues.add(new Issue(Severity.ERROR, node.getId(), "", key.kind() == GraphKey.Kind.PUBLIC
+                    ? "公开图不能包含玩家背包节点"
+                    : "空间图不能包含玩家背包节点"));
             return;
         }
         UUID target = node.getTargetPlayerId();

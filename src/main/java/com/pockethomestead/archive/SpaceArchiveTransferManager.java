@@ -1,0 +1,274 @@
+package com.pockethomestead.archive;
+
+import com.pockethomestead.PocketHomestead;
+import com.pockethomestead.config.ModConfig;
+import com.pockethomestead.network.SpaceArchiveClientChunkPacket;
+import com.pockethomestead.network.SpaceArchiveServerPacket;
+import com.pockethomestead.network.SpaceListPayload;
+import com.pockethomestead.space.SpaceData;
+import com.pockethomestead.space.SpaceManager;
+import com.pockethomestead.space.SpacePermission;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
+import net.neoforged.neoforge.network.PacketDistributor;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
+
+public final class SpaceArchiveTransferManager {
+    private static final Map<String, UploadSession> UPLOADS = new LinkedHashMap<>();
+    private static final Map<String, DownloadSession> DOWNLOADS = new LinkedHashMap<>();
+
+    private SpaceArchiveTransferManager() {
+    }
+
+    public static void reset() {
+        for (UploadSession session : UPLOADS.values()) {
+            try {
+                Files.deleteIfExists(session.path);
+            } catch (IOException ignored) {
+            }
+        }
+        for (DownloadSession session : DOWNLOADS.values()) {
+            session.closeAndDelete();
+        }
+        UPLOADS.clear();
+        DOWNLOADS.clear();
+    }
+
+    public static void beginUpload(ServerPlayer player, String sessionId, String fileName, long totalBytes, String sha256) {
+        if (player == null || sessionId == null || sessionId.isBlank()) return;
+        try {
+            if (UPLOADS.size() + DOWNLOADS.size() >= ModConfig.SPACE_ARCHIVE_MAX_CONCURRENT_TRANSFERS.get()) {
+                sendError(player, sessionId, "服务器正在处理其他空间包，请稍后再试");
+                return;
+            }
+            if (totalBytes <= 0 || totalBytes > ModConfig.SPACE_ARCHIVE_MAX_BYTES.get()) {
+                sendError(player, sessionId, "空间包过大或为空");
+                return;
+            }
+            if (UPLOADS.containsKey(sessionId)) {
+                sendError(player, sessionId, "上传会话重复");
+                return;
+            }
+            Path staging = SpaceArchiveService.archiveWorkDir(player.server)
+                    .resolve("staging")
+                    .resolve(sessionId + SpaceArchiveService.EXTENSION + ".upload");
+            Files.createDirectories(staging.getParent());
+            Files.deleteIfExists(staging);
+            UPLOADS.put(sessionId, new UploadSession(player.getUUID(), staging, fileName, totalBytes, sha256));
+            PacketDistributor.sendToPlayer(player, SpaceArchiveServerPacket.simple("UPLOAD_READY", sessionId, fileName, "准备上传"));
+        } catch (Exception e) {
+            PocketHomestead.LOGGER.error("创建空间包上传会话失败", e);
+            sendError(player, sessionId, "创建上传会话失败: " + e.getMessage());
+        }
+    }
+
+    public static void receiveUploadChunk(ServerPlayer player, SpaceArchiveClientChunkPacket packet) {
+        if (player == null || packet == null) return;
+        UploadSession session = UPLOADS.get(packet.sessionId());
+        if (session == null || !session.playerId.equals(player.getUUID())) {
+            sendError(player, packet.sessionId(), "上传会话无效");
+            return;
+        }
+        try {
+            if (packet.index() != session.nextIndex) {
+                failUpload(player, packet.sessionId(), "上传分块顺序错误");
+                return;
+            }
+            if (packet.data().length > ModConfig.SPACE_ARCHIVE_CHUNK_BYTES.get()) {
+                failUpload(player, packet.sessionId(), "上传分块超过服务器限制");
+                return;
+            }
+            Files.write(session.path, packet.data(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            session.receivedBytes += packet.data().length;
+            session.nextIndex++;
+            if (session.receivedBytes > session.totalBytes || Files.size(session.path) > ModConfig.SPACE_ARCHIVE_MAX_BYTES.get()) {
+                failUpload(player, packet.sessionId(), "上传超过服务器限制");
+                return;
+            }
+            if (session.receivedBytes == session.totalBytes) {
+                finishUpload(player, packet.sessionId(), session);
+            }
+        } catch (Exception e) {
+            PocketHomestead.LOGGER.error("处理空间包上传分块失败", e);
+            failUpload(player, packet.sessionId(), "上传失败: " + e.getMessage());
+        }
+    }
+
+    public static void beginDownload(ServerPlayer player, UUID spaceId, String sessionId) {
+        if (player == null || spaceId == null || sessionId == null || sessionId.isBlank()) return;
+        try {
+            if (UPLOADS.size() + DOWNLOADS.size() >= ModConfig.SPACE_ARCHIVE_MAX_CONCURRENT_TRANSFERS.get()) {
+                sendError(player, sessionId, "服务器正在处理其他空间包，请稍后再试");
+                return;
+            }
+            SpaceData space = SpaceManager.getInstance().getSpace(spaceId);
+            if (space == null) {
+                sendError(player, sessionId, "空间不存在");
+                return;
+            }
+            SpacePermission.AccessLevel required = downloadLevel();
+            if (!space.can(player.getUUID(), required)) {
+                sendError(player, sessionId, "权限不足，至少需要 " + required.name());
+                return;
+            }
+            Path archive = SpaceArchiveService.exportSpace(player.server, space, player.getUUID());
+            long size = Files.size(archive);
+            if (size > ModConfig.SPACE_ARCHIVE_MAX_BYTES.get()) {
+                Files.deleteIfExists(archive);
+                sendError(player, sessionId, "空间包超过服务器限制");
+                return;
+            }
+            DownloadSession download = new DownloadSession(player.getUUID(), archive, archive.getFileName().toString(), size);
+            DOWNLOADS.put(sessionId, download);
+            PacketDistributor.sendToPlayer(player, SpaceArchiveServerPacket.beginDownload(sessionId, download.fileName, download.totalBytes, download.totalChunks()));
+        } catch (Exception e) {
+            PocketHomestead.LOGGER.error("创建空间包下载失败", e);
+            sendError(player, sessionId, "创建下载失败: " + e.getMessage());
+        }
+    }
+
+    public static void tick(MinecraftServer server) {
+        if (server == null || DOWNLOADS.isEmpty()) return;
+        Iterator<Map.Entry<String, DownloadSession>> iterator = DOWNLOADS.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<String, DownloadSession> entry = iterator.next();
+            String sessionId = entry.getKey();
+            DownloadSession session = entry.getValue();
+            ServerPlayer player = server.getPlayerList().getPlayer(session.playerId);
+            if (player == null) {
+                session.closeAndDelete();
+                iterator.remove();
+                continue;
+            }
+            try {
+                byte[] buffer = session.input.readNBytes(session.chunkSize);
+                if (buffer.length > 0) {
+                    PacketDistributor.sendToPlayer(player, SpaceArchiveServerPacket.downloadChunk(
+                            sessionId, session.fileName, session.index, session.totalChunks(), session.totalBytes, buffer));
+                    session.index++;
+                    session.sentBytes += buffer.length;
+                }
+                if (buffer.length == 0 || session.sentBytes >= session.totalBytes) {
+                    PacketDistributor.sendToPlayer(player, SpaceArchiveServerPacket.simple("DOWNLOAD_END", sessionId, session.fileName, "下载完成"));
+                    session.closeAndDelete();
+                    iterator.remove();
+                }
+            } catch (Exception e) {
+                PocketHomestead.LOGGER.error("推送空间包下载分块失败", e);
+                sendError(player, sessionId, "下载失败: " + e.getMessage());
+                session.closeAndDelete();
+                iterator.remove();
+            }
+        }
+    }
+
+    private static void finishUpload(ServerPlayer player, String sessionId, UploadSession session) throws IOException {
+        if (session.receivedBytes != session.totalBytes || Files.size(session.path) != session.totalBytes) {
+            failUpload(player, sessionId, "上传大小不匹配");
+            return;
+        }
+        String actualSha = SpaceArchiveService.sha256(session.path);
+        if (session.sha256 != null && !session.sha256.isBlank() && !session.sha256.equalsIgnoreCase(actualSha)) {
+            failUpload(player, sessionId, "上传校验失败");
+            return;
+        }
+        SpaceArchiveService.ImportResult result = SpaceArchiveService.importArchive(player.server, session.path, player.getUUID());
+        UPLOADS.remove(sessionId);
+        Files.deleteIfExists(session.path);
+        PacketDistributor.sendToPlayer(player, SpaceArchiveServerPacket.simple(
+                "UPLOAD_DONE",
+                sessionId,
+                session.fileName,
+                "已创建服务器空间 " + result.name() + "，箱子 " + result.remappedChests() + " 个，图元素 " + result.importedNodes() + " 个"
+        ));
+        SpaceListPayload.sendToAll(player.server);
+    }
+
+    private static void failUpload(ServerPlayer player, String sessionId, String message) {
+        UploadSession session = UPLOADS.remove(sessionId);
+        if (session != null) {
+            try {
+                Files.deleteIfExists(session.path);
+            } catch (IOException ignored) {
+            }
+        }
+        sendError(player, sessionId, message);
+    }
+
+    private static void sendError(ServerPlayer player, String sessionId, String message) {
+        if (player != null) PacketDistributor.sendToPlayer(player, SpaceArchiveServerPacket.simple("ERROR", sessionId, "", message));
+    }
+
+    private static SpacePermission.AccessLevel downloadLevel() {
+        try {
+            return SpacePermission.AccessLevel.valueOf(ModConfig.SPACE_ARCHIVE_DOWNLOAD_MIN_LEVEL.get().trim().toUpperCase());
+        } catch (Exception e) {
+            return SpacePermission.AccessLevel.WRITE;
+        }
+    }
+
+    private static final class UploadSession {
+        private final UUID playerId;
+        private final Path path;
+        private final String fileName;
+        private final long totalBytes;
+        private final String sha256;
+        private int nextIndex;
+        private long receivedBytes;
+
+        private UploadSession(UUID playerId, Path path, String fileName, long totalBytes, String sha256) {
+            this.playerId = playerId;
+            this.path = path;
+            this.fileName = fileName == null || fileName.isBlank() ? "upload.phspace" : fileName;
+            this.totalBytes = totalBytes;
+            this.sha256 = sha256;
+        }
+    }
+
+    private static final class DownloadSession {
+        private final UUID playerId;
+        private final Path path;
+        private final String fileName;
+        private final long totalBytes;
+        private final InputStream input;
+        private final int chunkSize;
+        private final int totalChunks;
+        private int index;
+        private long sentBytes;
+
+        private DownloadSession(UUID playerId, Path path, String fileName, long totalBytes) throws IOException {
+            this.playerId = playerId;
+            this.path = path;
+            this.fileName = fileName;
+            this.totalBytes = totalBytes;
+            this.chunkSize = Math.min(ModConfig.SPACE_ARCHIVE_CHUNK_BYTES.get(),
+                    Math.max(4096, ModConfig.SPACE_ARCHIVE_BYTES_PER_SECOND_PER_PLAYER.get() / 20));
+            this.totalChunks = Math.max(1, (int) Math.ceil(totalBytes / (double) chunkSize));
+            this.input = Files.newInputStream(path);
+        }
+
+        private int totalChunks() {
+            return totalChunks;
+        }
+
+        private void closeAndDelete() {
+            try {
+                input.close();
+            } catch (IOException ignored) {
+            }
+            try {
+                Files.deleteIfExists(path);
+            } catch (IOException ignored) {
+            }
+        }
+    }
+}

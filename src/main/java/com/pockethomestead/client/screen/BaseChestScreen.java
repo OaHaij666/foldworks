@@ -331,7 +331,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             int cardW = panelW - BaseChestMenu.PANEL_PADDING * 2;
             graphButton = new UiButton("打开", UiButton.Variant.PRIMARY)
                     .bounds(cardX + cardW - 58, cardY + 9, 48, 18)
-                    .onClick(() -> Minecraft.getInstance().setScreen(new TransferGraphScreen()));
+                    .onClick(() -> Minecraft.getInstance().setScreen(new TransferGraphScreen(cacheGraphKind, cacheGraphTeamId)));
         }
     }
 
@@ -602,6 +602,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         renderGraphTierButton(g, mx, my, graphTierButtonX(cardX, cardW, 0), accessY + 22, graphTierButtonW(cardW, 0), "私有", "PRIVATE");
         renderGraphTierButton(g, mx, my, graphTierButtonX(cardX, cardW, 1), accessY + 22, graphTierButtonW(cardW, 1), "团队", "PROTECTED");
         renderGraphTierButton(g, mx, my, graphTierButtonX(cardX, cardW, 2), accessY + 22, graphTierButtonW(cardW, 2), "公开", "PUBLIC");
+        renderGraphTierButton(g, mx, my, graphTierButtonX(cardX, cardW, 3), accessY + 22, graphTierButtonW(cardW, 3), "空间", "SPACE");
 
         int offlineY = accessY + accessH + gap;
         int offlineH = 50;
@@ -667,20 +668,20 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
     }
 
     private int graphTierButtonX(int cardX, int cardW, int index) {
-        int gap = 6;
+        int gap = 4;
         int buttonW = graphTierButtonW(cardW, 0);
         return cardX + 10 + index * (buttonW + gap);
     }
 
     private int graphTierButtonW(int cardW, int index) {
-        int gap = 6;
+        int gap = 4;
         int total = Math.max(72, cardW - 20);
-        int base = Math.max(22, (total - gap * 2) / 3);
-        return index == 2 ? Math.max(22, total - (base + gap) * 2) : base;
+        int base = Math.max(22, (total - gap * 3) / 4);
+        return index == 3 ? Math.max(22, total - (base + gap) * 3) : base;
     }
 
     private String firstVisibleTeamId() {
-        if (cacheGraphTeamId != null && !cacheGraphTeamId.isBlank()) return cacheGraphTeamId;
+        if ("PROTECTED".equals(cacheGraphKind) && cacheGraphTeamId != null && !cacheGraphTeamId.isBlank()) return cacheGraphTeamId;
         for (com.pockethomestead.network.TransferGraphSyncPacket.TeamData team : ClientTransferGraphCache.teams()) {
             if (team.id() != null && !team.id().isBlank()) return team.id();
         }
@@ -1386,6 +1387,11 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             send(21, "PUBLIC|");
             cacheGraphKind = "PUBLIC";
             cacheGraphTeamId = "";
+            return true;
+        }
+        if (Theme.inside(mx, my, graphTierButtonX(cardX, cardW, 3), accessY + 22, graphTierButtonW(cardW, 3), 16)) {
+            send(21, "SPACE|");
+            cacheGraphKind = "SPACE";
             return true;
         }
 

@@ -60,10 +60,28 @@ public class ModMessages {
                 PermissionMemberPayload::handleOnServer
         );
 
+        registrar.playToServer(
+                SpaceArchiveRequestPacket.TYPE,
+                SpaceArchiveRequestPacket.STREAM_CODEC,
+                SpaceArchiveRequestPacket::handleOnServer
+        );
+
+        registrar.playToServer(
+                SpaceArchiveClientChunkPacket.TYPE,
+                SpaceArchiveClientChunkPacket.STREAM_CODEC,
+                SpaceArchiveClientChunkPacket::handleOnServer
+        );
+
         registrar.playToClient(
                 SpaceListPayload.TYPE,
                 SpaceListPayload.STREAM_CODEC,
                 SpaceListPayload::handleOnClient
+        );
+
+        registrar.playToClient(
+                SpaceArchiveServerPacket.TYPE,
+                SpaceArchiveServerPacket.STREAM_CODEC,
+                SpaceArchiveServerPacket::handleOnClient
         );
 
         registrar.playToClient(

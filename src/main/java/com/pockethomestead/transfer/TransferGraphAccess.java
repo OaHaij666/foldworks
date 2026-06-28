@@ -1,6 +1,8 @@
 package com.pockethomestead.transfer;
 
 import com.pockethomestead.blockentity.BaseChestBlockEntity;
+import com.pockethomestead.space.SpaceData;
+import com.pockethomestead.space.SpaceManager;
 import com.pockethomestead.space.SpacePermission;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -16,6 +18,7 @@ public final class TransferGraphAccess {
             case PUBLIC -> true;
             case PRIVATE -> player.getUUID().equals(key.id());
             case PROTECTED -> TransferTeamStorage.get(player.server).can(player.getUUID(), key.id(), SpacePermission.AccessLevel.VIEW);
+            case SPACE -> canSpace(player, key, SpacePermission.AccessLevel.VIEW);
         };
     }
 
@@ -25,6 +28,7 @@ public final class TransferGraphAccess {
             case PUBLIC -> true;
             case PRIVATE -> player.getUUID().equals(key.id());
             case PROTECTED -> TransferTeamStorage.get(player.server).can(player.getUUID(), key.id(), SpacePermission.AccessLevel.WRITE);
+            case SPACE -> canSpace(player, key, SpacePermission.AccessLevel.WRITE);
         };
     }
 
@@ -34,6 +38,7 @@ public final class TransferGraphAccess {
             case PUBLIC -> true;
             case PRIVATE -> player.getUUID().equals(key.id());
             case PROTECTED -> TransferTeamStorage.get(player.server).can(player.getUUID(), key.id(), SpacePermission.AccessLevel.MANAGE);
+            case SPACE -> canSpace(player, key, SpacePermission.AccessLevel.MANAGE);
         };
     }
 
@@ -41,6 +46,12 @@ public final class TransferGraphAccess {
         if (chest == null || key == null) return false;
         GraphKey chestKey = chest.getGraphKey();
         return chestKey != null && chestKey.sameTier(key);
+    }
+
+    private static boolean canSpace(ServerPlayer player, GraphKey key, SpacePermission.AccessLevel level) {
+        if (player == null || key == null || key.id() == null) return false;
+        SpaceData space = SpaceManager.getInstance().getSpace(key.id());
+        return space != null && space.can(player.getUUID(), level);
     }
 
     public static boolean canEditPlayerRules(ServerPlayer player, TransferNode node) {

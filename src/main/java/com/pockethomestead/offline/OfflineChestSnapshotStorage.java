@@ -425,6 +425,7 @@ public class OfflineChestSnapshotStorage extends SavedData {
             return switch (graphKind) {
                 case PUBLIC -> GraphKey.publicGraph();
                 case PROTECTED -> graphTeamId == null ? null : GraphKey.protectedGraph(graphTeamId);
+                case SPACE -> spaceId == null ? null : GraphKey.spaceGraph(spaceId);
                 case PRIVATE -> owner == null ? null : GraphKey.privateGraph(owner);
             };
         }

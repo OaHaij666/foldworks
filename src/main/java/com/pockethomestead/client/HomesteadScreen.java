@@ -2,6 +2,7 @@ package com.pockethomestead.client;
 
 import com.pockethomestead.client.page.CreatePage;
 import com.pockethomestead.client.page.ManagePage;
+import com.pockethomestead.client.page.MigrationPage;
 import com.pockethomestead.client.page.PermissionsPage;
 import com.pockethomestead.client.page.ProductionStatsPage;
 import com.pockethomestead.client.ui.Page;
@@ -45,6 +46,7 @@ public class HomesteadScreen extends Screen {
         router.register(new ManagePage());
         router.register(new PermissionsPage());
         router.register(new ProductionStatsPage());
+        router.register(new MigrationPage());
         router.selectInitial(initialPageId != null ? initialPageId : lastPageId);
     }
 
@@ -297,7 +299,12 @@ public class HomesteadScreen extends Screen {
         return super.charTyped(codePoint, modifiers);
     }
 
-    private int navItemSize() { return Math.min(NAV_ITEM_SIZE, Math.max(24, sidebarW - 12)); }
+    private int navItemSize() {
+        int count = Math.max(1, router.pages().size());
+        int availableH = Math.max(20, panelH - headerH - NAV_TOP_PAD * 2 - (count - 1) * NAV_ITEM_GAP);
+        int byHeight = availableH / count;
+        return Math.min(NAV_ITEM_SIZE, Math.max(20, Math.min(sidebarW - 12, byHeight)));
+    }
 
     private static int clamp(int v, int lo, int hi) { return Math.max(lo, Math.min(hi, v)); }
 }

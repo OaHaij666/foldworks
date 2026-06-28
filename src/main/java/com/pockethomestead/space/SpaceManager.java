@@ -100,6 +100,14 @@ public class SpaceManager {
         return true;
     }
 
+    public void addImportedSpace(MinecraftServer server, SpaceData space) {
+        if (space == null) return;
+        spaces.put(space.getSpaceId(), space);
+        dimensionIndex.put(space.getDimensionId(), space);
+        if (server != null) SpaceDimensionService.getInstance().loadOrCreate(server, space);
+        SpaceStorage.markDirty();
+    }
+
     public void loadSpaces(Collection<SpaceData> loaded) {
         spaces.clear();
         dimensionIndex.clear();

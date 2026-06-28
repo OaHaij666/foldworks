@@ -139,5 +139,25 @@ public class ModConfig {
             .comment("每秒最多推进的离线箱子快照数量")
             .defineInRange("offlineSimulationSnapshotsPerSecond", 64, 1, 4096);
 
+    public static final ModConfigSpec.IntValue SPACE_ARCHIVE_MAX_BYTES = BUILDER
+            .comment("实验性空间迁移：单个 .phspace 空间包允许的最大字节数")
+            .defineInRange("spaceArchiveMaxBytes", 256 * 1024 * 1024, 1024 * 1024, Integer.MAX_VALUE);
+
+    public static final ModConfigSpec.IntValue SPACE_ARCHIVE_CHUNK_BYTES = BUILDER
+            .comment("实验性空间迁移：网络分块大小（字节）")
+            .defineInRange("spaceArchiveChunkBytes", 32768, 4096, 1048576);
+
+    public static final ModConfigSpec.IntValue SPACE_ARCHIVE_BYTES_PER_SECOND_PER_PLAYER = BUILDER
+            .comment("实验性空间迁移：每名玩家空间包传输限速（字节/秒）")
+            .defineInRange("spaceArchiveBytesPerSecondPerPlayer", 1024 * 1024, 4096, Integer.MAX_VALUE);
+
+    public static final ModConfigSpec.IntValue SPACE_ARCHIVE_MAX_CONCURRENT_TRANSFERS = BUILDER
+            .comment("实验性空间迁移：服务器同时处理的空间包上传/下载数量")
+            .defineInRange("spaceArchiveMaxConcurrentTransfers", 2, 1, 32);
+
+    public static final ModConfigSpec.ConfigValue<String> SPACE_ARCHIVE_DOWNLOAD_MIN_LEVEL = BUILDER
+            .comment("实验性空间迁移：下载服务器空间所需最低权限，可选 VIEW/USE/WRITE/MANAGE")
+            .define("spaceArchiveDownloadMinLevel", "WRITE");
+
     public static final ModConfigSpec SPEC = BUILDER.build();
 }

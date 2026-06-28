@@ -109,6 +109,12 @@ public class TransferGraphScreen extends Screen {
         super(Component.literal("可视化传输图"));
     }
 
+    public TransferGraphScreen(String initialGraphKind, String initialGraphId) {
+        this();
+        this.pendingGraphKind = initialGraphKind == null || initialGraphKind.isBlank() ? "PRIVATE" : initialGraphKind;
+        this.pendingGraphId = initialGraphId == null ? "" : initialGraphId;
+    }
+
     @Override
     protected void init() {
         pageNameEdit = new EditBox(font, 0, 0, 108, 16, Component.literal("分页名称"));
@@ -2605,6 +2611,7 @@ public class TransferGraphScreen extends Screen {
         return switch (currentGraphKind()) {
             case "PUBLIC" -> "公开图";
             case "PROTECTED" -> "团队图";
+            case "SPACE" -> "空间图";
             default -> "我的私有图";
         };
     }
@@ -2623,7 +2630,7 @@ public class TransferGraphScreen extends Screen {
     }
 
     private boolean canAddPlayerNode() {
-        return !"PUBLIC".equals(currentGraphKind()) && Minecraft.getInstance().player != null;
+        return !"PUBLIC".equals(currentGraphKind()) && !"SPACE".equals(currentGraphKind()) && Minecraft.getInstance().player != null;
     }
 
     private void loadDraftFromCache() {

@@ -1,6 +1,7 @@
 package com.pockethomestead;
 
 import com.pockethomestead.command.PocketHomesteadCommand;
+import com.pockethomestead.archive.SpaceArchiveTransferManager;
 import com.pockethomestead.dimension.PocketDimensionManager;
 import com.pockethomestead.offline.OfflineChestSnapshotStorage;
 import com.pockethomestead.permission.AccessControl;
@@ -78,6 +79,7 @@ public class ModEvents {
 
     @SubscribeEvent
     public static void onServerStopped(ServerStoppedEvent event) {
+        SpaceArchiveTransferManager.reset();
         SpaceScheduler.getInstance().reset();
         SpaceManager.getInstance().clearSpaces();
         PocketDimensionManager.getInstance().reset();
@@ -90,6 +92,7 @@ public class ModEvents {
     public static void onServerTick(ServerTickEvent.Post event) {
         SpaceScheduler.getInstance().onServerTick(event);
         PocketDimensionManager.getInstance().onServerTick(event.getServer());
+        SpaceArchiveTransferManager.tick(event.getServer());
     }
 
     @SubscribeEvent

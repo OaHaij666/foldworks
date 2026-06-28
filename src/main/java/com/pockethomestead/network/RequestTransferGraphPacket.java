@@ -4,6 +4,8 @@ import com.pockethomestead.blockentity.BaseChestBlockEntity;
 import com.pockethomestead.blockentity.HomesteadChestAccess;
 import com.pockethomestead.offline.OfflineChestSnapshotStorage;
 import com.pockethomestead.registry.ChestRegistryManager;
+import com.pockethomestead.space.SpaceData;
+import com.pockethomestead.space.SpaceManager;
 import com.pockethomestead.space.SpacePermission;
 import com.pockethomestead.transfer.GraphKey;
 import com.pockethomestead.transfer.TransferGraph;
@@ -85,6 +87,11 @@ public record RequestTransferGraphPacket(String graphKind, String graphId) imple
             GraphKey key = GraphKey.protectedGraph(team.id());
             result.add(new TransferGraphSyncPacket.GraphOptionData(key.kind().name(), key.id().toString(),
                     "团队: " + team.name(), TransferGraphAccess.canWrite(player, key)));
+        }
+        for (SpaceData space : SpaceManager.getInstance().getAccessibleSpaces(player.getUUID())) {
+            GraphKey key = GraphKey.spaceGraph(space.getSpaceId());
+            result.add(new TransferGraphSyncPacket.GraphOptionData(key.kind().name(), key.id().toString(),
+                    "空间: " + space.getName(), TransferGraphAccess.canWrite(player, key)));
         }
         return result;
     }

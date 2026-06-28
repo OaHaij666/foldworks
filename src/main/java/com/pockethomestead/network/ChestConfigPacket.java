@@ -307,6 +307,12 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
                 sideEntries.add(new ChestSyncPacket.SideConfigEntry(kind.name(), side.name(), be.getSideMode(kind, side).name()));
             }
         }
+        GraphKey graphKey = be.getGraphKey();
+        String graphId = graphKey != null
+                && graphKey.id() != null
+                && (graphKey.kind() == GraphKey.Kind.PROTECTED || graphKey.kind() == GraphKey.Kind.SPACE)
+                ? graphKey.id().toString()
+                : "";
 
         ChestSyncPacket sync = new ChestSyncPacket(
             be.getChestId(),
@@ -332,7 +338,7 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
             be.getStressOutputSpeedRpm(),
             be.isStressOutputReversed(),
             be.getGraphKind().name(),
-            be.getGraphTeamId() == null ? "" : be.getGraphTeamId().toString(),
+            graphId,
             productionStatsEnabled,
             productionGroupId,
             java.util.Arrays.stream(be.getUpgradeCounts()).boxed().toList(),

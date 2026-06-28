@@ -6,6 +6,8 @@ import com.pockethomestead.offline.OfflineChestSnapshotStorage;
 import com.pockethomestead.production.ProductionStatsStorage;
 import com.pockethomestead.registration.ModItems;
 import com.pockethomestead.registry.ChestRegistryManager;
+import com.pockethomestead.space.SpaceData;
+import com.pockethomestead.space.SpaceManager;
 import com.pockethomestead.transfer.TransferEdge;
 import com.pockethomestead.transfer.GraphKey;
 import com.pockethomestead.transfer.TransferGraph;
@@ -1102,12 +1104,21 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         return switch (graphKind) {
             case PUBLIC -> GraphKey.publicGraph();
             case PROTECTED -> graphTeamId == null ? null : GraphKey.protectedGraph(graphTeamId);
+            case SPACE -> {
+                SpaceData space = level == null ? null : SpaceManager.getInstance().getSpaceByDimension(level.dimension().location());
+                yield space == null ? null : GraphKey.spaceGraph(space.getSpaceId());
+            }
             case PRIVATE -> ownerUUID == null ? null : GraphKey.privateGraph(ownerUUID);
         };
     }
 
     public void setGraphAccess(GraphKey.Kind kind, UUID teamId) {
-        this.graphKind = kind == null ? GraphKey.Kind.PRIVATE : kind;
+        GraphKey.Kind next = kind == null ? GraphKey.Kind.PRIVATE : kind;
+        if (next == GraphKey.Kind.SPACE
+                && (level == null || SpaceManager.getInstance().getSpaceByDimension(level.dimension().location()) == null)) {
+            next = GraphKey.Kind.PRIVATE;
+        }
+        this.graphKind = next;
         this.graphTeamId = this.graphKind == GraphKey.Kind.PROTECTED ? teamId : null;
         setChanged();
     }
