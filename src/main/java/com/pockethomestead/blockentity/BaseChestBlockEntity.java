@@ -6,6 +6,7 @@ import com.pockethomestead.production.ProductionStatsStorage;
 import com.pockethomestead.registration.ModItems;
 import com.pockethomestead.registry.ChestRegistryManager;
 import com.pockethomestead.transfer.TransferEdge;
+import com.pockethomestead.transfer.GraphKey;
 import com.pockethomestead.transfer.TransferGraph;
 import com.pockethomestead.transfer.TransferGraphStorage;
 import net.minecraft.core.BlockPos;
@@ -18,6 +19,7 @@ import net.minecraft.network.Connection;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
@@ -106,6 +108,10 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
 
     // 所有者UUID
     protected UUID ownerUUID = null;
+
+    // 传输图权限层级
+    protected GraphKey.Kind graphKind = GraphKey.Kind.PRIVATE;
+    protected UUID graphTeamId = null;
 
     // 传送开关
     protected boolean transferEnabled = false;
@@ -983,6 +989,23 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     public UUID getOwnerUUID() { return ownerUUID; }
     public void setOwnerUUID(UUID uuid) { this.ownerUUID = uuid; setChanged(); }
 
+    public GraphKey.Kind getGraphKind() { return graphKind; }
+    public UUID getGraphTeamId() { return graphTeamId; }
+
+    public GraphKey getGraphKey() {
+        return switch (graphKind) {
+            case PUBLIC -> GraphKey.publicGraph();
+            case PROTECTED -> graphTeamId == null ? null : GraphKey.protectedGraph(graphTeamId);
+            case PRIVATE -> ownerUUID == null ? null : GraphKey.privateGraph(ownerUUID);
+        };
+    }
+
+    public void setGraphAccess(GraphKey.Kind kind, UUID teamId) {
+        this.graphKind = kind == null ? GraphKey.Kind.PRIVATE : kind;
+        this.graphTeamId = this.graphKind == GraphKey.Kind.PROTECTED ? teamId : null;
+        setChanged();
+    }
+
     public boolean isTransferEnabled() { return transferEnabled; }
     public void setTransferEnabled(boolean enabled) { this.transferEnabled = enabled; setChanged(); }
 
@@ -1047,7 +1070,9 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         BandwidthBudget bandwidth = newNormalTransferBudget();
         if (bandwidth.remaining() <= 0) return;
 
-        TransferGraph graph = TransferGraphStorage.get(serverLevel.getServer()).graphFor(ownerUUID);
+        GraphKey graphKey = getGraphKey();
+        if (graphKey == null || !graphKey.isValid()) return;
+        TransferGraph graph = TransferGraphStorage.get(serverLevel.getServer()).graphFor(graphKey);
         String dim = level.dimension().location().toString();
         var node = graph.findNode(chestId, dim, worldPosition);
         if (node == null || !node.isEnabled()) return;
@@ -1073,7 +1098,9 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         long gameTime = serverLevel.getGameTime();
         recordGraphStressBandwidthUse(gameTime, 0);
         if (!hasNetworkUpgrade() || !hasStressUpgrade() || ownerUUID == null || chestId.isEmpty()) return;
-        TransferGraph graph = TransferGraphStorage.get(serverLevel.getServer()).graphFor(ownerUUID);
+        GraphKey graphKey = getGraphKey();
+        if (graphKey == null || !graphKey.isValid()) return;
+        TransferGraph graph = TransferGraphStorage.get(serverLevel.getServer()).graphFor(graphKey);
         String dim = level.dimension().location().toString();
         var node = graph.findNode(chestId, dim, worldPosition);
         if (node == null || !node.isEnabled()) return;
@@ -1122,18 +1149,26 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
             return result.moved();
         }
 
+        if (targetNode.getNodeType() == com.pockethomestead.transfer.TransferNode.NodeType.PLAYER_INVENTORY) {
+            TransferResult result = isFluidScope(scopePort) || isEnergyScope(scopePort) || isStressScope(scopePort)
+                    ? new TransferResult(Map.of(), TransferBlockReason.RECEIVER, firstMatchingResourceId(scopePort))
+                    : transferItemsToPlayer(targetNode, scopePort, nextPath, gameTime, routeBudget, bandwidth);
+            recordTransferResult(graph, serverLevel, nextPath, gameTime, result);
+            return result.moved();
+        }
+
         if (targetNode.getNodeType() != com.pockethomestead.transfer.TransferNode.NodeType.CHEST) return 0;
         BaseChestBlockEntity target = findNodeChest(targetNode, serverLevel);
         TransferResult result;
-        if (target != null && !target.isRemoved()) {
+        if (target != null && !target.isRemoved() && com.pockethomestead.transfer.TransferGraphAccess.chestMatchesGraph(target, graph.getKey())) {
             if (isEnergyScope(scopePort)) {
                 result = transferEnergyTo(target, nextPath, gameTime, routeBudget, bandwidth);
             } else if (isStressScope(scopePort)) {
                 result = transferStressTo(target, nextPath, gameTime, routeBudget, bandwidth);
             } else {
                 result = isFluidScope(scopePort)
-                        ? transferFluidsTo(target, scopePort, nextPath, gameTime, routeBudget, canVoid, bandwidth)
-                        : transferItemsTo(target, scopePort, nextPath, gameTime, routeBudget, canVoid, bandwidth);
+                        ? transferFluidsTo(target, targetNode, scopePort, nextPath, gameTime, routeBudget, canVoid, bandwidth)
+                        : transferItemsTo(target, targetNode, scopePort, nextPath, gameTime, routeBudget, canVoid, bandwidth);
             }
         } else if (canVoid) {
             result = isFluidScope(scopePort)
@@ -1309,7 +1344,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
      * @param target 目标箱子
      * @param canVoid 当目标满时是否虚空多余物品
      */
-    private TransferResult transferItemsTo(BaseChestBlockEntity target, String scopePort, List<TransferEdge> path,
+    private TransferResult transferItemsTo(BaseChestBlockEntity target, com.pockethomestead.transfer.TransferNode targetNode, String scopePort, List<TransferEdge> path,
                                            long gameTime, int routeBudget, boolean canVoid, BandwidthBudget bandwidth) {
         // 快照物品列表避免并发修改
         List<StoredItemStack> entries = getStoredItems();
@@ -1332,6 +1367,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
             matchedSourceItem = true;
             String itemId = itemId(item);
             if (itemId == null) continue;
+            if (!receiveFilterAllows(targetNode, itemId)) continue;
 
             int itemBudget = Math.min(pathBudget(path, gameTime, remainingRouteBudget, itemId), bandwidth.maxTransferable(itemId));
             if (itemBudget <= 0) {
@@ -1381,7 +1417,68 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
                 blockItemId != null ? blockItemId : lastMovedItemId(movedByItem));
     }
 
-    private TransferResult transferFluidsTo(BaseChestBlockEntity target, String scopePort, List<TransferEdge> path,
+    private TransferResult transferItemsToPlayer(com.pockethomestead.transfer.TransferNode targetNode, String scopePort, List<TransferEdge> path,
+                                                 long gameTime, int routeBudget, BandwidthBudget bandwidth) {
+        if (!(level instanceof ServerLevel serverLevel) || targetNode.getTargetPlayerId() == null) {
+            return new TransferResult(Map.of(), TransferBlockReason.RECEIVER, firstMatchingItemId(scopePort));
+        }
+        ServerPlayer targetPlayer = serverLevel.getServer().getPlayerList().getPlayer(targetNode.getTargetPlayerId());
+        if (targetPlayer == null) {
+            return new TransferResult(Map.of(), TransferBlockReason.RECEIVER, firstMatchingItemId(scopePort));
+        }
+        List<StoredItemStack> entries = getStoredItems();
+        int remainingRouteBudget = routeBudget;
+        Map<String, Integer> movedByItem = new LinkedHashMap<>();
+        boolean matchedSourceItem = false;
+        boolean rateLimitedOnly = false;
+        for (StoredItemStack entry : entries) {
+            Item item = entry.item();
+            int count = entry.count();
+            if (count <= 0 || !portAllows(scopePort, item)) continue;
+            matchedSourceItem = true;
+            String itemId = itemId(item);
+            String bareItemId = bareItemId(item);
+            if (itemId == null || bareItemId == null) continue;
+            if (!receiveFilterAllows(targetNode, itemId)) continue;
+            ItemStack prototype = entry.prototype();
+            int targetCount = targetNode.targetCountFor(bareItemId, prototype.getMaxStackSize());
+            if (targetCount <= 0) continue;
+            int current = countPlayerMainInventory(targetPlayer, item);
+            int missing = Math.max(0, targetCount - current);
+            if (missing <= 0) continue;
+
+            int itemBudget = Math.min(pathBudget(path, gameTime, remainingRouteBudget, itemId), bandwidth.maxTransferable(itemId));
+            if (itemBudget <= 0) {
+                rateLimitedOnly = true;
+                continue;
+            }
+            int toTransfer = Math.min(Math.min(count, missing), itemBudget);
+            toTransfer = Math.min(toTransfer, playerMainInventoryRoom(targetPlayer, prototype));
+            if (toTransfer <= 0) continue;
+
+            int removed = removeItemWithoutProduction(prototype, toTransfer);
+            if (removed <= 0) continue;
+            int accepted = insertIntoPlayerMainInventory(targetPlayer, prototype, removed);
+            if (accepted < removed) addItemWithoutProduction(prototype, removed - accepted);
+            if (accepted <= 0) continue;
+            recordProductionOutput(item, accepted);
+            bandwidth.consume(itemId, accepted);
+            movedByItem.merge(itemId, accepted, Integer::sum);
+            remainingRouteBudget -= accepted;
+            targetPlayer.containerMenu.broadcastChanges();
+            targetPlayer.inventoryMenu.broadcastChanges();
+            if (remainingRouteBudget <= 0 || bandwidth.remaining() <= 0) break;
+        }
+        if (movedByItem.isEmpty()) {
+            if (rateLimitedOnly) return new TransferResult(Map.of(), TransferBlockReason.NONE, null);
+            return new TransferResult(Map.of(), matchedSourceItem ? TransferBlockReason.RECEIVER : TransferBlockReason.SOURCE,
+                    matchedSourceItem ? firstMatchingItemId(scopePort) : scopedItemId(scopePort));
+        }
+        if (remainingRouteBudget <= 0 || bandwidth.remaining() <= 0) return new TransferResult(movedByItem, TransferBlockReason.NONE, null);
+        return new TransferResult(movedByItem, TransferBlockReason.SOURCE, lastMovedItemId(movedByItem));
+    }
+
+    private TransferResult transferFluidsTo(BaseChestBlockEntity target, com.pockethomestead.transfer.TransferNode targetNode, String scopePort, List<TransferEdge> path,
                                             long gameTime, int routeBudget, boolean canVoid, BandwidthBudget bandwidth) {
         List<Map.Entry<Fluid, Integer>> entries = new ArrayList<>(fluidStorage.entrySet());
         entries.sort(Comparator.comparing(entry -> net.minecraft.core.registries.BuiltInRegistries.FLUID.getKey(entry.getKey()).toString()));
@@ -1403,6 +1500,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
             matchedSourceFluid = true;
             String fluidId = fluidId(fluid);
             if (fluidId == null) continue;
+            if (!receiveFilterAllows(targetNode, fluidId)) continue;
             int fluidBudget = Math.min(pathBudget(path, gameTime, remainingRouteBudget, fluidId), bandwidth.maxTransferable(fluidId));
             if (fluidBudget <= 0) {
                 rateLimitedOnly = true;
@@ -1598,9 +1696,70 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         return id != null && scopePort.substring(TransferEdge.ITEM_PREFIX.length()).equals(id.toString());
     }
 
+    private boolean receiveFilterAllows(com.pockethomestead.transfer.TransferNode targetNode, String resourceId) {
+        if (targetNode == null || targetNode.getReceiveFilterIds().isEmpty()) return true;
+        if (resourceId == null || resourceId.isBlank()) return false;
+        if (targetNode.getReceiveFilterIds().contains(resourceId)) return true;
+        if (resourceId.startsWith(TransferEdge.ITEM_PREFIX)) {
+            String bare = resourceId.substring(TransferEdge.ITEM_PREFIX.length());
+            return targetNode.getReceiveFilterIds().contains(bare) || targetNode.getReceiveFilterIds().contains(TransferEdge.ITEM_ALL);
+        }
+        if (resourceId.startsWith(TransferEdge.FLUID_PREFIX)) {
+            return targetNode.getReceiveFilterIds().contains(TransferEdge.FLUID_ALL);
+        }
+        return false;
+    }
+
     private String itemId(Item item) {
         net.minecraft.resources.ResourceLocation id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item);
         return id == null ? null : TransferEdge.ITEM_PREFIX + id;
+    }
+
+    private String bareItemId(Item item) {
+        net.minecraft.resources.ResourceLocation id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item);
+        return id == null ? null : id.toString();
+    }
+
+    private int countPlayerMainInventory(ServerPlayer player, Item item) {
+        int total = 0;
+        for (ItemStack stack : player.getInventory().items) {
+            if (!stack.isEmpty() && stack.getItem() == item) total += stack.getCount();
+        }
+        return total;
+    }
+
+    private int playerMainInventoryRoom(ServerPlayer player, ItemStack prototype) {
+        if (prototype == null || prototype.isEmpty()) return 0;
+        int room = 0;
+        for (ItemStack stack : player.getInventory().items) {
+            if (stack.isEmpty()) room += prototype.getMaxStackSize();
+            else if (ItemStack.isSameItemSameComponents(stack, prototype)) room += Math.max(0, stack.getMaxStackSize() - stack.getCount());
+        }
+        return room;
+    }
+
+    private int insertIntoPlayerMainInventory(ServerPlayer player, ItemStack prototype, int amount) {
+        if (prototype == null || prototype.isEmpty() || amount <= 0) return 0;
+        int remaining = amount;
+        for (ItemStack stack : player.getInventory().items) {
+            if (remaining <= 0) break;
+            if (stack.isEmpty() || !ItemStack.isSameItemSameComponents(stack, prototype)) continue;
+            int room = Math.max(0, stack.getMaxStackSize() - stack.getCount());
+            int move = Math.min(room, remaining);
+            if (move > 0) {
+                stack.grow(move);
+                remaining -= move;
+            }
+        }
+        for (int i = 0; i < player.getInventory().items.size() && remaining > 0; i++) {
+            ItemStack stack = player.getInventory().items.get(i);
+            if (!stack.isEmpty()) continue;
+            int move = Math.min(prototype.getMaxStackSize(), remaining);
+            player.getInventory().items.set(i, prototype.copyWithCount(move));
+            remaining -= move;
+        }
+        if (remaining != amount) player.getInventory().setChanged();
+        return amount - remaining;
     }
 
     private String scopedItemId(String scopePort) {
@@ -1682,7 +1841,9 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         if (level == null || level.isClientSide || ownerUUID == null || chestId.isEmpty()) return false;
         if (!hasNetworkUpgrade()) return false;
         if (!(level instanceof ServerLevel serverLevel)) return false;
-        TransferGraph graph = TransferGraphStorage.get(serverLevel.getServer()).graphFor(ownerUUID);
+        GraphKey graphKey = getGraphKey();
+        if (graphKey == null || !graphKey.isValid()) return false;
+        TransferGraph graph = TransferGraphStorage.get(serverLevel.getServer()).graphFor(graphKey);
         var node = graph.findNode(chestId, level.dimension().location().toString(), worldPosition);
         return node != null && graph.hasOutgoing(node.getId());
     }
@@ -1744,6 +1905,8 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         // 保存基础信息
         tag.putString("ChestId", chestId);
         if (ownerUUID != null) tag.putUUID("Owner", ownerUUID);
+        tag.putString("GraphKind", graphKind.name());
+        if (graphKind == GraphKey.Kind.PROTECTED && graphTeamId != null) tag.putUUID("GraphTeamId", graphTeamId);
         tag.putBoolean("TransferEnabled", transferEnabled);
         tag.putBoolean("VoidModeEnabled", voidModeEnabled);
         tag.putInt("TransferRateLimit", transferRateLimit);
@@ -1832,6 +1995,13 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         // 加载基础信息
         chestId = tag.getString("ChestId");
         if (tag.hasUUID("Owner")) ownerUUID = tag.getUUID("Owner");
+        try {
+            graphKind = tag.contains("GraphKind") ? GraphKey.Kind.valueOf(tag.getString("GraphKind")) : GraphKey.Kind.PRIVATE;
+        } catch (IllegalArgumentException e) {
+            graphKind = GraphKey.Kind.PRIVATE;
+        }
+        graphTeamId = tag.hasUUID("GraphTeamId") ? tag.getUUID("GraphTeamId") : null;
+        if (graphKind != GraphKey.Kind.PROTECTED) graphTeamId = null;
         transferEnabled = tag.getBoolean("TransferEnabled");
         voidModeEnabled = tag.getBoolean("VoidModeEnabled");
         transferRateLimit = tag.getInt("TransferRateLimit");

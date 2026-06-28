@@ -5,8 +5,11 @@ import com.pockethomestead.blockentity.RelativeSide;
 import com.pockethomestead.blockentity.ResourceKind;
 import com.pockethomestead.blockentity.SideMode;
 import com.pockethomestead.menu.BaseChestMenu;
+import com.pockethomestead.permission.AccessControl;
 import com.pockethomestead.production.ProductionStatsStorage;
 import com.pockethomestead.registry.ChestRegistryManager;
+import com.pockethomestead.space.SpacePermission;
+import com.pockethomestead.transfer.GraphKey;
 import com.pockethomestead.transfer.TransferGraphStorage;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -59,6 +62,11 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
             if (!(player.containerMenu instanceof BaseChestMenu menu)) return;
             BaseChestBlockEntity be = menu.getBlockEntity();
             if (be == null) return;
+            SpacePermission.AccessLevel required = requiredLevel(packet.action);
+            if (required != null && !AccessControl.canChest(player.getUUID(), be, required)) {
+                AccessControl.deny(player);
+                return;
+            }
 
             switch (packet.action) {
                 case 0 -> { be.setTransferEnabled(!be.isTransferEnabled()); sendSyncToClient(player, be); }
@@ -73,9 +81,7 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
                         be.setChestId(newId);
                         if (player.server != null && be.getLevel() != null) {
                             TransferGraphStorage graphStorage = TransferGraphStorage.get(player.server);
-                            boolean changed = graphStorage.graphFor(be.getOwnerUUID()).updateChestId(
-                                    oldId, newId, be.getLevel().dimension().location().toString(), be.getBlockPos());
-                            if (changed) graphStorage.setDirty();
+                            graphStorage.updateChestId(oldId, newId, be.getLevel().dimension().location().toString(), be.getBlockPos());
                         }
                     }
                     sendSyncToClient(player, be);
@@ -95,6 +101,7 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
                 case 18 -> applySideFunction(be, packet.value);
                 case 19 -> applyStressOutputSpeed(be, packet.value);
                 case 20 -> applyStressOutputDirection(be, packet.value);
+                case 21 -> applyGraphAccess(be, packet.value);
                 default -> {}
             }
 
@@ -103,6 +110,15 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
                 sendSyncToClient(player, be);
             }
         });
+    }
+
+    private static SpacePermission.AccessLevel requiredLevel(int action) {
+        return switch (action) {
+            case 0, 1, 2, 5, 6, 14, 15, 16, 17, 18, 19, 20 -> SpacePermission.AccessLevel.WRITE;
+            case 21 -> SpacePermission.AccessLevel.MANAGE;
+            case 7, 8, 9, 10, 11, 12 -> SpacePermission.AccessLevel.USE;
+            default -> null;
+        };
     }
 
     private static void putFromCarried(BaseChestMenu menu, BaseChestBlockEntity be, boolean onlyOne) {
@@ -235,6 +251,29 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
         be.setStressOutputReversed("1".equals(value) || "true".equalsIgnoreCase(value));
     }
 
+    private static void applyGraphAccess(BaseChestBlockEntity be, String value) {
+        String[] parts = value == null ? new String[0] : value.split("\\|", -1);
+        GraphKey.Kind kind;
+        try {
+            kind = parts.length > 0 ? GraphKey.Kind.valueOf(parts[0]) : GraphKey.Kind.PRIVATE;
+        } catch (IllegalArgumentException e) {
+            kind = GraphKey.Kind.PRIVATE;
+        }
+        java.util.UUID teamId = null;
+        if (kind == GraphKey.Kind.PROTECTED && parts.length > 1 && !parts[1].isBlank()) {
+            try {
+                teamId = java.util.UUID.fromString(parts[1]);
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        be.setGraphAccess(kind, teamId);
+        if (be.getLevel() instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            net.minecraft.world.level.block.state.BlockState state = be.getLevel().getBlockState(be.getBlockPos());
+            be.getLevel().sendBlockUpdated(be.getBlockPos(), state, state, 3);
+            serverLevel.getChunkSource().blockChanged(be.getBlockPos());
+        }
+    }
+
     private static int parseSlot(String value) {
         try { return Integer.parseInt(value); } catch (NumberFormatException e) { return -1; }
     }
@@ -286,6 +325,8 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
             net.neoforged.fml.ModList.get().isLoaded("create"),
             be.getStressOutputSpeedRpm(),
             be.isStressOutputReversed(),
+            be.getGraphKind().name(),
+            be.getGraphTeamId() == null ? "" : be.getGraphTeamId().toString(),
             productionStatsEnabled,
             productionGroupId,
             java.util.Arrays.stream(be.getUpgradeCounts()).boxed().toList(),

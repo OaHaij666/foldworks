@@ -11,22 +11,28 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 public class TransferGraph {
     public static final String DEFAULT_PAGE_ID = "default";
 
-    private final UUID owner;
+    private final GraphKey key;
     private final Map<String, TransferGraphPage> pages = new LinkedHashMap<>();
     private final Map<String, TransferNode> nodes = new LinkedHashMap<>();
     private final Map<String, TransferEdge> edges = new LinkedHashMap<>();
 
     public TransferGraph(UUID owner) {
-        this.owner = owner;
+        this(GraphKey.privateGraph(owner));
+    }
+
+    public TransferGraph(GraphKey key) {
+        this.key = key == null ? GraphKey.publicGraph() : key;
         ensureDefaultPage();
     }
 
-    public UUID getOwner() { return owner; }
+    public UUID getOwner() { return key.kind() == GraphKey.Kind.PRIVATE ? key.id() : null; }
+    public GraphKey getKey() { return key; }
     public Collection<TransferGraphPage> getPages() { return pages.values().stream().sorted(Comparator.comparingInt(TransferGraphPage::getOrder)).toList(); }
     public Collection<TransferNode> getNodes() { return nodes.values(); }
     public Collection<TransferEdge> getEdges() { return edges.values(); }
@@ -107,6 +113,21 @@ public class TransferGraph {
         return node;
     }
 
+    public TransferNode addPlayerInventoryNode(String pageId, UUID playerId, int x, int y) {
+        if (!pages.containsKey(pageId)) pageId = ensureDefaultPage().getId();
+        for (TransferNode node : nodes.values()) {
+            if (node.getNodeType() == TransferNode.NodeType.PLAYER_INVENTORY && Objects.equals(node.getTargetPlayerId(), playerId)) {
+                node.setPageId(pageId);
+                node.setPosition(x, y);
+                return node;
+            }
+        }
+        TransferNode node = new TransferNode(UUID.randomUUID().toString(), pageId, TransferNode.NodeType.PLAYER_INVENTORY,
+                "", "", BlockPos.ZERO, x, y, false, true, List.of(), List.of(), playerId, List.of());
+        nodes.put(node.getId(), node);
+        return node;
+    }
+
     public void removeNode(String nodeId) {
         nodes.remove(nodeId);
         edges.values().removeIf(edge -> edge.getFromNodeId().equals(nodeId) || edge.getToNodeId().equals(nodeId));
@@ -168,7 +189,8 @@ public class TransferGraph {
 
     public CompoundTag save() {
         CompoundTag tag = new CompoundTag();
-        tag.putUUID("Owner", owner);
+        tag.put("GraphKey", key.save());
+        if (key.kind() == GraphKey.Kind.PRIVATE && key.id() != null) tag.putUUID("Owner", key.id());
         ListTag pageList = new ListTag();
         for (TransferGraphPage page : pages.values()) pageList.add(page.save());
         tag.put("Pages", pageList);
@@ -182,7 +204,8 @@ public class TransferGraph {
     }
 
     public static TransferGraph load(CompoundTag tag) {
-        TransferGraph graph = new TransferGraph(tag.getUUID("Owner"));
+        UUID legacyOwner = tag.hasUUID("Owner") ? tag.getUUID("Owner") : null;
+        TransferGraph graph = new TransferGraph(GraphKey.load(tag, legacyOwner));
         graph.pages.clear();
         ListTag pageList = tag.getList("Pages", Tag.TAG_COMPOUND);
         if (pageList.isEmpty()) graph.ensureDefaultPage();

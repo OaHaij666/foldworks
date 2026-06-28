@@ -1,6 +1,13 @@
 package com.pockethomestead.network;
 
-import com.pockethomestead.transfer.*;
+import com.pockethomestead.transfer.GraphKey;
+import com.pockethomestead.transfer.TransferEdge;
+import com.pockethomestead.transfer.TransferGraph;
+import com.pockethomestead.transfer.TransferGraphAccess;
+import com.pockethomestead.transfer.TransferGraphPage;
+import com.pockethomestead.transfer.TransferGraphStorage;
+import com.pockethomestead.transfer.TransferGraphValidator;
+import com.pockethomestead.transfer.TransferNode;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.codec.ByteBufCodecs;
@@ -16,6 +23,8 @@ import java.util.List;
 import java.util.UUID;
 
 public record SaveTransferGraphPacket(
+        String graphKind,
+        String graphId,
         List<TransferGraphSyncPacket.PageData> pages,
         List<TransferGraphSyncPacket.NodeData> nodes,
         List<TransferGraphSyncPacket.EdgeData> edges
@@ -26,6 +35,8 @@ public record SaveTransferGraphPacket(
     public static final StreamCodec<ByteBuf, SaveTransferGraphPacket> STREAM_CODEC = new StreamCodec<>() {
         @Override
         public SaveTransferGraphPacket decode(ByteBuf buf) {
+            String graphKind = ByteBufCodecs.STRING_UTF8.decode(buf);
+            String graphId = ByteBufCodecs.STRING_UTF8.decode(buf);
             List<TransferGraphSyncPacket.PageData> pages = new ArrayList<>();
             int pageCount = ByteBufCodecs.VAR_INT.decode(buf);
             for (int i = 0; i < pageCount; i++) {
@@ -39,44 +50,18 @@ public record SaveTransferGraphPacket(
 
             List<TransferGraphSyncPacket.NodeData> nodes = new ArrayList<>();
             int nodeCount = ByteBufCodecs.VAR_INT.decode(buf);
-            for (int i = 0; i < nodeCount; i++) {
-                String id = ByteBufCodecs.STRING_UTF8.decode(buf);
-                String pageId = ByteBufCodecs.STRING_UTF8.decode(buf);
-                String type = ByteBufCodecs.STRING_UTF8.decode(buf);
-                String chestId = ByteBufCodecs.STRING_UTF8.decode(buf);
-                String dim = ByteBufCodecs.STRING_UTF8.decode(buf);
-                long pos = buf.readLong();
-                int x = ByteBufCodecs.VAR_INT.decode(buf);
-                int y = ByteBufCodecs.VAR_INT.decode(buf);
-                boolean expanded = buf.readBoolean();
-                boolean enabled = buf.readBoolean();
-                nodes.add(new TransferGraphSyncPacket.NodeData(id, pageId, type, chestId, dim, pos, x, y, expanded, enabled, decodeStrings(buf), decodeNodeFlowStats(buf)));
-            }
+            for (int i = 0; i < nodeCount; i++) nodes.add(TransferGraphSyncPacket.decodeNode(buf));
 
             List<TransferGraphSyncPacket.EdgeData> edges = new ArrayList<>();
             int edgeCount = ByteBufCodecs.VAR_INT.decode(buf);
-            for (int i = 0; i < edgeCount; i++) {
-                edges.add(new TransferGraphSyncPacket.EdgeData(
-                        ByteBufCodecs.STRING_UTF8.decode(buf),
-                        ByteBufCodecs.STRING_UTF8.decode(buf),
-                        ByteBufCodecs.STRING_UTF8.decode(buf),
-                        ByteBufCodecs.STRING_UTF8.decode(buf),
-                        ByteBufCodecs.STRING_UTF8.decode(buf),
-                        ByteBufCodecs.STRING_UTF8.decode(buf),
-                        buf.readBoolean(),
-                        buf.readBoolean(),
-                        ByteBufCodecs.VAR_INT.decode(buf),
-                        ByteBufCodecs.VAR_INT.decode(buf),
-                        ByteBufCodecs.STRING_UTF8.decode(buf),
-                        ByteBufCodecs.VAR_INT.decode(buf),
-                        decodeEdgeItemRates(buf)
-                ));
-            }
-            return new SaveTransferGraphPacket(pages, nodes, edges);
+            for (int i = 0; i < edgeCount; i++) edges.add(TransferGraphSyncPacket.decodeEdge(buf));
+            return new SaveTransferGraphPacket(graphKind, graphId, pages, nodes, edges);
         }
 
         @Override
         public void encode(ByteBuf buf, SaveTransferGraphPacket pkt) {
+            ByteBufCodecs.STRING_UTF8.encode(buf, pkt.graphKind);
+            ByteBufCodecs.STRING_UTF8.encode(buf, pkt.graphId);
             ByteBufCodecs.VAR_INT.encode(buf, pkt.pages.size());
             for (TransferGraphSyncPacket.PageData page : pkt.pages) {
                 ByteBufCodecs.STRING_UTF8.encode(buf, page.id());
@@ -86,37 +71,10 @@ public record SaveTransferGraphPacket(
             }
 
             ByteBufCodecs.VAR_INT.encode(buf, pkt.nodes.size());
-            for (TransferGraphSyncPacket.NodeData node : pkt.nodes) {
-                ByteBufCodecs.STRING_UTF8.encode(buf, node.id());
-                ByteBufCodecs.STRING_UTF8.encode(buf, node.pageId());
-                ByteBufCodecs.STRING_UTF8.encode(buf, node.type());
-                ByteBufCodecs.STRING_UTF8.encode(buf, node.chestId());
-                ByteBufCodecs.STRING_UTF8.encode(buf, node.dimensionKey());
-                buf.writeLong(node.pos());
-                ByteBufCodecs.VAR_INT.encode(buf, node.x());
-                ByteBufCodecs.VAR_INT.encode(buf, node.y());
-                buf.writeBoolean(node.expanded());
-                buf.writeBoolean(node.enabled());
-                encodeStrings(buf, node.filterItemIds());
-                encodeNodeFlowStats(buf, node.flowStats());
-            }
+            for (TransferGraphSyncPacket.NodeData node : pkt.nodes) TransferGraphSyncPacket.encodeNode(buf, node);
 
             ByteBufCodecs.VAR_INT.encode(buf, pkt.edges.size());
-            for (TransferGraphSyncPacket.EdgeData edge : pkt.edges) {
-                ByteBufCodecs.STRING_UTF8.encode(buf, edge.id());
-                ByteBufCodecs.STRING_UTF8.encode(buf, edge.pageId());
-                ByteBufCodecs.STRING_UTF8.encode(buf, edge.fromNodeId());
-                ByteBufCodecs.STRING_UTF8.encode(buf, edge.toNodeId());
-                ByteBufCodecs.STRING_UTF8.encode(buf, edge.fromPortKey());
-                ByteBufCodecs.STRING_UTF8.encode(buf, edge.toPortKey());
-                buf.writeBoolean(edge.enabled());
-                buf.writeBoolean(edge.rateLimitEnabled());
-                ByteBufCodecs.VAR_INT.encode(buf, edge.rateLimitSeconds());
-                ByteBufCodecs.VAR_INT.encode(buf, edge.rateLimitItems());
-                ByteBufCodecs.STRING_UTF8.encode(buf, edge.health());
-                ByteBufCodecs.VAR_INT.encode(buf, edge.actualRatePerMinute());
-                encodeEdgeItemRates(buf, edge.itemRates());
-            }
+            for (TransferGraphSyncPacket.EdgeData edge : pkt.edges) TransferGraphSyncPacket.encodeEdge(buf, edge);
         }
     };
 
@@ -126,23 +84,30 @@ public record SaveTransferGraphPacket(
     public static void handle(SaveTransferGraphPacket packet, IPayloadContext context) {
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer player)) return;
-            UUID owner = player.getUUID();
+            GraphKey key = GraphKey.parse(packet.graphKind, packet.graphId, player.getUUID());
+            if (!TransferGraphAccess.canWrite(player, key)) {
+                PacketDistributor.sendToPlayer(player, TransferGraphValidationPacket.from(List.of(
+                        new TransferGraphValidator.Issue(TransferGraphValidator.Severity.ERROR, "", "", "没有权限编辑当前连线图"))));
+                RequestTransferGraphPacket.sendGraphTo(player, key);
+                return;
+            }
             TransferGraphStorage storage = TransferGraphStorage.get(player.server);
-            TransferGraph graph = toGraph(owner, packet, storage.graphFor(owner));
+            TransferGraph previous = storage.graphFor(key);
+            TransferGraph graph = toGraph(key, packet, previous, player);
             List<TransferGraphValidator.Issue> issues = new ArrayList<>(TransferGraphValidator.validate(graph));
-            issues.addAll(TransferGraphValidator.validateRuntime(graph, player.server, owner));
+            issues.addAll(TransferGraphValidator.validateRuntime(graph, player.server, key));
             if (TransferGraphValidator.hasErrors(issues)) {
                 PacketDistributor.sendToPlayer(player, TransferGraphValidationPacket.from(issues));
                 return;
             }
-            storage.replaceGraph(owner, graph);
+            storage.replaceGraph(key, graph);
             PacketDistributor.sendToPlayer(player, TransferGraphValidationPacket.from(issues));
-            RequestTransferGraphPacket.sendGraphTo(player);
+            RequestTransferGraphPacket.sendGraphTo(player, key);
         });
     }
 
-    private static TransferGraph toGraph(UUID owner, SaveTransferGraphPacket packet, TransferGraph previousGraph) {
-        TransferGraph graph = new TransferGraph(owner);
+    private static TransferGraph toGraph(GraphKey key, SaveTransferGraphPacket packet, TransferGraph previousGraph, ServerPlayer player) {
+        TransferGraph graph = new TransferGraph(key);
         graph.clearAll();
         for (TransferGraphSyncPacket.PageData page : packet.pages) {
             graph.putPage(new TransferGraphPage(page.id(), page.name(), page.enabled(), page.order()));
@@ -150,10 +115,8 @@ public record SaveTransferGraphPacket(
         if (packet.pages.isEmpty()) graph.ensureDefaultPage();
         for (TransferGraphSyncPacket.NodeData node : packet.nodes) {
             if ("SUPPLY".equals(node.type()) || "PICKUP".equals(node.type())) continue;
-            TransferNode.NodeType type;
-            try { type = TransferNode.NodeType.valueOf(node.type()); } catch (Exception e) { type = TransferNode.NodeType.CHEST; }
-            TransferNode transferNode = new TransferNode(node.id(), node.pageId(), type, node.chestId(), node.dimensionKey(), BlockPos.of(node.pos()), node.x(), node.y(), node.expanded(), node.enabled(), node.filterItemIds());
-            if (previousGraph != null) transferNode.copyFlowStatsFrom(previousGraph.getNode(node.id()));
+            TransferNode transferNode = toNode(node, previousGraph == null ? null : previousGraph.getNode(node.id()), player);
+            if (transferNode == null) continue;
             graph.putNode(transferNode);
         }
         for (TransferGraphSyncPacket.EdgeData edge : packet.edges) {
@@ -167,71 +130,38 @@ public record SaveTransferGraphPacket(
         return graph;
     }
 
-    private static List<String> decodeStrings(ByteBuf buf) {
-        List<String> strings = new ArrayList<>();
-        int count = ByteBufCodecs.VAR_INT.decode(buf);
-        for (int i = 0; i < count; i++) strings.add(ByteBufCodecs.STRING_UTF8.decode(buf));
-        return strings;
-    }
-
-    private static void encodeStrings(ByteBuf buf, List<String> strings) {
-        ByteBufCodecs.VAR_INT.encode(buf, strings.size());
-        for (String value : strings) ByteBufCodecs.STRING_UTF8.encode(buf, value);
-    }
-
-    private static List<TransferGraphSyncPacket.NodeFlowData> decodeNodeFlowStats(ByteBuf buf) {
-        List<TransferGraphSyncPacket.NodeFlowData> rows = new ArrayList<>();
-        int count = ByteBufCodecs.VAR_INT.decode(buf);
-        for (int i = 0; i < count; i++) {
-            rows.add(new TransferGraphSyncPacket.NodeFlowData(
-                    ByteBufCodecs.STRING_UTF8.decode(buf),
-                    ByteBufCodecs.VAR_INT.decode(buf),
-                    ByteBufCodecs.VAR_INT.decode(buf),
-                    buf.readLong(),
-                    buf.readLong()
-            ));
+    private static TransferNode toNode(TransferGraphSyncPacket.NodeData node, TransferNode previous, ServerPlayer player) {
+        TransferNode.NodeType type;
+        try { type = TransferNode.NodeType.valueOf(node.type()); } catch (Exception e) { type = TransferNode.NodeType.CHEST; }
+        UUID targetPlayerId = parseUuid(node.targetPlayerId());
+        List<TransferNode.ReplenishRule> rules = new ArrayList<>();
+        for (TransferGraphSyncPacket.ReplenishRuleData rule : node.replenishRules()) {
+            rules.add(new TransferNode.ReplenishRule(normalizeItemId(rule.itemId()), rule.targetCount()));
         }
-        return rows;
+        if (type == TransferNode.NodeType.PLAYER_INVENTORY) {
+            if (targetPlayerId == null) targetPlayerId = player.getUUID();
+            if (!player.getUUID().equals(targetPlayerId)) {
+                if (previous == null || previous.getNodeType() != TransferNode.NodeType.PLAYER_INVENTORY
+                        || !targetPlayerId.equals(previous.getTargetPlayerId())) return null;
+                rules = new ArrayList<>(previous.getReplenishRules());
+            }
+        }
+        TransferNode transferNode = new TransferNode(node.id(), node.pageId(), type, node.chestId(), node.dimensionKey(), BlockPos.of(node.pos()),
+                node.x(), node.y(), node.expanded(), node.enabled(), node.filterItemIds(), node.receiveFilterIds(), targetPlayerId, rules);
+        if (previous != null) transferNode.copyFlowStatsFrom(previous);
+        return transferNode;
     }
 
-    private static void encodeNodeFlowStats(ByteBuf buf, List<TransferGraphSyncPacket.NodeFlowData> rows) {
-        ByteBufCodecs.VAR_INT.encode(buf, rows.size());
-        for (TransferGraphSyncPacket.NodeFlowData row : rows) {
-            ByteBufCodecs.STRING_UTF8.encode(buf, row.itemId());
-            ByteBufCodecs.VAR_INT.encode(buf, row.inputRatePerMinute());
-            ByteBufCodecs.VAR_INT.encode(buf, row.outputRatePerMinute());
-            buf.writeLong(row.inputTotal());
-            buf.writeLong(row.outputTotal());
+    private static UUID parseUuid(String value) {
+        try {
+            return value == null || value.isBlank() ? null : UUID.fromString(value);
+        } catch (IllegalArgumentException e) {
+            return null;
         }
     }
 
-    private static List<TransferGraphSyncPacket.EdgeItemRateData> decodeEdgeItemRates(ByteBuf buf) {
-        List<TransferGraphSyncPacket.EdgeItemRateData> rows = new ArrayList<>();
-        int count = ByteBufCodecs.VAR_INT.decode(buf);
-        for (int i = 0; i < count; i++) {
-            rows.add(new TransferGraphSyncPacket.EdgeItemRateData(
-                    ByteBufCodecs.STRING_UTF8.decode(buf),
-                    buf.readBoolean(),
-                    ByteBufCodecs.VAR_INT.decode(buf),
-                    ByteBufCodecs.VAR_INT.decode(buf),
-                    ByteBufCodecs.STRING_UTF8.decode(buf),
-                    ByteBufCodecs.VAR_INT.decode(buf),
-                    buf.readBoolean()
-            ));
-        }
-        return rows;
-    }
-
-    private static void encodeEdgeItemRates(ByteBuf buf, List<TransferGraphSyncPacket.EdgeItemRateData> rows) {
-        ByteBufCodecs.VAR_INT.encode(buf, rows.size());
-        for (TransferGraphSyncPacket.EdgeItemRateData row : rows) {
-            ByteBufCodecs.STRING_UTF8.encode(buf, row.itemId());
-            buf.writeBoolean(row.rateLimitEnabled());
-            ByteBufCodecs.VAR_INT.encode(buf, row.rateLimitSeconds());
-            ByteBufCodecs.VAR_INT.encode(buf, row.rateLimitItems());
-            ByteBufCodecs.STRING_UTF8.encode(buf, row.health());
-            ByteBufCodecs.VAR_INT.encode(buf, row.actualRatePerMinute());
-            buf.writeBoolean(row.configured());
-        }
+    private static String normalizeItemId(String itemId) {
+        if (itemId == null) return "";
+        return itemId.startsWith(TransferEdge.ITEM_PREFIX) ? itemId.substring(TransferEdge.ITEM_PREFIX.length()) : itemId;
     }
 }

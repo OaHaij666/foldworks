@@ -9,19 +9,27 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 public class TransferNode {
     private static final int FLOW_WINDOW_TICKS = 20 * 20;
 
     public record FlowSnapshot(String itemId, int inputRatePerMinute, int outputRatePerMinute, long inputTotal, long outputTotal) {}
+    public record ReplenishRule(String itemId, int targetCount) {
+        public ReplenishRule {
+            itemId = itemId == null ? "" : itemId;
+            targetCount = Math.max(1, Math.min(2304, targetCount));
+        }
+    }
 
     public enum NodeType {
         CHEST,
         REROUTE,
-        TRASH;
+        TRASH,
+        PLAYER_INVENTORY;
 
         public boolean isVirtual() {
-            return this == REROUTE || this == TRASH;
+            return this == REROUTE || this == TRASH || this == PLAYER_INVENTORY;
         }
     }
 
@@ -36,9 +44,18 @@ public class TransferNode {
     private boolean expanded;
     private boolean enabled;
     private final List<String> filterItemIds = new ArrayList<>();
+    private final List<String> receiveFilterIds = new ArrayList<>();
+    private UUID targetPlayerId;
+    private final List<ReplenishRule> replenishRules = new ArrayList<>();
     private transient final Map<String, FlowStats> flowStats = new LinkedHashMap<>();
 
     public TransferNode(String id, String pageId, NodeType type, String chestId, String dimensionKey, BlockPos pos, int x, int y, boolean expanded, boolean enabled, List<String> filterItemIds) {
+        this(id, pageId, type, chestId, dimensionKey, pos, x, y, expanded, enabled, filterItemIds, List.of(), null, List.of());
+    }
+
+    public TransferNode(String id, String pageId, NodeType type, String chestId, String dimensionKey, BlockPos pos, int x, int y,
+                        boolean expanded, boolean enabled, List<String> filterItemIds, List<String> receiveFilterIds,
+                        UUID targetPlayerId, List<ReplenishRule> replenishRules) {
         this.id = id;
         this.pageId = pageId;
         this.type = type == null ? NodeType.CHEST : type;
@@ -51,6 +68,13 @@ public class TransferNode {
         this.enabled = enabled;
         if (filterItemIds != null) {
             for (String itemId : filterItemIds) addFilterItem(itemId);
+        }
+        if (receiveFilterIds != null) {
+            for (String itemId : receiveFilterIds) addReceiveFilterItem(itemId);
+        }
+        this.targetPlayerId = targetPlayerId;
+        if (replenishRules != null) {
+            for (ReplenishRule rule : replenishRules) setReplenishRule(rule.itemId(), rule.targetCount());
         }
     }
 
@@ -65,18 +89,54 @@ public class TransferNode {
     public boolean isExpanded() { return expanded; }
     public boolean isEnabled() { return enabled; }
     public List<String> getFilterItemIds() { return filterItemIds; }
+    public List<String> getReceiveFilterIds() { return receiveFilterIds; }
+    public UUID getTargetPlayerId() { return targetPlayerId; }
+    public List<ReplenishRule> getReplenishRules() { return replenishRules; }
 
     public void setPageId(String pageId) { this.pageId = pageId; }
     public void setChestId(String chestId) { this.chestId = chestId == null ? "" : chestId; }
     public void setPosition(int x, int y) { this.x = x; this.y = y; }
     public void setExpanded(boolean expanded) { this.expanded = expanded; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
+    public void setTargetPlayerId(UUID targetPlayerId) { this.targetPlayerId = targetPlayerId; }
 
     public void addFilterItem(String itemId) {
         if (itemId != null && !itemId.isBlank() && !filterItemIds.contains(itemId)) filterItemIds.add(itemId);
     }
 
     public void removeFilterItem(String itemId) { filterItemIds.remove(itemId); }
+
+    public void addReceiveFilterItem(String itemId) {
+        if (itemId != null && !itemId.isBlank() && !receiveFilterIds.contains(itemId)) receiveFilterIds.add(itemId);
+    }
+
+    public void removeReceiveFilterItem(String itemId) { receiveFilterIds.remove(itemId); }
+
+    public void setReplenishRule(String itemId, int targetCount) {
+        if (itemId == null || itemId.isBlank()) return;
+        ReplenishRule rule = new ReplenishRule(itemId, targetCount);
+        for (int i = 0; i < replenishRules.size(); i++) {
+            if (replenishRules.get(i).itemId().equals(rule.itemId())) {
+                replenishRules.set(i, rule);
+                return;
+            }
+        }
+        replenishRules.add(rule);
+    }
+
+    public void removeReplenishRule(String itemId) {
+        replenishRules.removeIf(rule -> rule.itemId().equals(itemId));
+    }
+
+    public int targetCountFor(String itemId, int defaultStackSize) {
+        if (itemId == null || itemId.isBlank()) return 0;
+        if (type != NodeType.PLAYER_INVENTORY) return Integer.MAX_VALUE;
+        if (replenishRules.isEmpty()) return Math.max(1, defaultStackSize);
+        for (ReplenishRule rule : replenishRules) {
+            if (rule.itemId().equals(itemId)) return rule.targetCount();
+        }
+        return 0;
+    }
 
     public void recordFlowInput(long gameTime, String itemId, int amount) {
         if (itemId == null || itemId.isBlank() || amount <= 0) return;
@@ -137,6 +197,22 @@ public class TransferNode {
             filters.add(item);
         }
         tag.put("FilterItems", filters);
+        ListTag receiveFilters = new ListTag();
+        for (String itemId : receiveFilterIds) {
+            CompoundTag item = new CompoundTag();
+            item.putString("Id", itemId);
+            receiveFilters.add(item);
+        }
+        tag.put("ReceiveFilterItems", receiveFilters);
+        if (targetPlayerId != null) tag.putUUID("TargetPlayer", targetPlayerId);
+        ListTag replenish = new ListTag();
+        for (ReplenishRule rule : replenishRules) {
+            CompoundTag item = new CompoundTag();
+            item.putString("Id", rule.itemId());
+            item.putInt("Target", rule.targetCount());
+            replenish.add(item);
+        }
+        tag.put("ReplenishRules", replenish);
         ListTag flows = new ListTag();
         for (FlowStats stats : flowStats.values()) {
             if (stats.inputTotal <= 0 && stats.outputTotal <= 0) continue;
@@ -162,6 +238,16 @@ public class TransferNode {
         List<String> filters = new ArrayList<>();
         ListTag filterList = tag.getList("FilterItems", Tag.TAG_COMPOUND);
         for (int i = 0; i < filterList.size(); i++) filters.add(filterList.getCompound(i).getString("Id"));
+        List<String> receiveFilters = new ArrayList<>();
+        ListTag receiveFilterList = tag.getList("ReceiveFilterItems", Tag.TAG_COMPOUND);
+        for (int i = 0; i < receiveFilterList.size(); i++) receiveFilters.add(receiveFilterList.getCompound(i).getString("Id"));
+        UUID targetPlayerId = tag.hasUUID("TargetPlayer") ? tag.getUUID("TargetPlayer") : null;
+        List<ReplenishRule> replenishRules = new ArrayList<>();
+        ListTag replenishList = tag.getList("ReplenishRules", Tag.TAG_COMPOUND);
+        for (int i = 0; i < replenishList.size(); i++) {
+            CompoundTag rule = replenishList.getCompound(i);
+            replenishRules.add(new ReplenishRule(rule.getString("Id"), rule.getInt("Target")));
+        }
         TransferNode node = new TransferNode(
                 tag.getString("Id"),
                 tag.contains("PageId") ? tag.getString("PageId") : defaultPageId,
@@ -173,7 +259,10 @@ public class TransferNode {
                 tag.getInt("Y"),
                 tag.getBoolean("Expanded"),
                 !tag.contains("Enabled") || tag.getBoolean("Enabled"),
-                filters
+                filters,
+                receiveFilters,
+                targetPlayerId,
+                replenishRules
         );
         ListTag flowList = tag.getList("FlowStats", Tag.TAG_COMPOUND);
         for (int i = 0; i < flowList.size(); i++) {

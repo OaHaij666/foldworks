@@ -37,6 +37,8 @@ public record ChestSyncPacket(
     boolean createLoaded,
     int stressOutputSpeedRpm,
     boolean stressOutputReversed,
+    String graphKind,
+    String graphTeamId,
     boolean productionStatsEnabled,
     String productionGroupId,
     List<Integer> upgradeCounts,
@@ -73,6 +75,8 @@ public record ChestSyncPacket(
             boolean createLoaded = buf.readBoolean();
             int stressOutputSpeedRpm = ByteBufCodecs.VAR_INT.decode(buf);
             boolean stressOutputReversed = buf.readBoolean();
+            String graphKind = ByteBufCodecs.STRING_UTF8.decode(buf);
+            String graphTeamId = ByteBufCodecs.STRING_UTF8.decode(buf);
             boolean productionStatsEnabled = buf.readBoolean();
             String productionGroupId = ByteBufCodecs.STRING_UTF8.decode(buf);
 
@@ -110,6 +114,7 @@ public record ChestSyncPacket(
                     networkBandwidth, stressBandwidthUsed, remainingTransferBandwidth,
                     stressUpgradeInstalled, createLoaded,
                     stressOutputSpeedRpm, stressOutputReversed,
+                    graphKind, graphTeamId,
                     productionStatsEnabled, productionGroupId,
                     Collections.unmodifiableList(upgrades), Collections.unmodifiableList(sideConfig),
                     Collections.unmodifiableList(items), Collections.unmodifiableMap(fluids));
@@ -137,6 +142,8 @@ public record ChestSyncPacket(
             buf.writeBoolean(pkt.createLoaded);
             ByteBufCodecs.VAR_INT.encode(buf, pkt.stressOutputSpeedRpm);
             buf.writeBoolean(pkt.stressOutputReversed);
+            ByteBufCodecs.STRING_UTF8.encode(buf, pkt.graphKind);
+            ByteBufCodecs.STRING_UTF8.encode(buf, pkt.graphTeamId);
             buf.writeBoolean(pkt.productionStatsEnabled);
             ByteBufCodecs.STRING_UTF8.encode(buf, pkt.productionGroupId);
 

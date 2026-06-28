@@ -10,6 +10,7 @@ import com.pockethomestead.network.RequestTransferGraphPacket;
 import com.pockethomestead.network.SaveTransferGraphPacket;
 import com.pockethomestead.network.TransferGraphSyncPacket;
 import com.pockethomestead.network.TransferGraphValidationPacket;
+import com.pockethomestead.network.TransferTeamPacket;
 import com.pockethomestead.network.UpdateProductionStatsPacket;
 import com.pockethomestead.registration.*;
 import com.pockethomestead.space.SpaceData;
@@ -98,6 +99,11 @@ public class PocketHomestead {
             TransferGraphValidationPacket.TYPE,
             TransferGraphValidationPacket.STREAM_CODEC,
             TransferGraphValidationPacket::handle
+        );
+        registrar.playToServer(
+            TransferTeamPacket.TYPE,
+            TransferTeamPacket.STREAM_CODEC,
+            TransferTeamPacket::handle
         );
         registrar.playToServer(
             RequestProductionStatsPacket.TYPE,

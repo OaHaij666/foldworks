@@ -47,6 +47,8 @@ public class ChestRegistryManager {
         }
     }
 
+    public record RegisteredChest(UUID ownerUUID, String chestId, ChestLocation location) {}
+
     public void registerChest(UUID ownerUUID, String chestId, Level level, BlockPos pos) {
         if (ownerUUID == null || chestId == null || chestId.isEmpty() || level == null || pos == null) return;
         String dimKey = level.dimension().location().toString();
@@ -85,6 +87,18 @@ public class ChestRegistryManager {
         if (chests == null) return Collections.emptyList();
         List<ChestLocation> locations = chests.get(chestId);
         return locations != null ? new ArrayList<>(locations) : Collections.emptyList();
+    }
+
+    public List<RegisteredChest> getAllRegisteredChests() {
+        List<RegisteredChest> result = new ArrayList<>();
+        for (Map.Entry<UUID, Map<String, List<ChestLocation>>> ownerEntry : playerChests.entrySet()) {
+            for (Map.Entry<String, List<ChestLocation>> chestEntry : ownerEntry.getValue().entrySet()) {
+                for (ChestLocation location : chestEntry.getValue()) {
+                    result.add(new RegisteredChest(ownerEntry.getKey(), chestEntry.getKey(), location));
+                }
+            }
+        }
+        return result;
     }
 
     public BaseChestBlockEntity findChest(UUID ownerUUID, String chestId, ServerLevel currentLevel) {

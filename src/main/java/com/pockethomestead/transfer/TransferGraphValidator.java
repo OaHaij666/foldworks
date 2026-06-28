@@ -2,6 +2,7 @@ package com.pockethomestead.transfer;
 
 import com.pockethomestead.blockentity.BaseChestBlockEntity;
 import com.pockethomestead.blockentity.HomesteadChestAccess;
+import com.pockethomestead.space.SpacePermission;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.Registries;
@@ -80,6 +81,11 @@ public final class TransferGraphValidator {
                     if (!out.isEmpty()) issues.add(new Issue(Severity.ERROR, node.getId(), "", "销毁节点不能有输出"));
                     if (in.isEmpty()) issues.add(new Issue(Severity.WARN, node.getId(), "", "销毁节点没有输入"));
                 }
+                case PLAYER_INVENTORY -> {
+                    if (!out.isEmpty()) issues.add(new Issue(Severity.ERROR, node.getId(), "", "玩家背包节点不能有输出"));
+                    if (in.isEmpty()) issues.add(new Issue(Severity.WARN, node.getId(), "", "玩家背包节点没有输入"));
+                    if (node.getTargetPlayerId() == null) issues.add(new Issue(Severity.ERROR, node.getId(), "", "玩家背包节点缺少目标玩家"));
+                }
             }
         }
 
@@ -94,8 +100,12 @@ public final class TransferGraphValidator {
     }
 
     public static List<Issue> validateRuntime(TransferGraph graph, MinecraftServer server, UUID owner) {
+        return validateRuntime(graph, server, GraphKey.privateGraph(owner));
+    }
+
+    public static List<Issue> validateRuntime(TransferGraph graph, MinecraftServer server, GraphKey key) {
         List<Issue> issues = new ArrayList<>();
-        if (server == null || owner == null) return issues;
+        if (server == null || key == null || !key.isValid()) return issues;
         boolean createLoaded = ModList.get().isLoaded("create");
         Map<String, Boolean> stressOutgoing = new HashMap<>();
         Map<String, Boolean> stressIncoming = new HashMap<>();
@@ -106,6 +116,10 @@ public final class TransferGraphValidator {
             }
         }
         for (TransferNode node : graph.getNodes()) {
+            if (node.getNodeType() == TransferNode.NodeType.PLAYER_INVENTORY) {
+                validatePlayerInventoryRuntime(node, server, key, issues);
+                continue;
+            }
             if (node.getNodeType().isVirtual()) continue;
             ResourceLocation dimLoc = ResourceLocation.tryParse(node.getDimensionKey());
             if (dimLoc == null) {
@@ -126,8 +140,8 @@ public final class TransferGraphValidator {
                 issues.add(new Issue(Severity.ERROR, node.getId(), "", "节点位置上的箱子已变化"));
                 continue;
             }
-            if (!owner.equals(be.getOwnerUUID())) {
-                issues.add(new Issue(Severity.ERROR, node.getId(), "", "节点引用了不属于当前玩家的箱子"));
+            if (!TransferGraphAccess.chestMatchesGraph(be, key)) {
+                issues.add(new Issue(Severity.ERROR, node.getId(), "", "箱子的图层级与当前连线图不一致"));
                 continue;
             }
             if (!be.hasNetworkUpgrade()) {
@@ -166,13 +180,41 @@ public final class TransferGraphValidator {
         return issues;
     }
 
+    private static void validatePlayerInventoryRuntime(TransferNode node, MinecraftServer server, GraphKey key, List<Issue> issues) {
+        if (key.kind() == GraphKey.Kind.PUBLIC) {
+            issues.add(new Issue(Severity.ERROR, node.getId(), "", "Public 图不能包含玩家背包节点"));
+            return;
+        }
+        UUID target = node.getTargetPlayerId();
+        if (target == null) {
+            issues.add(new Issue(Severity.ERROR, node.getId(), "", "玩家背包节点缺少目标玩家"));
+            return;
+        }
+        if (key.kind() == GraphKey.Kind.PRIVATE && !target.equals(key.id())) {
+            issues.add(new Issue(Severity.ERROR, node.getId(), "", "Private 图只能包含自己的背包节点"));
+            return;
+        }
+        if (key.kind() == GraphKey.Kind.PROTECTED) {
+            TransferTeam team = TransferTeamStorage.get(server).getTeam(key.id());
+            if (team == null || !team.can(target, SpacePermission.AccessLevel.VIEW)) {
+                issues.add(new Issue(Severity.ERROR, node.getId(), "", "玩家背包节点目标不在当前 Team 中"));
+                return;
+            }
+        }
+        if (server.getPlayerList().getPlayer(target) == null) {
+            issues.add(new Issue(Severity.WARN, node.getId(), "", "目标玩家离线，背包补货暂不工作"));
+        }
+    }
+
     private static boolean validDirection(TransferNode from, TransferNode to) {
         if (from.getNodeType() == TransferNode.NodeType.TRASH) return false;
+        if (from.getNodeType() == TransferNode.NodeType.PLAYER_INVENTORY) return false;
         return from.getNodeType() == TransferNode.NodeType.CHEST || from.getNodeType() == TransferNode.NodeType.REROUTE;
     }
 
     private static boolean validPort(TransferNode from, String port) {
         if (from.getNodeType() == TransferNode.NodeType.TRASH) return false;
+        if (from.getNodeType() == TransferNode.NodeType.PLAYER_INVENTORY) return false;
         if (from.getNodeType() == TransferNode.NodeType.REROUTE) return isAll(port) || validItemPort(port) || validFluidPort(port) || validEnergyPort(port) || validStressPort(port);
         if (isAll(port) || TransferEdge.FLUID_ALL.equals(port) || TransferEdge.ENERGY_FE.equals(port) || TransferEdge.STRESS_SU.equals(port)) return true;
         if (validFluidPort(port)) return true;
@@ -183,6 +225,9 @@ public final class TransferGraphValidator {
     private static boolean validTargetPort(TransferNode to, String port) {
         if (to.getNodeType() == TransferNode.NodeType.TRASH) {
             return TransferEdge.ITEM_IN.equals(port) || TransferEdge.FLUID_IN.equals(port) || TransferEdge.PORT_IN.equals(port);
+        }
+        if (to.getNodeType() == TransferNode.NodeType.PLAYER_INVENTORY) {
+            return TransferEdge.ITEM_IN.equals(port);
         }
         return (to.getNodeType() == TransferNode.NodeType.CHEST || to.getNodeType() == TransferNode.NodeType.REROUTE)
                 && (TransferEdge.PORT_IN.equals(port)

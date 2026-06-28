@@ -7,6 +7,7 @@ import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import com.pockethomestead.client.ClientProductionStatsCache;
+import com.pockethomestead.client.ClientTransferGraphCache;
 import com.pockethomestead.client.ui.Theme;
 import com.pockethomestead.client.ui.widget.UiButton;
 import com.pockethomestead.blockentity.BaseChestBlockEntity;
@@ -97,6 +98,8 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
     private int cacheStressOutputSpeedRpm;
     private boolean cacheStressOutputReversed;
     private String cacheChestId = "";
+    private String cacheGraphKind = "PRIVATE";
+    private String cacheGraphTeamId = "";
     private boolean cacheProductionStatsEnabled;
     private String cacheProductionGroupId = "";
     private final int[] cacheUpgradeCounts = new int[BaseChestBlockEntity.UPGRADE_SLOT_COUNT];
@@ -184,6 +187,8 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         this.cacheStressOutputSpeedRpm = p.stressOutputSpeedRpm();
         this.cacheStressOutputReversed = p.stressOutputReversed();
         this.cacheChestId = p.chestId();
+        this.cacheGraphKind = p.graphKind();
+        this.cacheGraphTeamId = p.graphTeamId();
         syncChestIdEdit(false);
         this.cacheProductionStatsEnabled = p.productionStatsEnabled();
         this.cacheProductionGroupId = p.productionGroupId();
@@ -578,7 +583,16 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         Theme.panel(g, saveX, renameY + 25, 42, 18, 5, changed ? Theme.PRIMARY_SOFT : Theme.SURFACE_SUNK, saveHover && changed ? Theme.PRIMARY : Theme.BORDER);
         Theme.textCentered(g, font, "保存", saveX + 21, renameY + 31, changed ? Theme.PRIMARY_PRESS : Theme.TEXT_FAINT);
 
-        int cardY = renameY + renameH + 8;
+        int accessY = renameY + renameH + 8;
+        int accessH = 42;
+
+        Theme.panel(g, cardX, accessY, cardW, accessH, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
+        Theme.text(g, font, "连线图层级", cardX + 10, accessY + 9, Theme.TEXT);
+        renderGraphTierButton(g, mx, my, cardX + 10, accessY + 24, 58, "Private", "PRIVATE");
+        renderGraphTierButton(g, mx, my, cardX + 74, accessY + 24, 74, "Protected", "PROTECTED");
+        renderGraphTierButton(g, mx, my, cardX + 154, accessY + 24, 52, "Public", "PUBLIC");
+
+        int cardY = accessY + accessH + 8;
         int cardH = 72;
 
         Theme.panel(g, cardX, cardY, cardW, cardH, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
@@ -589,6 +603,23 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         Theme.text(g, font, "分组", cardX + 10, cardY + 50, Theme.TEXT_MUTED);
         drawGroupSelector(g, mx, my, groupSelectorX(cardX), cardY + 44, groupSelectorW(cardW), 18);
         if (statsGroupDropdownOpen) renderGroupDropdown(g, mx, my, groupSelectorX(cardX), cardY + 63, groupSelectorW(cardW));
+    }
+
+    private void renderGraphTierButton(GuiGraphics g, int mx, int my, int x, int y, int w, String label, String kind) {
+        boolean selected = kind.equals(cacheGraphKind);
+        boolean enabled = !"PROTECTED".equals(kind) || firstVisibleTeamId() != null || !cacheGraphTeamId.isBlank();
+        int fill = selected ? Theme.PRIMARY_SOFT : enabled ? Theme.SURFACE : Theme.SURFACE_SUNK;
+        int border = Theme.inside(mx, my, x, y, w, 16) && enabled ? Theme.PRIMARY : selected ? Theme.PRIMARY : Theme.BORDER;
+        Theme.panel(g, x, y, w, 16, 5, fill, border);
+        Theme.textCentered(g, font, label, x + w / 2, y + 5, enabled ? selected ? Theme.PRIMARY_PRESS : Theme.TEXT : Theme.TEXT_FAINT);
+    }
+
+    private String firstVisibleTeamId() {
+        if (cacheGraphTeamId != null && !cacheGraphTeamId.isBlank()) return cacheGraphTeamId;
+        for (com.pockethomestead.network.TransferGraphSyncPacket.TeamData team : ClientTransferGraphCache.teams()) {
+            if (team.id() != null && !team.id().isBlank()) return team.id();
+        }
+        return null;
     }
 
     private void layoutChestIdEdit(int cardX, int cardY, int cardW) {
@@ -1235,7 +1266,8 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         int cardX = leftPos + BaseChestMenu.PANEL_PADDING;
         int graphY = topPos + BaseChestMenu.HEADER_HEIGHT + 10;
         int renameY = graphY + 40 + 8;
-        int cardY = renameY + 50 + 8;
+        int accessY = renameY + 50 + 8;
+        int cardY = accessY + 42 + 8;
         int cardW = panelW - BaseChestMenu.PANEL_PADDING * 2;
         int selectorX = groupSelectorX(cardX);
         int selectorY = cardY + 44;
@@ -1260,6 +1292,28 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         if (chestIdEdit != null) {
             chestIdEdit.setFocused(false);
             setFocused(null);
+        }
+
+        if (Theme.inside(mx, my, cardX + 10, accessY + 24, 58, 16)) {
+            send(21, "PRIVATE|");
+            cacheGraphKind = "PRIVATE";
+            cacheGraphTeamId = "";
+            return true;
+        }
+        if (Theme.inside(mx, my, cardX + 74, accessY + 24, 74, 16)) {
+            String teamId = firstVisibleTeamId();
+            if (teamId != null) {
+                send(21, "PROTECTED|" + teamId);
+                cacheGraphKind = "PROTECTED";
+                cacheGraphTeamId = teamId;
+            }
+            return true;
+        }
+        if (Theme.inside(mx, my, cardX + 154, accessY + 24, 52, 16)) {
+            send(21, "PUBLIC|");
+            cacheGraphKind = "PUBLIC";
+            cacheGraphTeamId = "";
+            return true;
         }
 
         if (statsGroupDropdownOpen) {

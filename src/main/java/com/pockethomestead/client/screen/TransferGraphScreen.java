@@ -11,12 +11,14 @@ import com.pockethomestead.client.ui.Theme;
 import com.pockethomestead.network.RequestTransferGraphPacket;
 import com.pockethomestead.network.SaveTransferGraphPacket;
 import com.pockethomestead.network.TransferGraphSyncPacket;
+import com.pockethomestead.network.TransferTeamPacket;
 import com.pockethomestead.network.TransferGraphValidationPacket;
 import com.pockethomestead.transfer.TransferEdge;
 import com.pockethomestead.transfer.TransferGraph;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -64,7 +66,7 @@ public class TransferGraphScreen extends Screen {
     private MenuMode menuMode = MenuMode.NONE;
     private PopupMode popupMode = PopupMode.NONE;
     private int menuX, menuY, popupX, popupY, pendingNodeX, pendingNodeY;
-    private String selectedNodeId, selectedEdgeId, selectedItemId, pendingDeletePageId;
+    private String selectedNodeId, selectedEdgeId, selectedItemId, pendingDeletePageId, pendingTeamId;
     private String draggingNodeId;
     private int dragOffX, dragOffY;
     private int dragPreviewX, dragPreviewY;
@@ -73,6 +75,9 @@ public class TransferGraphScreen extends Screen {
     private boolean exitAfterSave;
     private int popupDragOffX, popupDragOffY;
     private String linkingFromNodeId, linkingFromPort = TransferEdge.PORT_ALL;
+    private String selectedReplenishItemId;
+    private String replenishTargetValue = "";
+    private boolean editingReplenishTarget;
     private EditBox pageNameEdit;
     private EdgeField focusedEdgeField = EdgeField.NONE;
     private String selectedRateItemId;
@@ -92,8 +97,10 @@ public class TransferGraphScreen extends Screen {
     private boolean savePending;
     private boolean validationStale = true;
     private int graphSyncTicker;
+    private String pendingGraphKind = "";
+    private String pendingGraphId = "";
 
-    private enum MenuMode { NONE, ROOT, CHEST_LIST, PAGE_ACTION, PAGE_DELETE_CONFIRM, PAGE_RENAME, PAGE_CREATE }
+    private enum MenuMode { NONE, ROOT, CHEST_LIST, GRAPH_ACTION, TEAM_MEMBER_ADD, PAGE_ACTION, PAGE_DELETE_CONFIRM, PAGE_RENAME, PAGE_CREATE }
     private enum PopupMode { NONE, NODE, EDGE, SEARCH, HELP, EXIT_CONFIRM }
     private enum EdgeField { NONE, SECONDS, ITEMS }
     private enum SearchKind { ALL, ITEM, FLUID }
@@ -110,7 +117,7 @@ public class TransferGraphScreen extends Screen {
         addRenderableWidget(pageNameEdit);
 
         if (draftPages.isEmpty()) loadDraftFromCache();
-        PacketDistributor.sendToServer(new RequestTransferGraphPacket());
+        PacketDistributor.sendToServer(new RequestTransferGraphPacket(currentGraphKind(), currentGraphId()));
     }
 
     public void onGraphSynced() {
@@ -119,6 +126,8 @@ public class TransferGraphScreen extends Screen {
             dirty = false;
             savePending = false;
             validationStale = true;
+            pendingGraphKind = "";
+            pendingGraphId = "";
         }
         if (page(activePageId) == null) activePageId = firstPage().id();
         TransferGraphSyncPacket.EdgeData edge = edge(selectedEdgeId);
@@ -163,13 +172,13 @@ public class TransferGraphScreen extends Screen {
         graphSyncTicker++;
         if (graphSyncTicker >= 40) {
             graphSyncTicker = 0;
-            PacketDistributor.sendToServer(new RequestTransferGraphPacket());
+            PacketDistributor.sendToServer(new RequestTransferGraphPacket(currentGraphKind(), currentGraphId()));
         }
     }
 
     private void syncWidgets() {
         if (pageNameEdit != null) {
-            pageNameEdit.visible = menuMode == MenuMode.PAGE_RENAME || menuMode == MenuMode.PAGE_CREATE;
+            pageNameEdit.visible = menuMode == MenuMode.PAGE_RENAME || menuMode == MenuMode.PAGE_CREATE || menuMode == MenuMode.TEAM_MEMBER_ADD;
             pageNameEdit.setX(menuX + 8);
             pageNameEdit.setY(menuY + 8);
         }
@@ -180,6 +189,8 @@ public class TransferGraphScreen extends Screen {
         g.fill(0, HEADER_H - 2, width, HEADER_H, 0x12000000);
         Theme.hLine(g, 0, HEADER_H - 1, width, Theme.BORDER);
         text(g, "可视化传输图", 10, 10, Theme.TEXT);
+        chip(g, 302, 6, 150, 18, Theme.SURFACE, Theme.BORDER);
+        text(g, Theme.ellipsize(font, currentGraphLabel(), 134), 310, 11, Theme.PRIMARY_PRESS);
 
         int statusColor = hasValidationErrors() ? Theme.DANGER : dirty ? Theme.PRIMARY_PRESS : Theme.SUCCESS;
         String status = hasValidationErrors() ? "有错误，保存会被拒绝" : dirty ? "未保存" : "已保存";
@@ -271,6 +282,11 @@ public class TransferGraphScreen extends Screen {
                 g.pose().popPose();
                 continue;
             }
+            if (node.type().equals("PLAYER_INVENTORY")) {
+                renderPlayerInventoryNode(g, node, border);
+                g.pose().popPose();
+                continue;
+            }
 
             Theme.shadow(g, 0, 0, NODE_W, h, CARD_RADIUS);
             Theme.panel(g, 0, 0, NODE_W, h, CARD_RADIUS, fill, border);
@@ -351,6 +367,39 @@ public class TransferGraphScreen extends Screen {
         drawPort(g, inputPortLocalX(), h / 2, node.enabled() ? 0xFFE05768 : Theme.TEXT_FAINT);
         text(g, "剩余产物终点", 12, 36, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
         if (isExpanded(node)) text(g, "按连线限速销毁", 12, 52, node.enabled() ? Theme.TEXT_MUTED : Theme.TEXT_FAINT);
+        Theme.hLine(g, 8, h - 28, TRASH_W - 16, Theme.DIVIDER);
+        text(g, node.enabled() ? "禁用" : "启用", 10, h - 18, Theme.PRIMARY_PRESS);
+        text(g, "删除", 62, h - 18, Theme.DANGER);
+    }
+
+    private void renderPlayerInventoryNode(GuiGraphics g, TransferGraphSyncPacket.NodeData node, int border) {
+        int h = nodeHeight(node);
+        Theme.shadow(g, 0, 0, TRASH_W, h, CARD_RADIUS);
+        Theme.panel(g, 0, 0, TRASH_W, h, CARD_RADIUS, node.enabled() ? Theme.SURFACE : 0xFFE9EDF2, border);
+        Theme.fillRound(g, 2, 2, TRASH_W - 4, 24, CARD_RADIUS - 1, node.enabled() ? 0xFFEAF6FF : 0xFFDDE3EA);
+        text(g, (node.enabled() ? "" : "⊘ ") + "玩家背包", 10, 8, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
+        drawExpandButton(g, node, TRASH_W);
+        drawPort(g, inputPortLocalX(), h / 2, node.enabled() ? Theme.SUCCESS : Theme.TEXT_FAINT);
+        text(g, "补货目标", 12, 36, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
+        String playerLabel = node.targetPlayerId() == null || node.targetPlayerId().isBlank() ? "自己" : node.targetPlayerId().substring(0, Math.min(8, node.targetPlayerId().length()));
+        text(g, playerLabel, 82, 36, Theme.TEXT_MUTED);
+        if (isExpanded(node)) {
+            text(g, "+ 补货项", 12, 54, node.enabled() ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED);
+            int y = 74;
+            if (node.replenishRules().isEmpty()) {
+                text(g, "默认补到一组", 12, y, Theme.TEXT_MUTED);
+            } else {
+                for (TransferGraphSyncPacket.ReplenishRuleData rule : node.replenishRules()) {
+                    Item item = resolveItem(rule.itemId());
+                    if (item != null && zoom > 0.22) g.renderItem(new ItemStack(item), 12, y - 8);
+                    text(g, Theme.ellipsize(font, shortResource(rule.itemId()), 80), 32, y - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
+                    boolean editing = editingReplenishTarget && node.id().equals(selectedNodeId) && rule.itemId().equals(selectedReplenishItemId);
+                    text(g, editing ? "目标 " + replenishTargetValue + "_" : "目标 " + rule.targetCount(), 104, y - 4, editing ? Theme.SUCCESS : Theme.PRIMARY_PRESS);
+                    text(g, "×", TRASH_W - 22, y - 4, Theme.DANGER);
+                    y += 18;
+                }
+            }
+        }
         Theme.hLine(g, 8, h - 28, TRASH_W - 16, Theme.DIVIDER);
         text(g, node.enabled() ? "禁用" : "启用", 10, h - 18, Theme.PRIMARY_PRESS);
         text(g, "删除", 62, h - 18, Theme.DANGER);
@@ -616,6 +665,29 @@ public class TransferGraphScreen extends Screen {
 
     private void renderMenu(GuiGraphics g) {
         if (menuMode == MenuMode.NONE) return;
+        if (menuMode == MenuMode.GRAPH_ACTION) {
+            List<TransferGraphSyncPacket.GraphOptionData> options = ClientTransferGraphCache.graphOptions();
+            int h = 34 + Math.max(1, options.size()) * 18 + 22 + ("PROTECTED".equals(currentGraphKind()) ? 18 : 0);
+            crispPanel(g, menuX, menuY, 214, h, Theme.SURFACE, Theme.BORDER_STRONG);
+            text(g, "连线图", menuX + 8, menuY + 8, Theme.TEXT);
+            int y = menuY + 28;
+            for (TransferGraphSyncPacket.GraphOptionData option : options) {
+                boolean active = option.kind().equals(currentGraphKind()) && option.id().equals(currentGraphId());
+                text(g, active ? "●" : "○", menuX + 8, y, active ? Theme.SUCCESS : Theme.TEXT_FAINT);
+                text(g, Theme.ellipsize(font, option.label(), 150), menuX + 28, y, option.writable() ? Theme.TEXT : Theme.TEXT_MUTED);
+                y += 18;
+            }
+            text(g, "+ 新建 Team 图", menuX + 8, y + 2, Theme.PRIMARY_PRESS);
+            if ("PROTECTED".equals(currentGraphKind())) text(g, "+ 添加成员 WRITE", menuX + 8, y + 20, Theme.PRIMARY_PRESS);
+            return;
+        }
+        if (menuMode == MenuMode.TEAM_MEMBER_ADD) {
+            crispPanel(g, menuX, menuY, 214, 56, Theme.SURFACE, Theme.BORDER_STRONG);
+            text(g, "添加 Team 成员 UUID", menuX + 8, menuY + 8, Theme.TEXT);
+            if (pageNameEdit != null) pageNameEdit.render(g, 0, 0, 0);
+            text(g, "Enter 添加 WRITE", menuX + 8, menuY + 39, Theme.TEXT_MUTED);
+            return;
+        }
         if (menuMode == MenuMode.PAGE_ACTION) {
             int rows = pages().size();
             int h = 30 + rows * 18 + 22;
@@ -648,10 +720,11 @@ public class TransferGraphScreen extends Screen {
             return;
         }
         if (menuMode == MenuMode.ROOT) {
-            crispPanel(g, menuX, menuY, 150, 72, Theme.SURFACE, Theme.BORDER_STRONG);
+            crispPanel(g, menuX, menuY, 150, 92, Theme.SURFACE, Theme.BORDER_STRONG);
             text(g, "新建箱子节点", menuX + 9, menuY + 10, Theme.TEXT);
             text(g, "新建中转节点", menuX + 9, menuY + 30, Theme.TEXT);
             text(g, "新建销毁节点", menuX + 9, menuY + 50, Theme.TEXT);
+            text(g, "新建背包节点", menuX + 9, menuY + 70, canAddPlayerNode() ? Theme.TEXT : Theme.TEXT_MUTED);
             return;
         }
         List<TransferGraphSyncPacket.ChestData> chests = ClientTransferGraphCache.chests();
@@ -718,12 +791,13 @@ public class TransferGraphScreen extends Screen {
         TransferGraphSyncPacket.NodeData node = node(selectedNodeId);
         if (node == null) return;
         if (node.type().equals("REROUTE")) return;
-        int h = node.type().equals("CHEST") ? 82 : 62;
+        int h = node.type().equals("CHEST") || node.type().equals("PLAYER_INVENTORY") ? 82 : 62;
         crispPanel(g, popupX, popupY, 150, h, Theme.SURFACE, hasIssueForNode(node.id()) ? Theme.DANGER : Theme.BORDER_STRONG);
-        text(g, node.type().equals("TRASH") ? "销毁节点" : node.chestId(), popupX + 9, popupY + 9, Theme.TEXT);
+        text(g, node.type().equals("TRASH") ? "销毁节点" : node.type().equals("PLAYER_INVENTORY") ? "玩家背包" : node.chestId(), popupX + 9, popupY + 9, Theme.TEXT);
         text(g, node.enabled() ? "禁用节点" : "启用节点", popupX + 9, popupY + 28, Theme.PRIMARY_PRESS);
         if (node.type().equals("CHEST")) text(g, "添加过滤", popupX + 9, popupY + 46, Theme.PRIMARY_PRESS);
-        text(g, "删除节点", popupX + 9, popupY + (node.type().equals("CHEST") ? 64 : 46), Theme.DANGER);
+        if (node.type().equals("PLAYER_INVENTORY")) text(g, "添加补货", popupX + 9, popupY + 46, Theme.PRIMARY_PRESS);
+        text(g, "删除节点", popupX + 9, popupY + (node.type().equals("CHEST") || node.type().equals("PLAYER_INVENTORY") ? 64 : 46), Theme.DANGER);
     }
 
     private void renderReroutePopup(GuiGraphics g, TransferGraphSyncPacket.NodeData node) {
@@ -858,6 +932,7 @@ public class TransferGraphScreen extends Screen {
         crispPanel(g, popupX, popupY, SEARCH_W, panelH, Theme.SURFACE, Theme.BORDER_STRONG);
         TransferGraphSyncPacket.NodeData selectedNode = node(selectedNodeId);
         String title = searchForEdgeItem ? "添加资源行"
+                : selectedNode != null && selectedNode.type().equals("PLAYER_INVENTORY") ? "添加补货项"
                 : selectedNode != null && selectedNode.type().equals("REROUTE") ? "添加输出"
                 : searchKind == SearchKind.ITEM ? "添加物品过滤"
                 : searchKind == SearchKind.FLUID ? "添加流体过滤"
@@ -967,6 +1042,7 @@ public class TransferGraphScreen extends Screen {
                 }
                 return true;
             }
+            if (playerRuleHit(node, mx, my)) return true;
             if (chestAddHit(node, mx, my)) {
                 openSearchPopup(node, mx, my, SearchKind.ALL);
                 return true;
@@ -993,6 +1069,13 @@ public class TransferGraphScreen extends Screen {
 
     private boolean handleHeaderClick(double mx, double my) {
         if (my < 0 || my >= HEADER_H) return false;
+        if (inside(mx, my, 302, 6, 150, 18)) {
+            menuMode = MenuMode.GRAPH_ACTION;
+            menuX = 302;
+            menuY = HEADER_H + 4;
+            popupMode = PopupMode.NONE;
+            return true;
+        }
         int saveX = width - 214;
         if (inside(mx, my, saveX, 6, 54, 18)) {
             saveDraft();
@@ -1025,6 +1108,7 @@ public class TransferGraphScreen extends Screen {
             menuX = x;
             menuY = y + TAB_H;
             if (pageNameEdit != null) {
+                pageNameEdit.setMaxLength(24);
                 pageNameEdit.setValue("新页面");
                 pageNameEdit.setFocused(true);
             }
@@ -1047,6 +1131,36 @@ public class TransferGraphScreen extends Screen {
             menuMode = MenuMode.NONE;
             return true;
         }
+        if (menuMode == MenuMode.GRAPH_ACTION) {
+            List<TransferGraphSyncPacket.GraphOptionData> options = ClientTransferGraphCache.graphOptions();
+            int row = ((int) my - (menuY + 24)) / 18;
+            if (mx >= menuX && mx < menuX + 214 && row >= 0 && row < options.size()) {
+                TransferGraphSyncPacket.GraphOptionData option = options.get(row);
+                requestGraph(option.kind(), option.id());
+            } else {
+                int createY = menuY + 30 + options.size() * 18;
+                if (mx >= menuX && mx < menuX + 214 && my >= createY && my < createY + 20) {
+                    PacketDistributor.sendToServer(new TransferTeamPacket("CREATE", "", "Team"));
+                    dirty = false;
+                    savePending = false;
+                } else if ("PROTECTED".equals(currentGraphKind()) && mx >= menuX && mx < menuX + 214 && my >= createY + 18 && my < createY + 38) {
+                    pendingTeamId = currentGraphId();
+                    menuMode = MenuMode.TEAM_MEMBER_ADD;
+                    if (pageNameEdit != null) {
+                        pageNameEdit.setMaxLength(48);
+                        pageNameEdit.setValue("");
+                        pageNameEdit.setFocused(true);
+                    }
+                    return true;
+                }
+            }
+            menuMode = MenuMode.NONE;
+            return true;
+        }
+        if (menuMode == MenuMode.TEAM_MEMBER_ADD) {
+            if (pageNameEdit != null && pageNameEdit.mouseClicked(mx, my, button)) return true;
+            return true;
+        }
         if (menuMode == MenuMode.PAGE_ACTION) {
             if (mx < menuX || mx >= menuX + 210) {
                 menuMode = MenuMode.NONE;
@@ -1061,6 +1175,7 @@ public class TransferGraphScreen extends Screen {
                     pendingDeletePageId = page.id();
                     menuMode = MenuMode.PAGE_RENAME;
                     if (pageNameEdit != null) {
+                        pageNameEdit.setMaxLength(24);
                         pageNameEdit.setValue(page.name());
                         pageNameEdit.setFocused(true);
                     }
@@ -1078,6 +1193,7 @@ public class TransferGraphScreen extends Screen {
             if (my >= createY && my < createY + 20) {
                 menuMode = MenuMode.PAGE_CREATE;
                 if (pageNameEdit != null) {
+                    pageNameEdit.setMaxLength(24);
                     pageNameEdit.setValue("新页面");
                     pageNameEdit.setFocused(true);
                 }
@@ -1100,13 +1216,16 @@ public class TransferGraphScreen extends Screen {
             return true;
         }
         if (menuMode == MenuMode.ROOT) {
-            if (mx >= menuX && mx < menuX + 150 && my >= menuY && my < menuY + 72) {
+            if (mx >= menuX && mx < menuX + 150 && my >= menuY && my < menuY + 92) {
                 if (my < menuY + 24) menuMode = MenuMode.CHEST_LIST;
                 else if (my < menuY + 48) {
                     addRerouteNode(activePageId, pendingNodeX, pendingNodeY);
                     menuMode = MenuMode.NONE;
-                } else {
+                } else if (my < menuY + 68) {
                     addTrashNode(activePageId, pendingNodeX, pendingNodeY);
+                    menuMode = MenuMode.NONE;
+                } else {
+                    if (canAddPlayerNode()) addPlayerInventoryNode(activePageId, pendingNodeX, pendingNodeY);
                     menuMode = MenuMode.NONE;
                 }
             } else menuMode = MenuMode.NONE;
@@ -1186,7 +1305,9 @@ public class TransferGraphScreen extends Screen {
                 return true;
             }
             if (mx >= popupX && mx < popupX + SEARCH_W && idx >= 0 && idx < results.size() && selectedNodeId != null) {
-                addFilterItem(selectedNodeId, results.get(idx));
+                TransferGraphSyncPacket.NodeData node = node(selectedNodeId);
+                if (node != null && node.type().equals("PLAYER_INVENTORY")) addReplenishRule(selectedNodeId, results.get(idx), 64);
+                else addFilterItem(selectedNodeId, results.get(idx));
                 popupMode = PopupMode.NONE;
                 searchFocused = false;
                 return true;
@@ -1223,7 +1344,8 @@ public class TransferGraphScreen extends Screen {
             int row = ((int) my - popupY - 22) / 18;
             if (row == 0) toggleNode(selectedNodeId);
             else if (row == 1 && node.type().equals("CHEST")) openSearchPopup(node, popupX, popupY, SearchKind.ALL);
-            else if ((row == 1 && !node.type().equals("CHEST")) || row == 2) {
+            else if (row == 1 && node.type().equals("PLAYER_INVENTORY")) openSearchPopup(node, popupX, popupY, SearchKind.ITEM);
+            else if ((row == 1 && !node.type().equals("CHEST") && !node.type().equals("PLAYER_INVENTORY")) || row == 2) {
                 deleteNode(selectedNodeId);
                 popupMode = PopupMode.NONE;
             }
@@ -1401,6 +1523,25 @@ public class TransferGraphScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (editingReplenishTarget) {
+            if (keyCode == 257 || keyCode == 335) {
+                applyReplenishTargetEdit();
+                return true;
+            }
+            if (keyCode == 259) {
+                if (!replenishTargetValue.isEmpty()) replenishTargetValue = replenishTargetValue.substring(0, replenishTargetValue.length() - 1);
+                return true;
+            }
+            if (keyCode == 261) {
+                replenishTargetValue = "";
+                return true;
+            }
+            if (keyCode == 256) {
+                editingReplenishTarget = false;
+                selectedReplenishItemId = null;
+                return true;
+            }
+        }
         if (keyCode == 256) {
             if (popupMode == PopupMode.SEARCH) {
                 popupMode = PopupMode.NONE;
@@ -1425,6 +1566,20 @@ public class TransferGraphScreen extends Screen {
             }
             onClose();
             return true;
+        }
+        if (menuMode == MenuMode.TEAM_MEMBER_ADD && pageNameEdit != null) {
+            if (keyCode == 257 || keyCode == 335) {
+                String playerId = pageNameEdit.getValue().trim();
+                if (!playerId.isEmpty() && pendingTeamId != null && !pendingTeamId.isBlank()) {
+                    PacketDistributor.sendToServer(new TransferTeamPacket("SET_MEMBER", pendingTeamId, playerId + "|WRITE"));
+                    requestGraph("PROTECTED", pendingTeamId);
+                }
+                pageNameEdit.setFocused(false);
+                pageNameEdit.setMaxLength(24);
+                menuMode = MenuMode.NONE;
+                return true;
+            }
+            if (pageNameEdit.keyPressed(keyCode, scanCode, modifiers)) return true;
         }
         if ((menuMode == MenuMode.PAGE_RENAME || menuMode == MenuMode.PAGE_CREATE) && pageNameEdit != null) {
             if (keyCode == 257 || keyCode == 335) {
@@ -1477,7 +1632,11 @@ public class TransferGraphScreen extends Screen {
 
     @Override
     public boolean charTyped(char c, int modifiers) {
-        if ((menuMode == MenuMode.PAGE_RENAME || menuMode == MenuMode.PAGE_CREATE) && pageNameEdit != null && pageNameEdit.charTyped(c, modifiers)) return true;
+        if (editingReplenishTarget && Character.isDigit(c) && replenishTargetValue.length() < 5) {
+            replenishTargetValue += c;
+            return true;
+        }
+        if ((menuMode == MenuMode.PAGE_RENAME || menuMode == MenuMode.PAGE_CREATE || menuMode == MenuMode.TEAM_MEMBER_ADD) && pageNameEdit != null && pageNameEdit.charTyped(c, modifiers)) return true;
         if (popupMode == PopupMode.SEARCH && searchFocused && !Character.isISOControl(c) && searchValue.length() < 64) {
             searchValue += c;
             resetSearchCache();
@@ -1488,6 +1647,22 @@ public class TransferGraphScreen extends Screen {
             return true;
         }
         return super.charTyped(c, modifiers);
+    }
+
+    private void applyReplenishTargetEdit() {
+        if (selectedNodeId == null || selectedReplenishItemId == null) {
+            editingReplenishTarget = false;
+            return;
+        }
+        int target = 64;
+        try {
+            target = Math.max(1, Math.min(2304, Integer.parseInt(replenishTargetValue)));
+        } catch (NumberFormatException ignored) {
+        }
+        addReplenishRule(selectedNodeId, selectedReplenishItemId, target);
+        editingReplenishTarget = false;
+        selectedReplenishItemId = null;
+        replenishTargetValue = "";
     }
 
     private void createEdge(String toNodeId, String toPortKey) {
@@ -1523,7 +1698,7 @@ public class TransferGraphScreen extends Screen {
         if (savePending) return;
         savePending = true;
         validationStale = false;
-        PacketDistributor.sendToServer(new SaveTransferGraphPacket(copyPages(draftPages), copyNodes(draftNodes), copyEdges(draftEdges)));
+        PacketDistributor.sendToServer(new SaveTransferGraphPacket(currentGraphKind(), currentGraphId(), copyPages(draftPages), copyNodes(draftNodes), copyEdges(draftEdges)));
     }
 
     private void discardDraft() {
@@ -1585,41 +1760,56 @@ public class TransferGraphScreen extends Screen {
             TransferGraphSyncPacket.NodeData n = draftNodes.get(i);
             if (n.type().equals("CHEST") && n.chestId().equals(chest.chestId())
                     && n.dimensionKey().equals(chest.dimensionKey()) && n.pos() == chest.pos()) {
-                draftNodes.set(i, new TransferGraphSyncPacket.NodeData(n.id(), activePageId, n.type(), n.chestId(), n.dimensionKey(), n.pos(), x, y, n.expanded(), n.enabled(), List.copyOf(n.filterItemIds()), List.copyOf(n.flowStats())));
+                draftNodes.set(i, copyNode(n, activePageId, x, y, n.expanded(), n.enabled(), n.filterItemIds(), n.receiveFilterIds(), n.replenishRules()));
                 markDirty();
                 return;
             }
         }
-        draftNodes.add(new TransferGraphSyncPacket.NodeData(UUID.randomUUID().toString(), activePageId, "CHEST", chest.chestId(), chest.dimensionKey(), chest.pos(), x, y, false, true, List.of(), List.of()));
+        draftNodes.add(new TransferGraphSyncPacket.NodeData(UUID.randomUUID().toString(), activePageId, "CHEST", chest.chestId(), chest.dimensionKey(), chest.pos(), x, y, false, true, List.of(), List.of(), "", List.of(), List.of()));
         markDirty();
     }
 
     private void addRerouteNode(String pageId, int x, int y) {
-        draftNodes.add(new TransferGraphSyncPacket.NodeData(UUID.randomUUID().toString(), pageId, "REROUTE", "", "", BlockPos.ZERO.asLong(), x, y, false, true, List.of(), List.of()));
+        draftNodes.add(new TransferGraphSyncPacket.NodeData(UUID.randomUUID().toString(), pageId, "REROUTE", "", "", BlockPos.ZERO.asLong(), x, y, false, true, List.of(), List.of(), "", List.of(), List.of()));
         markDirty();
     }
 
     private void addTrashNode(String pageId, int x, int y) {
-        draftNodes.add(new TransferGraphSyncPacket.NodeData(UUID.randomUUID().toString(), pageId, "TRASH", "", "", BlockPos.ZERO.asLong(), x, y, false, true, List.of(), List.of()));
+        draftNodes.add(new TransferGraphSyncPacket.NodeData(UUID.randomUUID().toString(), pageId, "TRASH", "", "", BlockPos.ZERO.asLong(), x, y, false, true, List.of(), List.of(), "", List.of(), List.of()));
+        markDirty();
+    }
+
+    private void addPlayerInventoryNode(String pageId, int x, int y) {
+        if (Minecraft.getInstance().player == null) return;
+        String playerId = Minecraft.getInstance().player.getUUID().toString();
+        for (int i = 0; i < draftNodes.size(); i++) {
+            TransferGraphSyncPacket.NodeData n = draftNodes.get(i);
+            if (n.type().equals("PLAYER_INVENTORY") && playerId.equals(n.targetPlayerId())) {
+                draftNodes.set(i, copyNode(n, pageId, x, y, n.expanded(), n.enabled(), n.filterItemIds(), n.receiveFilterIds(), n.replenishRules()));
+                markDirty();
+                return;
+            }
+        }
+        draftNodes.add(new TransferGraphSyncPacket.NodeData(UUID.randomUUID().toString(), pageId, "PLAYER_INVENTORY", "", "", BlockPos.ZERO.asLong(), x, y, true, true, List.of(), List.of(), playerId, List.of(), List.of()));
         markDirty();
     }
 
     private void moveNode(String nodeId, int x, int y) {
         TransferGraphSyncPacket.NodeData n = node(nodeId);
         if (n == null) return;
-        replaceNode(new TransferGraphSyncPacket.NodeData(n.id(), n.pageId(), n.type(), n.chestId(), n.dimensionKey(), n.pos(), x, y, n.expanded(), n.enabled(), List.copyOf(n.filterItemIds()), List.copyOf(n.flowStats())));
+        replaceNode(copyNode(n, n.pageId(), x, y, n.expanded(), n.enabled(), n.filterItemIds(), n.receiveFilterIds(), n.replenishRules()));
     }
 
     private void toggleNode(String nodeId) {
         TransferGraphSyncPacket.NodeData n = node(nodeId);
         if (n == null) return;
-        replaceNode(new TransferGraphSyncPacket.NodeData(n.id(), n.pageId(), n.type(), n.chestId(), n.dimensionKey(), n.pos(), n.x(), n.y(), n.expanded(), !n.enabled(), List.copyOf(n.filterItemIds()), List.copyOf(n.flowStats())));
+        replaceNode(copyNode(n, n.pageId(), n.x(), n.y(), n.expanded(), !n.enabled(), n.filterItemIds(), n.receiveFilterIds(), n.replenishRules()));
     }
 
     private void toggleNodeExpanded(String nodeId) {
         TransferGraphSyncPacket.NodeData n = node(nodeId);
         if (n == null) return;
-        replaceNode(new TransferGraphSyncPacket.NodeData(n.id(), n.pageId(), n.type(), n.chestId(), n.dimensionKey(), n.pos(), n.x(), n.y(), !n.expanded(), n.enabled(), List.copyOf(n.filterItemIds()), List.copyOf(n.flowStats())));
+        replaceNode(copyNode(n, n.pageId(), n.x(), n.y(), !n.expanded(), n.enabled(), n.filterItemIds(), n.receiveFilterIds(), n.replenishRules()));
     }
 
     private void deleteNode(String nodeId) {
@@ -1635,7 +1825,7 @@ public class TransferGraphScreen extends Screen {
         List<String> filters = new ArrayList<>(n.filterItemIds());
         filters.add(itemId);
         boolean expanded = n.expanded() || n.type().equals("CHEST");
-        replaceNode(new TransferGraphSyncPacket.NodeData(n.id(), n.pageId(), n.type(), n.chestId(), n.dimensionKey(), n.pos(), n.x(), n.y(), expanded, n.enabled(), filters, List.copyOf(n.flowStats())));
+        replaceNode(copyNode(n, n.pageId(), n.x(), n.y(), expanded, n.enabled(), filters, n.receiveFilterIds(), n.replenishRules()));
     }
 
     private void removeFilterItem(String nodeId, String itemId) {
@@ -1644,10 +1834,36 @@ public class TransferGraphScreen extends Screen {
         if (n == null) return;
         List<String> filters = new ArrayList<>(n.filterItemIds());
         if (!filters.remove(itemId)) return;
-        replaceNode(new TransferGraphSyncPacket.NodeData(n.id(), n.pageId(), n.type(), n.chestId(), n.dimensionKey(), n.pos(), n.x(), n.y(), n.expanded(), n.enabled(), filters, List.copyOf(n.flowStats())));
+        replaceNode(copyNode(n, n.pageId(), n.x(), n.y(), n.expanded(), n.enabled(), filters, n.receiveFilterIds(), n.replenishRules()));
         String port = filterPort(itemId);
         draftEdges.removeIf(e -> e.fromNodeId().equals(nodeId) && e.fromPortKey().equals(port));
         markDirty();
+    }
+
+    private void addReplenishRule(String nodeId, String itemId, int targetCount) {
+        itemId = normalizeFilterResource(itemId);
+        if (itemId.startsWith(TransferEdge.FLUID_PREFIX)) return;
+        TransferGraphSyncPacket.NodeData n = node(nodeId);
+        if (n == null || !n.type().equals("PLAYER_INVENTORY")) return;
+        List<TransferGraphSyncPacket.ReplenishRuleData> rules = new ArrayList<>(n.replenishRules());
+        for (int i = 0; i < rules.size(); i++) {
+            if (rules.get(i).itemId().equals(itemId)) {
+                rules.set(i, new TransferGraphSyncPacket.ReplenishRuleData(itemId, Math.max(1, targetCount)));
+                replaceNode(copyNode(n, n.pageId(), n.x(), n.y(), true, n.enabled(), n.filterItemIds(), n.receiveFilterIds(), rules));
+                return;
+            }
+        }
+        rules.add(new TransferGraphSyncPacket.ReplenishRuleData(itemId, Math.max(1, targetCount)));
+        replaceNode(copyNode(n, n.pageId(), n.x(), n.y(), true, n.enabled(), n.filterItemIds(), n.receiveFilterIds(), rules));
+    }
+
+    private void removeReplenishRule(String nodeId, String itemId) {
+        TransferGraphSyncPacket.NodeData n = node(nodeId);
+        if (n == null || !n.type().equals("PLAYER_INVENTORY")) return;
+        List<TransferGraphSyncPacket.ReplenishRuleData> rules = new ArrayList<>(n.replenishRules());
+        if (rules.removeIf(rule -> rule.itemId().equals(itemId))) {
+            replaceNode(copyNode(n, n.pageId(), n.x(), n.y(), n.expanded(), n.enabled(), n.filterItemIds(), n.receiveFilterIds(), rules));
+        }
     }
 
     private String normalizeFilterResource(String resourceId) {
@@ -1655,6 +1871,32 @@ public class TransferGraphScreen extends Screen {
         if (resourceId.startsWith(TransferEdge.ITEM_PREFIX)) return resourceId.substring(TransferEdge.ITEM_PREFIX.length());
         if (resourceId.startsWith(TransferEdge.FLUID_PREFIX)) return resourceId;
         return resourceId;
+    }
+
+    private boolean playerRuleHit(TransferGraphSyncPacket.NodeData node, double mx, double my) {
+        if (node == null || !node.type().equals("PLAYER_INVENTORY") || !isExpanded(node)) return false;
+        double lx = nodeLocalX(node, mx);
+        double ly = nodeLocalY(node, my);
+        if (inside(lx, ly, 10, 50, 66, 18)) {
+            openSearchPopup(node, mx, my, SearchKind.ITEM);
+            return true;
+        }
+        int y = 74;
+        for (TransferGraphSyncPacket.ReplenishRuleData rule : node.replenishRules()) {
+            if (inside(lx, ly, 100, y - 10, 48, 18)) {
+                selectedNodeId = node.id();
+                selectedReplenishItemId = rule.itemId();
+                replenishTargetValue = String.valueOf(rule.targetCount());
+                editingReplenishTarget = true;
+                return true;
+            }
+            if (inside(lx, ly, TRASH_W - 30, y - 10, 24, 18)) {
+                removeReplenishRule(node.id(), rule.itemId());
+                return true;
+            }
+            y += 18;
+        }
+        return false;
     }
 
     private void addEdgeItemRate(String edgeId, String itemId) {
@@ -1782,6 +2024,15 @@ public class TransferGraphScreen extends Screen {
         }
     }
 
+    private TransferGraphSyncPacket.NodeData copyNode(TransferGraphSyncPacket.NodeData n, String pageId, int x, int y,
+                                                      boolean expanded, boolean enabled, List<String> filters,
+                                                      List<String> receiveFilters,
+                                                      List<TransferGraphSyncPacket.ReplenishRuleData> replenishRules) {
+        return new TransferGraphSyncPacket.NodeData(n.id(), pageId, n.type(), n.chestId(), n.dimensionKey(), n.pos(),
+                x, y, expanded, enabled, List.copyOf(filters), List.copyOf(receiveFilters),
+                n.targetPlayerId(), List.copyOf(replenishRules), List.copyOf(n.flowStats()));
+    }
+
     private void markDirty() {
         dirty = true;
         savePending = false;
@@ -1854,13 +2105,14 @@ public class TransferGraphScreen extends Screen {
             return 86 + Math.max(1, rerouteOutputPorts(node).size()) * 20;
         }
         if (node.type().equals("TRASH")) return isExpanded(node) ? 88 : 78;
+        if (node.type().equals("PLAYER_INVENTORY")) return isExpanded(node) ? 104 + Math.max(1, node.replenishRules().size()) * 18 : 78;
         if (!isExpanded(node)) return COLLAPSED_CHEST_H;
         return chestFirstFilterLocalY() + Math.max(1, node.filterItemIds().size()) * 18 + 12;
     }
 
     private int nodeWidth(TransferGraphSyncPacket.NodeData node) {
         if (node.type().equals("REROUTE")) return REROUTE_W;
-        if (node.type().equals("TRASH")) return TRASH_W;
+        if (node.type().equals("TRASH") || node.type().equals("PLAYER_INVENTORY")) return TRASH_W;
         return NODE_W;
     }
 
@@ -1926,7 +2178,7 @@ public class TransferGraphScreen extends Screen {
     }
 
     private int inputY(TransferGraphSyncPacket.NodeData node) {
-        return nodeScreenY(node) + scaled(node.type().equals("REROUTE") || node.type().equals("TRASH") ? nodeHeight(node) / 2 : chestItemLocalY());
+        return nodeScreenY(node) + scaled(node.type().equals("REROUTE") || node.type().equals("TRASH") || node.type().equals("PLAYER_INVENTORY") ? nodeHeight(node) / 2 : chestItemLocalY());
     }
 
     private int chestInputY(TransferGraphSyncPacket.NodeData node, String sourcePort) {
@@ -1975,7 +2227,7 @@ public class TransferGraphScreen extends Screen {
 
     private PortHit inputAt(double mx, double my) {
         for (TransferGraphSyncPacket.NodeData node : visibleNodes()) {
-            if (!node.type().equals("CHEST") && !node.type().equals("REROUTE") && !node.type().equals("TRASH")) continue;
+            if (!node.type().equals("CHEST") && !node.type().equals("REROUTE") && !node.type().equals("TRASH") && !node.type().equals("PLAYER_INVENTORY")) continue;
             int x = nodeScreenX(node) + scaled(inputPortLocalX());
             if (node.type().equals("CHEST")) {
                 if (hit(mx, my, x, allOutputY(node))) return new PortHit(node.id(), TransferEdge.ITEM_IN);
@@ -1985,6 +2237,7 @@ public class TransferGraphScreen extends Screen {
             } else if (hit(mx, my, x, inputY(node))) {
                 String targetPort = TransferEdge.inputPortFor(linkingFromPort);
                 if (node.type().equals("TRASH") && (TransferEdge.ENERGY_IN.equals(targetPort) || TransferEdge.STRESS_IN.equals(targetPort))) return null;
+                if (node.type().equals("PLAYER_INVENTORY") && !TransferEdge.ITEM_IN.equals(targetPort)) return null;
                 return new PortHit(node.id(), targetPort);
             }
         }
@@ -2262,6 +2515,46 @@ public class TransferGraphScreen extends Screen {
         return 54 + Math.max(1, Math.min(5, results.size())) * 20 + 8;
     }
 
+    private String currentGraphKind() {
+        if (!pendingGraphKind.isBlank()) return pendingGraphKind;
+        return ClientTransferGraphCache.graphKind() == null || ClientTransferGraphCache.graphKind().isBlank()
+                ? "PRIVATE"
+                : ClientTransferGraphCache.graphKind();
+    }
+
+    private String currentGraphId() {
+        if (!pendingGraphKind.isBlank()) return pendingGraphId;
+        return ClientTransferGraphCache.graphId() == null ? "" : ClientTransferGraphCache.graphId();
+    }
+
+    private String currentGraphLabel() {
+        for (TransferGraphSyncPacket.GraphOptionData option : ClientTransferGraphCache.graphOptions()) {
+            if (option.kind().equals(currentGraphKind()) && option.id().equals(currentGraphId())) return option.label();
+        }
+        return switch (currentGraphKind()) {
+            case "PUBLIC" -> "Public 图";
+            case "PROTECTED" -> "Team 图";
+            default -> "我的 Private 图";
+        };
+    }
+
+    private void requestGraph(String kind, String id) {
+        dirty = false;
+        savePending = false;
+        validationStale = true;
+        draftPages.clear();
+        draftNodes.clear();
+        draftEdges.clear();
+        pendingGraphKind = kind == null || kind.isBlank() ? "PRIVATE" : kind;
+        pendingGraphId = id == null ? "" : id;
+        graphSyncTicker = 0;
+        PacketDistributor.sendToServer(new RequestTransferGraphPacket(kind, id));
+    }
+
+    private boolean canAddPlayerNode() {
+        return !"PUBLIC".equals(currentGraphKind()) && Minecraft.getInstance().player != null;
+    }
+
     private void loadDraftFromCache() {
         draftPages = copyPages(ClientTransferGraphCache.pages());
         if (draftPages.isEmpty()) draftPages.add(new TransferGraphSyncPacket.PageData(TransferGraph.DEFAULT_PAGE_ID, "默认页", true, 0));
@@ -2341,7 +2634,9 @@ public class TransferGraphScreen extends Screen {
     private List<TransferGraphSyncPacket.NodeData> copyNodes(List<TransferGraphSyncPacket.NodeData> nodes) {
         List<TransferGraphSyncPacket.NodeData> copy = new ArrayList<>();
         for (TransferGraphSyncPacket.NodeData n : nodes) {
-            copy.add(new TransferGraphSyncPacket.NodeData(n.id(), n.pageId(), n.type(), n.chestId(), n.dimensionKey(), n.pos(), n.x(), n.y(), n.expanded(), n.enabled(), List.copyOf(n.filterItemIds()), List.copyOf(n.flowStats())));
+            copy.add(new TransferGraphSyncPacket.NodeData(n.id(), n.pageId(), n.type(), n.chestId(), n.dimensionKey(), n.pos(), n.x(), n.y(),
+                    n.expanded(), n.enabled(), List.copyOf(n.filterItemIds()), List.copyOf(n.receiveFilterIds()),
+                    n.targetPlayerId(), List.copyOf(n.replenishRules()), List.copyOf(n.flowStats())));
         }
         return copy;
     }

@@ -15,29 +15,48 @@ import java.util.UUID;
 public class TransferGraphStorage extends SavedData {
     public static final String DATA_NAME = "pockethomestead_transfer_graphs";
 
-    private final Map<UUID, TransferGraph> graphs = new LinkedHashMap<>();
+    private final Map<GraphKey, TransferGraph> graphs = new LinkedHashMap<>();
 
     public static TransferGraphStorage get(MinecraftServer server) {
         return server.overworld().getDataStorage().computeIfAbsent(factory(), DATA_NAME);
     }
 
     public TransferGraph graphFor(UUID owner) {
-        return graphs.computeIfAbsent(owner, TransferGraph::new);
+        return graphFor(GraphKey.privateGraph(owner));
+    }
+
+    public TransferGraph graphFor(GraphKey key) {
+        GraphKey safeKey = key == null ? GraphKey.publicGraph() : key;
+        return graphs.computeIfAbsent(safeKey, TransferGraph::new);
     }
 
     public void replaceGraph(UUID owner, TransferGraph graph) {
-        graphs.put(owner, graph);
+        replaceGraph(GraphKey.privateGraph(owner), graph);
+    }
+
+    public void replaceGraph(GraphKey key, TransferGraph graph) {
+        GraphKey safeKey = key == null ? GraphKey.publicGraph() : key;
+        graphs.put(safeKey, graph);
         setDirty();
     }
 
     public Collection<TransferGraph> getGraphs() { return graphs.values(); }
+
+    public boolean updateChestId(String oldChestId, String newChestId, String dimensionKey, net.minecraft.core.BlockPos pos) {
+        boolean changed = false;
+        for (TransferGraph graph : graphs.values()) {
+            changed |= graph.updateChestId(oldChestId, newChestId, dimensionKey, pos);
+        }
+        if (changed) setDirty();
+        return changed;
+    }
 
     public static TransferGraphStorage load(CompoundTag tag, HolderLookup.Provider reg) {
         TransferGraphStorage storage = new TransferGraphStorage();
         ListTag list = tag.getList("Graphs", Tag.TAG_COMPOUND);
         for (int i = 0; i < list.size(); i++) {
             TransferGraph graph = TransferGraph.load(list.getCompound(i));
-            storage.graphs.put(graph.getOwner(), graph);
+            storage.graphs.put(graph.getKey(), graph);
         }
         return storage;
     }
