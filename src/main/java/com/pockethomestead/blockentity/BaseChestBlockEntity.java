@@ -165,7 +165,6 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     @Override
     public void onLoad() {
         super.onLoad();
-        logChestLifecycle("onLoad");
         if (level instanceof ServerLevel serverLevel) {
             OfflineChestSnapshotStorage.get(serverLevel.getServer()).applySnapshotToLoadedChest(this, serverLevel.getGameTime());
         }
@@ -181,7 +180,6 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         if (level == null || level.isClientSide) return;
         if (registered) return;
         if (ownerUUID == null || chestId.isEmpty()) return;
-        logChestLifecycle("registerIfReady");
         ChestRegistryManager.getInstance().registerChest(ownerUUID, chestId, level, worldPosition);
         registered = true;
         refreshProductionInventorySnapshot();
@@ -193,7 +191,6 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     @Override
     public void setRemoved() {
         if (isRemoved()) return;
-        logChestLifecycle("setRemoved:start");
         // 服务端卸载时从全局管理器注销
         if (level != null && !level.isClientSide && ownerUUID != null && !chestId.isEmpty()) {
             if (level instanceof ServerLevel serverLevel) {
@@ -207,25 +204,6 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
             registered = false;
         }
         super.setRemoved();
-        logChestLifecycle("setRemoved:end");
-    }
-
-    protected void logChestLifecycle(String phase) {
-        if (!com.pockethomestead.debug.ShutdownDiagnostics.enabled()) return;
-        String dimension = level == null ? "null" : level.dimension().location().toString();
-        com.pockethomestead.PocketHomestead.LOGGER.warn(
-                "[chest-lifecycle] phase={} class={} dim={} pos={} id={} owner={} registered={} destroyedForOfflineSnapshot={} removed={} thread={}",
-                phase,
-                getClass().getSimpleName(),
-                dimension,
-                worldPosition,
-                chestId,
-                ownerUUID,
-                registered,
-                destroyedForOfflineSnapshot,
-                isRemoved(),
-                Thread.currentThread().getName()
-        );
     }
 
     // ===== 容量系统方法 =====

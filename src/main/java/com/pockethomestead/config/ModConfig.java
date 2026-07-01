@@ -169,10 +169,6 @@ public class ModConfig {
             .comment("每秒最多推进的离线箱子快照数量")
             .defineInRange("offlineSimulationSnapshotsPerSecond", 64, 1, 4096);
 
-    public static final ModConfigSpec.BooleanValue SHUTDOWN_DIAGNOSTICS = BUILDER
-            .comment("临时诊断：关服时周期性输出 chunk 卸载队列、服务器线程栈和箱子卸载生命周期日志")
-            .define("shutdownDiagnostics", true);
-
     public static final ModConfigSpec.IntValue SPACE_ARCHIVE_MAX_BYTES = BUILDER
             .comment("实验性空间迁移：单个 .phspace 空间包允许的最大字节数")
             .defineInRange("spaceArchiveMaxBytes", 256 * 1024 * 1024, 1024 * 1024, 1024 * 1024 * 1024);

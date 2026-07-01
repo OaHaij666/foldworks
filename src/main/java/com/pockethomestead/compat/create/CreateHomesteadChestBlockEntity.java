@@ -92,14 +92,12 @@ public class CreateHomesteadChestBlockEntity extends GeneratingKineticBlockEntit
 
     @Override
     public void remove() {
-        logLifecycle("remove");
         removeDelegate();
         super.remove();
     }
 
     @Override
     public void invalidate() {
-        logLifecycle("invalidate");
         removeDelegate();
         clearStressState();
         super.invalidate();
@@ -107,7 +105,6 @@ public class CreateHomesteadChestBlockEntity extends GeneratingKineticBlockEntit
 
     @Override
     public void onChunkUnloaded() {
-        logLifecycle("onChunkUnloaded");
         removeDelegate();
         clearStressState();
         super.onChunkUnloaded();
@@ -115,25 +112,8 @@ public class CreateHomesteadChestBlockEntity extends GeneratingKineticBlockEntit
 
     private void removeDelegate() {
         if (delegateRemoved) return;
-        logLifecycle("removeDelegate");
         delegateRemoved = true;
         chest.setRemoved();
-    }
-
-    private void logLifecycle(String phase) {
-        if (!com.pockethomestead.debug.ShutdownDiagnostics.enabled()) return;
-        String dimension = level == null ? "null" : level.dimension().location().toString();
-        com.pockethomestead.PocketHomestead.LOGGER.warn(
-                "[chest-lifecycle] phase={} class={} dim={} pos={} delegateLoaded={} delegateRemoved={} removed={} thread={}",
-                phase,
-                getClass().getSimpleName(),
-                dimension,
-                worldPosition,
-                delegateLoaded,
-                delegateRemoved,
-                isRemoved(),
-                Thread.currentThread().getName()
-        );
     }
 
     private void clearStressState() {

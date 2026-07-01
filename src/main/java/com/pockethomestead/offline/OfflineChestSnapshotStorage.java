@@ -76,6 +76,10 @@ public class OfflineChestSnapshotStorage extends SavedData {
         if (!validChest(chest)) return;
         Snapshot snapshot = snapshotFrom(chest, false, gameTime);
         Snapshot previous = findSnapshot(snapshot.dimensionKey, snapshot.pos(), snapshot.chestId);
+        if (previous != null) {
+            snapshot.sampledStressSpeed = previous.sampledStressSpeed;
+            snapshot.sampledStressCapacity = previous.sampledStressCapacity;
+        }
         if (previous != null && previous.lastSimulatedGameTime > gameTime) {
             snapshot.items.clear();
             snapshot.items.addAll(previous.copyItems());

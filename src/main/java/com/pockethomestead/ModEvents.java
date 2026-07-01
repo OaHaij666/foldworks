@@ -2,7 +2,6 @@ package com.pockethomestead;
 
 import com.pockethomestead.command.PocketHomesteadCommand;
 import com.pockethomestead.archive.SpaceArchiveTransferManager;
-import com.pockethomestead.debug.ShutdownDiagnostics;
 import com.pockethomestead.dimension.PocketDimensionManager;
 import com.pockethomestead.offline.OfflineChestSnapshotStorage;
 import com.pockethomestead.permission.AccessControl;
@@ -24,7 +23,6 @@ import net.neoforged.neoforge.event.level.LevelEvent;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
-import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
@@ -79,13 +77,7 @@ public class ModEvents {
     }
 
     @SubscribeEvent
-    public static void onServerStopping(ServerStoppingEvent event) {
-        ShutdownDiagnostics.start(event.getServer());
-    }
-
-    @SubscribeEvent
     public static void onServerStopped(ServerStoppedEvent event) {
-        ShutdownDiagnostics.stop();
         SpaceArchiveTransferManager.reset();
         SpaceScheduler.getInstance().reset();
         SpaceManager.getInstance().clearSpaces();
