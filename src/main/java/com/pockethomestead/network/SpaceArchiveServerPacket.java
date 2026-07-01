@@ -2,6 +2,7 @@ package com.pockethomestead.network;
 
 import com.pockethomestead.PocketHomestead;
 import com.pockethomestead.client.ClientSpaceArchiveTransfer;
+import com.pockethomestead.config.ModConfig;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -10,10 +11,14 @@ import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 public record SpaceArchiveServerPacket(String action, String sessionId, String fileName,
-                                       int index, int totalChunks, long totalBytes,
-                                       byte[] data, String message) implements CustomPacketPayload {
+                                        int index, int totalChunks, long totalBytes,
+                                        byte[] data, String message) implements CustomPacketPayload {
     public static final Type<SpaceArchiveServerPacket> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(PocketHomestead.MODID, "space_archive_server"));
+
+    private static int maxChunkBytes() {
+        return Math.max(4096, ModConfig.SPACE_ARCHIVE_CHUNK_BYTES.get());
+    }
 
     public static final StreamCodec<ByteBuf, SpaceArchiveServerPacket> STREAM_CODEC = StreamCodec.of(
             (buf, packet) -> {
@@ -33,7 +38,7 @@ public record SpaceArchiveServerPacket(String action, String sessionId, String f
                     ByteBufCodecs.VAR_INT.decode(buf),
                     ByteBufCodecs.VAR_INT.decode(buf),
                     ByteBufCodecs.VAR_LONG.decode(buf),
-                    ByteBufCodecs.BYTE_ARRAY.decode(buf),
+                    ByteBufCodecs.byteArray(maxChunkBytes()).decode(buf),
                     ByteBufCodecs.STRING_UTF8.decode(buf)
             )
     );

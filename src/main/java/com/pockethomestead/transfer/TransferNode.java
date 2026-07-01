@@ -47,7 +47,8 @@ public class TransferNode {
     private final List<String> receiveFilterIds = new ArrayList<>();
     private UUID targetPlayerId;
     private final List<ReplenishRule> replenishRules = new ArrayList<>();
-    private transient final Map<String, FlowStats> flowStats = new LinkedHashMap<>();
+    // flowStats 通过 save()/load() 手动 NBT 持久化（仅保存累计 total，丢弃窗口内值）。不要加 transient——该关键字对 NBT 序列化无效，反而会误导读者以为不持久化。
+    private final Map<String, FlowStats> flowStats = new LinkedHashMap<>();
 
     public TransferNode(String id, String pageId, NodeType type, String chestId, String dimensionKey, BlockPos pos, int x, int y, boolean expanded, boolean enabled, List<String> filterItemIds) {
         this(id, pageId, type, chestId, dimensionKey, pos, x, y, expanded, enabled, filterItemIds, List.of(), null, List.of());
@@ -74,7 +75,12 @@ public class TransferNode {
         }
         this.targetPlayerId = targetPlayerId;
         if (replenishRules != null) {
-            for (ReplenishRule rule : replenishRules) setReplenishRule(rule.itemId(), rule.targetCount());
+            java.util.LinkedHashMap<String, ReplenishRule> dedup = new java.util.LinkedHashMap<>();
+            for (ReplenishRule rule : replenishRules) {
+                if (rule == null || rule.itemId() == null || rule.itemId().isBlank()) continue;
+                dedup.put(rule.itemId(), rule);
+            }
+            this.replenishRules.addAll(dedup.values());
         }
     }
 

@@ -23,7 +23,6 @@ import net.minecraft.world.level.dimension.BuiltinDimensionTypes;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.levelgen.Heightmap;
 
-import java.util.Collection;
 import java.util.Optional;
 import java.util.OptionalLong;
 
@@ -71,11 +70,9 @@ public final class SpaceDimensionService {
         return isSpaceDimension(level.dimension());
     }
 
-    public Optional<SpaceData> findByDimension(Collection<SpaceData> spaces, Level level) {
-        ResourceLocation id = level.dimension().location();
-        SpaceData indexed = SpaceManager.getInstance().getSpaceByDimension(id);
-        if (indexed != null) return Optional.of(indexed);
-        return spaces.stream().filter(space -> space.getDimensionId().equals(id)).findFirst();
+    public Optional<SpaceData> findByDimension(Level level) {
+        // 仅依赖 SpaceManager 的 dimensionIndex；stream fallback 会掩盖索引不一致的 bug
+        return Optional.ofNullable(SpaceManager.getInstance().getSpaceByDimension(level.dimension().location()));
     }
 
     public BlockPos getSpawnPos(SpaceData space) {
@@ -119,8 +116,16 @@ public final class SpaceDimensionService {
 
     private ChunkGenerator copyGenerator(MinecraftServer server, ChunkGenerator original) {
         RegistryOps<Tag> ops = RegistryOps.create(NbtOps.INSTANCE, server.registryAccess());
-        Tag encoded = ChunkGenerator.CODEC.encodeStart(ops, original).getOrThrow();
-        return ChunkGenerator.CODEC.parse(ops, encoded).getOrThrow();
+        try {
+            Tag encoded = ChunkGenerator.CODEC.encodeStart(ops, original).getOrThrow();
+            return ChunkGenerator.CODEC.parse(ops, encoded).getOrThrow();
+        } catch (RuntimeException e) {
+            // Codec 编解码失败时（第三方 ChunkGenerator 未暴露完整 CODEC 等）回退到 PocketChunkGenerator
+            PocketHomestead.LOGGER.warn("Codec 深拷贝源维度 generator 失败，回退到 PocketChunkGenerator", e);
+            var biomeRegistry = server.registryAccess().registryOrThrow(Registries.BIOME);
+            var biome = biomeRegistry.getHolderOrThrow(Biomes.PLAINS);
+            return new PocketChunkGenerator(new FixedBiomeSource(biome), server.overworld().getSeed());
+        }
     }
 
     DimensionType createDimensionType(MinecraftServer server, SpaceData space) {

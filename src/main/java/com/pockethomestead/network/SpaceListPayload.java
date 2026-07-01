@@ -45,6 +45,8 @@ public record SpaceListPayload(List<SpaceInfo> spaces) implements CustomPacketPa
         PacketDistributor.sendToPlayer(player, new SpaceListPayload(infos));
     }
 
+    /** 服务端便捷方法：向所有在线玩家广播各自可访问的空间列表。
+     *  注意：由于每个玩家可访问的空间不同，仍需 per-player 构建；但通过单次遍历避免重复 getPlayerList 调用。 */
     public static void sendToAll(MinecraftServer server) {
         if (server == null) return;
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {

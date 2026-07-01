@@ -37,6 +37,7 @@ public class CreateHomesteadChestBlockEntity extends GeneratingKineticBlockEntit
     private float inputReservationSu;
     private long lastGraphStressRequestGameTime = Long.MIN_VALUE;
     private boolean delegateLoaded;
+    private boolean delegateRemoved;
 
     public CreateHomesteadChestBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.HOMESTEAD_CHEST.get(), pos, state);
@@ -46,13 +47,13 @@ public class CreateHomesteadChestBlockEntity extends GeneratingKineticBlockEntit
     @Override
     public void setLevel(Level level) {
         super.setLevel(level);
-        chest.setLevel(level);
+        if (!delegateRemoved) chest.setLevel(level);
     }
 
     @Override
     public void setBlockState(BlockState blockState) {
         super.setBlockState(blockState);
-        chest.setBlockState(blockState);
+        if (!delegateRemoved) chest.setBlockState(blockState);
     }
 
     @Override
@@ -62,6 +63,7 @@ public class CreateHomesteadChestBlockEntity extends GeneratingKineticBlockEntit
     }
 
     private void syncDelegateState() {
+        if (delegateRemoved) return;
         if (level != null && chest.getLevel() != level) chest.setLevel(level);
         chest.setBlockState(getBlockState());
     }
@@ -69,7 +71,7 @@ public class CreateHomesteadChestBlockEntity extends GeneratingKineticBlockEntit
     @Override
     public void initialize() {
         syncDelegateState();
-        if (!delegateLoaded) {
+        if (!delegateLoaded && !delegateRemoved) {
             chest.onLoad();
             delegateLoaded = true;
         }
@@ -90,28 +92,55 @@ public class CreateHomesteadChestBlockEntity extends GeneratingKineticBlockEntit
 
     @Override
     public void remove() {
-        chest.setRemoved();
+        logLifecycle("remove");
+        removeDelegate();
         super.remove();
     }
 
     @Override
     public void invalidate() {
-        chest.setRemoved();
-        stressLeases.clear();
-        outputSpeed = 0;
-        outputCapacitySu = 0;
-        inputReservationSu = 0;
+        logLifecycle("invalidate");
+        removeDelegate();
+        clearStressState();
         super.invalidate();
     }
 
     @Override
     public void onChunkUnloaded() {
+        logLifecycle("onChunkUnloaded");
+        removeDelegate();
+        clearStressState();
+        super.onChunkUnloaded();
+    }
+
+    private void removeDelegate() {
+        if (delegateRemoved) return;
+        logLifecycle("removeDelegate");
+        delegateRemoved = true;
         chest.setRemoved();
+    }
+
+    private void logLifecycle(String phase) {
+        if (!com.pockethomestead.debug.ShutdownDiagnostics.enabled()) return;
+        String dimension = level == null ? "null" : level.dimension().location().toString();
+        com.pockethomestead.PocketHomestead.LOGGER.warn(
+                "[chest-lifecycle] phase={} class={} dim={} pos={} delegateLoaded={} delegateRemoved={} removed={} thread={}",
+                phase,
+                getClass().getSimpleName(),
+                dimension,
+                worldPosition,
+                delegateLoaded,
+                delegateRemoved,
+                isRemoved(),
+                Thread.currentThread().getName()
+        );
+    }
+
+    private void clearStressState() {
         stressLeases.clear();
         outputSpeed = 0;
         outputCapacitySu = 0;
         inputReservationSu = 0;
-        super.onChunkUnloaded();
     }
 
     @Override

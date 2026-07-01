@@ -12,10 +12,15 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
+import java.util.UUID;
+
 public record CreateSpaceConfigPayload(ResourceLocation sourceDimension) implements CustomPacketPayload {
 
     public static final CustomPacketPayload.Type<CreateSpaceConfigPayload> TYPE =
             new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(PocketHomestead.MODID, "create_space_config"));
+
+    private static final long CREATE_COOLDILLIS = 5000L;
+    private static final java.util.Map<UUID, Long> lastCreateMillis = new java.util.concurrent.ConcurrentHashMap<>();
 
     public static final StreamCodec<ByteBuf, CreateSpaceConfigPayload> STREAM_CODEC = StreamCodec.composite(
             ResourceLocation.STREAM_CODEC,
@@ -30,8 +35,16 @@ public record CreateSpaceConfigPayload(ResourceLocation sourceDimension) impleme
 
     public static void handleOnServer(CreateSpaceConfigPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)) return;
             try {
-                if (!(context.player() instanceof ServerPlayer player)) return;
+                UUID playerId = player.getUUID();
+                long now = System.currentTimeMillis();
+                Long last = lastCreateMillis.get(playerId);
+                if (last != null && now - last < CREATE_COOLDILLIS) {
+                    PocketHomestead.LOGGER.warn("玩家 {} 创建空间过快，已限速", playerId);
+                    return;
+                }
+                lastCreateMillis.put(playerId, now);
 
                 CreateSpacePayload pending = CreateSpacePayload.takePending(player.getUUID());
                 if (pending == null) {
@@ -57,6 +70,9 @@ public record CreateSpaceConfigPayload(ResourceLocation sourceDimension) impleme
 
                 // 推送最新列表
                 SpaceListPayload.sendToAll(player.server);
+            } catch (com.pockethomestead.space.SpaceLimitExceededException e) {
+                player.displayClientMessage(net.minecraft.network.chat.Component.translatable(
+                        "pockethomestead.space.create.limit_exceeded", e.max()), true);
             } catch (Exception e) {
                 PocketHomestead.LOGGER.error("创建空间失败", e);
             }

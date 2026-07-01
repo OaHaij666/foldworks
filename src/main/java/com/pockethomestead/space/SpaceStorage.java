@@ -21,15 +21,14 @@ public class SpaceStorage extends SavedData {
         // 必须清空 JVM 单例缓存，否则上一个存档的空间会被写入新存档，造成跨存档泄漏。
         SpaceManager.getInstance().clearSpaces();
         PocketDimensionManager.getInstance().reset();
-        SpaceItemRegistry.clearAll();
     }
     public static SpaceStorage getInstance() { return instance; }
     public static void clearInstance() { instance = null; }
     public static void markDirty() { if (instance != null) instance.setDirty(); }
 
     public static SpaceStorage load(CompoundTag tag, HolderLookup.Provider reg) {
-        PocketDimensionManager.getInstance().reset();
-        SpaceItemRegistry.clearAll();
+        // 构造器已清空 SpaceManager/PocketDimensionManager 单例，此处不再重复 reset
+        int version = tag.contains("FormatVersion") ? tag.getInt("FormatVersion") : 0;
         SpaceStorage s = new SpaceStorage();
         List<SpaceData> list = new ArrayList<>();
         ListTag lt = tag.getList("Spaces", ListTag.TAG_COMPOUND);
@@ -42,6 +41,7 @@ public class SpaceStorage extends SavedData {
     }
 
     @Override public CompoundTag save(CompoundTag tag, HolderLookup.Provider reg) {
+        tag.putInt("FormatVersion", 1);
         ListTag lt = new ListTag();
         for (SpaceData s : SpaceManager.getInstance().getAllSpaces()) lt.add(serialize(s));
         tag.put("Spaces", lt);
@@ -83,9 +83,8 @@ public class SpaceStorage extends SavedData {
     private static SpaceData deserialize(CompoundTag t) {
         try {
             UUID sid = t.getUUID("SpaceId"), oid = t.getUUID("OwnerId");
-            ResourceLocation dimensionId = t.contains("DimensionId")
-                    ? ResourceLocation.parse(t.getString("DimensionId"))
-                    : SpaceData.defaultDimensionId(sid);
+            // 始终用 spaceId 派生 dimensionId，避免旧存档 dimensionId 与 spaceId 不匹配导致 dimensionIndex 失效
+            ResourceLocation dimensionId = SpaceData.defaultDimensionId(sid);
             int w = t.getInt("Width"), h = t.getInt("Height"), d = t.getInt("Depth");
             boolean mob = t.getBoolean("MobSpawning"), struct = t.getBoolean("StructureGeneration");
             boolean infinite = t.getBoolean("Infinite");

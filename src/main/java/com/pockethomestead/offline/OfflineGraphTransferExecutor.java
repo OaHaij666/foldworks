@@ -84,17 +84,21 @@ public final class OfflineGraphTransferExecutor {
         if (server == null || storage == null || source == null || source.loaded() || !source.hasNetworkUpgrade()) return;
         GraphKey key = source.graphKey();
         if (key == null || !key.isValid() || !source.shouldSimulate(server)) return;
-        TransferGraph graph = TransferGraphStorage.get(server).graphFor(key);
+        TransferGraph graph = TransferGraphStorage.get(server).getGraph(key);
+        if (graph == null) return;
         TransferNode sourceNode = graph.findNode(source.chestId(), source.dimensionKey(), source.pos());
         if (sourceNode == null || !sourceNode.isEnabled()) return;
         TransferGraphPage page = graph.getPage(sourceNode.getPageId());
         if (page == null || !page.isEnabled()) return;
 
         Context ctx = new Context(server, storage, source, graph, gameTime);
+        // 源节点加入 visitedNodes 防止环路图 ping-pong（A→B→A 往返消耗带宽但净效果为零）
         BandwidthBudget stressBandwidth = new BandwidthBudget(source.networkBandwidth(), 0);
         if (source.canSendGraphStress(gameTime) && stressBandwidth.remaining() > 0) {
+            Set<String> visited = new HashSet<>();
+            visited.add(sourceNode.getId());
             followOutgoingEdges(ctx, sourceNode.getPageId(), sourceNode.getId(), TransferEdge.STRESS_SU,
-                    new ArrayList<>(), new HashSet<>(), false,
+                    new ArrayList<>(), visited, false,
                     Math.min(source.stressTransferLimit(), Math.max(0, (int) source.graphStressCapacity(gameTime))),
                     stressBandwidth);
         }
@@ -110,8 +114,10 @@ public final class OfflineGraphTransferExecutor {
         for (String scope : scopes) {
             if (normalBandwidth.remaining() <= 0) break;
             if (normalBandwidth.maxTransferable(scope) <= 0) continue;
+            Set<String> visited = new HashSet<>();
+            visited.add(sourceNode.getId());
             followOutgoingEdges(ctx, sourceNode.getPageId(), sourceNode.getId(), scope,
-                    new ArrayList<>(), new HashSet<>(), canVoid && !isEnergyScope(scope),
+                    new ArrayList<>(), visited, canVoid && !isEnergyScope(scope),
                     Integer.MAX_VALUE, normalBandwidth);
         }
     }
@@ -141,7 +147,9 @@ public final class OfflineGraphTransferExecutor {
             if (nextScope == null) continue;
             int remainingBudget = Math.min(routeBudget - moved, bandwidth.maxTransferable(nextScope));
             int branchBudget = fairBranchBudget(ctx.source(), nextScope, edges.subList(i, edges.size()), remainingBudget, ctx.gameTime());
-            int branchMoved = followTransferEdge(ctx, pageId, next, nextScope, path, new HashSet<>(visitedNodes), canVoid, branchBudget, bandwidth);
+            // 回溯模式：直接传入 visitedNodes 与 path，由 followTransferEdge 在递归前 add、递归后 remove。
+            // 不再每条边复制 HashSet，避免深图 O(n²) 分配压力。
+            int branchMoved = followTransferEdge(ctx, pageId, next, nextScope, path, visitedNodes, canVoid, branchBudget, bandwidth);
             moved += branchMoved;
         }
         return moved;
@@ -152,7 +160,6 @@ public final class OfflineGraphTransferExecutor {
                                           int routeBudget, BandwidthBudget bandwidth) {
         if (routeBudget <= 0 || bandwidth.remaining() <= 0) return 0;
         if (!edge.isEnabled() || !edge.getPageId().equals(pageId)) return 0;
-        if (!edge.canTransferAt(ctx.gameTime())) return 0;
 
         scopePort = intersectPorts(scopePort, edge.getFromPortKey());
         if (scopePort == null) return 0;
@@ -161,50 +168,55 @@ public final class OfflineGraphTransferExecutor {
         if (targetNode == null || !targetNode.isEnabled()) return 0;
         if (!visitedNodes.add(targetNode.getId())) return 0;
 
-        List<TransferEdge> nextPath = new ArrayList<>(path);
-        nextPath.add(edge);
-
-        if (targetNode.getNodeType() == TransferNode.NodeType.REROUTE) {
-            return followOutgoingEdges(ctx, pageId, targetNode.getId(), scopePort, nextPath, visitedNodes, canVoid, routeBudget, bandwidth);
-        }
-
-        TransferResult result;
-        if (targetNode.getNodeType() == TransferNode.NodeType.TRASH) {
-            if (isEnergyScope(scopePort) || isStressScope(scopePort)) return 0;
-            result = isFluidScope(scopePort)
-                    ? voidFilteredFluids(ctx, scopePort, nextPath, routeBudget, bandwidth)
-                    : voidFilteredItems(ctx, scopePort, nextPath, routeBudget, bandwidth);
-        } else if (targetNode.getNodeType() == TransferNode.NodeType.PLAYER_INVENTORY) {
-            result = isFluidScope(scopePort) || isEnergyScope(scopePort) || isStressScope(scopePort)
-                    ? new TransferResult(Map.of(), TransferBlockReason.RECEIVER, firstMatchingResourceId(ctx.source(), scopePort, ctx.gameTime()))
-                    : transferItemsToPlayer(ctx, targetNode, scopePort, nextPath, routeBudget, bandwidth);
-        } else if (targetNode.getNodeType() == TransferNode.NodeType.CHEST) {
-            BaseChestBlockEntity loadedTarget = loadedChest(ctx.server(), targetNode);
-            if (loadedTarget != null && !loadedTarget.isRemoved() && TransferGraphAccess.chestMatchesGraph(loadedTarget, ctx.graph().getKey())) {
-                if (isEnergyScope(scopePort)) result = transferEnergyToLoaded(ctx, loadedTarget, nextPath, routeBudget, bandwidth);
-                else if (isStressScope(scopePort)) result = transferStressToLoaded(ctx, loadedTarget, nextPath, routeBudget, bandwidth);
-                else result = isFluidScope(scopePort)
-                        ? transferFluidsToLoaded(ctx, loadedTarget, targetNode, scopePort, nextPath, routeBudget, canVoid, bandwidth)
-                        : transferItemsToLoaded(ctx, loadedTarget, targetNode, scopePort, nextPath, routeBudget, canVoid, bandwidth);
-            } else if (snapshotTarget(ctx, targetNode) instanceof OfflineChestSnapshotStorage.Snapshot snapshot) {
-                if (isEnergyScope(scopePort)) result = transferEnergyToSnapshot(ctx, snapshot, nextPath, routeBudget, bandwidth);
-                else if (isStressScope(scopePort)) result = transferStressToSnapshot(ctx, snapshot, nextPath, routeBudget, bandwidth);
-                else result = isFluidScope(scopePort)
-                        ? transferFluidsToSnapshot(ctx, snapshot, targetNode, scopePort, nextPath, routeBudget, canVoid, bandwidth)
-                        : transferItemsToSnapshot(ctx, snapshot, targetNode, scopePort, nextPath, routeBudget, canVoid, bandwidth);
-            } else if (canVoid) {
-                result = isFluidScope(scopePort)
-                        ? voidFilteredFluids(ctx, scopePort, nextPath, routeBudget, bandwidth)
-                        : voidFilteredItems(ctx, scopePort, nextPath, routeBudget, bandwidth);
-            } else {
-                result = new TransferResult(Map.of(), TransferBlockReason.RECEIVER, firstMatchingResourceId(ctx.source(), scopePort, ctx.gameTime()));
+        // 回溯模式：递归前 path.add、递归后 finally 移除；不再每层复制 path。
+        // recordTransferResult 在 finally 前调用，此时 path 已包含完整路径。
+        path.add(edge);
+        try {
+            if (targetNode.getNodeType() == TransferNode.NodeType.REROUTE) {
+                return followOutgoingEdges(ctx, pageId, targetNode.getId(), scopePort, path, visitedNodes, canVoid, routeBudget, bandwidth);
             }
-        } else {
-            return 0;
-        }
 
-        recordTransferResult(ctx, nextPath, result);
-        return result.moved();
+            TransferResult result;
+            if (targetNode.getNodeType() == TransferNode.NodeType.TRASH) {
+                if (isEnergyScope(scopePort) || isStressScope(scopePort)) return 0;
+                result = isFluidScope(scopePort)
+                        ? voidFilteredFluids(ctx, scopePort, path, routeBudget, bandwidth)
+                        : voidFilteredItems(ctx, scopePort, path, routeBudget, bandwidth);
+            } else if (targetNode.getNodeType() == TransferNode.NodeType.PLAYER_INVENTORY) {
+                result = isFluidScope(scopePort) || isEnergyScope(scopePort) || isStressScope(scopePort)
+                        ? new TransferResult(Map.of(), TransferBlockReason.RECEIVER, firstMatchingResourceId(ctx.source(), scopePort, ctx.gameTime()))
+                        : transferItemsToPlayer(ctx, targetNode, scopePort, path, routeBudget, bandwidth);
+            } else if (targetNode.getNodeType() == TransferNode.NodeType.CHEST) {
+                BaseChestBlockEntity loadedTarget = loadedChest(ctx.server(), targetNode);
+                if (loadedTarget != null && !loadedTarget.isRemoved() && TransferGraphAccess.chestMatchesGraph(loadedTarget, ctx.graph().getKey())) {
+                    if (isEnergyScope(scopePort)) result = transferEnergyToLoaded(ctx, loadedTarget, path, routeBudget, bandwidth);
+                    else if (isStressScope(scopePort)) result = transferStressToLoaded(ctx, loadedTarget, path, routeBudget, bandwidth);
+                    else result = isFluidScope(scopePort)
+                            ? transferFluidsToLoaded(ctx, loadedTarget, targetNode, scopePort, path, routeBudget, canVoid, bandwidth)
+                            : transferItemsToLoaded(ctx, loadedTarget, targetNode, scopePort, path, routeBudget, canVoid, bandwidth);
+                } else if (snapshotTarget(ctx, targetNode) instanceof OfflineChestSnapshotStorage.Snapshot snapshot) {
+                    if (isEnergyScope(scopePort)) result = transferEnergyToSnapshot(ctx, snapshot, path, routeBudget, bandwidth);
+                    else if (isStressScope(scopePort)) result = transferStressToSnapshot(ctx, snapshot, path, routeBudget, bandwidth);
+                    else result = isFluidScope(scopePort)
+                            ? transferFluidsToSnapshot(ctx, snapshot, targetNode, scopePort, path, routeBudget, canVoid, bandwidth)
+                            : transferItemsToSnapshot(ctx, snapshot, targetNode, scopePort, path, routeBudget, canVoid, bandwidth);
+                } else if (canVoid) {
+                    result = isFluidScope(scopePort)
+                            ? voidFilteredFluids(ctx, scopePort, path, routeBudget, bandwidth)
+                            : voidFilteredItems(ctx, scopePort, path, routeBudget, bandwidth);
+                } else {
+                    result = new TransferResult(Map.of(), TransferBlockReason.RECEIVER, firstMatchingResourceId(ctx.source(), scopePort, ctx.gameTime()));
+                }
+            } else {
+                return 0;
+            }
+
+            recordTransferResult(ctx, path, result);
+            return result.moved();
+        } finally {
+            path.remove(path.size() - 1);
+            visitedNodes.remove(targetNode.getId());
+        }
     }
 
     private static TransferResult transferItemsToLoaded(Context ctx, BaseChestBlockEntity target, TransferNode targetNode,
@@ -335,6 +347,7 @@ public final class OfflineGraphTransferExecutor {
         Map<String, Integer> movedByItem = new LinkedHashMap<>();
         boolean matchedSourceItem = false;
         boolean rateLimitedOnly = false;
+        boolean movedAny = false;
         for (StoredItemStack entry : entries) {
             Item item = entry.item();
             int count = entry.count();
@@ -366,9 +379,13 @@ public final class OfflineGraphTransferExecutor {
             bandwidth.consume(itemId, accepted);
             movedByItem.merge(itemId, accepted, Integer::sum);
             remainingRouteBudget -= accepted;
+            movedAny = true;
+            if (remainingRouteBudget <= 0 || bandwidth.remaining() <= 0) break;
+        }
+        // 广播移到循环外：N 个物品只触发一次全量背包广播，避免 N 次扫描整个背包
+        if (movedAny) {
             targetPlayer.containerMenu.broadcastChanges();
             targetPlayer.inventoryMenu.broadcastChanges();
-            if (remainingRouteBudget <= 0 || bandwidth.remaining() <= 0) break;
         }
         if (movedByItem.isEmpty()) {
             if (rateLimitedOnly) return new TransferResult(Map.of(), TransferBlockReason.NONE, null);
@@ -548,7 +565,8 @@ public final class OfflineGraphTransferExecutor {
         float speed = ctx.source().graphStressSpeed(ctx.gameTime());
         if (speed == 0) return new TransferResult(Map.of(), TransferBlockReason.SOURCE, TransferEdge.STRESS_SU);
         String leaseId = stressLeaseId(ctx.source(), target.getBlockPos(), path);
-        int accepted = Math.max(0, Math.min(budget, (int) targetEndpoint.receiveGraphStressLease(leaseId, speed, budget, ctx.gameTime())));
+        // 用 Math.round 四舍五入而非 (int) 截断，避免容量为 x.99 SU 时丢失近 1 SU
+        int accepted = Math.max(0, Math.min(budget, Math.round(targetEndpoint.receiveGraphStressLease(leaseId, speed, budget, ctx.gameTime()))));
         if (accepted <= 0) return new TransferResult(Map.of(), TransferBlockReason.RECEIVER, TransferEdge.STRESS_SU);
         bandwidth.consume(TransferEdge.STRESS_SU, accepted);
         return new TransferResult(Map.of(TransferEdge.STRESS_SU, accepted), TransferBlockReason.NONE, null);
@@ -569,7 +587,8 @@ public final class OfflineGraphTransferExecutor {
         float speed = ctx.source().graphStressSpeed(ctx.gameTime());
         if (speed == 0) return new TransferResult(Map.of(), TransferBlockReason.SOURCE, TransferEdge.STRESS_SU);
         String leaseId = stressLeaseId(ctx.source(), target.pos(), path);
-        int accepted = Math.max(0, Math.min(budget, (int) target.receiveGraphStressLease(leaseId, speed, budget, ctx.gameTime())));
+        // 用 Math.round 四舍五入而非 (int) 截断，避免容量为 x.99 SU 时丢失近 1 SU
+        int accepted = Math.max(0, Math.min(budget, Math.round(target.receiveGraphStressLease(leaseId, speed, budget, ctx.gameTime()))));
         if (accepted <= 0) return new TransferResult(Map.of(), TransferBlockReason.RECEIVER, TransferEdge.STRESS_SU);
         bandwidth.consume(TransferEdge.STRESS_SU, accepted);
         return new TransferResult(Map.of(TransferEdge.STRESS_SU, accepted), TransferBlockReason.NONE, null);

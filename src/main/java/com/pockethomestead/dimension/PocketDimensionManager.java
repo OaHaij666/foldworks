@@ -14,20 +14,21 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class PocketDimensionManager {
     private static volatile PocketDimensionManager instance;
 
     private final Map<UUID, ReturnAnchor> playerAnchors = new ConcurrentHashMap<>();
-    private final Queue<PendingTeleport> pendingTeleports = new ConcurrentLinkedQueue<>();
+    // 仅在主线程（onServerTick / packet handler enqueueWork）访问，无需并发容器
+    private final Deque<PendingTeleport> pendingTeleports = new ArrayDeque<>();
 
     private PocketDimensionManager() {}
 
@@ -41,8 +42,7 @@ public class PocketDimensionManager {
     }
 
     public static SpaceData findSpaceAt(Level level, int blockX, int blockZ) {
-        Optional<SpaceData> byDimension = SpaceDimensionService.getInstance()
-                .findByDimension(SpaceManager.getInstance().getAllSpaces(), level);
+        Optional<SpaceData> byDimension = SpaceDimensionService.getInstance().findByDimension(level);
         if (byDimension.isEmpty()) return null;
 
         SpaceData space = byDimension.get();
@@ -65,22 +65,24 @@ public class PocketDimensionManager {
     }
 
     public void queueTeleportToSpace(ServerPlayer player, SpaceData space, int delayTicks) {
-        pendingTeleports.add(new PendingTeleport(player.getUUID(), space.getSpaceId(), delayTicks));
+        long readyAtTick = player.server.overworld().getGameTime() + Math.max(0, delayTicks);
+        pendingTeleports.add(new PendingTeleport(player.getUUID(), space.getSpaceId(), readyAtTick));
         player.sendSystemMessage(Component.literal("口袋空间正在准备，请稍候...").withStyle(ChatFormatting.YELLOW));
         PocketHomestead.LOGGER.info("排队传送玩家 {} 到空间 {}, 延迟{}tick",
                 player.getName().getString(), space.getSpaceId(), delayTicks);
     }
 
     public void onServerTick(MinecraftServer server) {
+        if (pendingTeleports.isEmpty()) return;
+        long currentTick = server.overworld().getGameTime();
         int processed = 0;
+        // 队头元素未就绪时直接返回：ArrayDeque 保持入队顺序，readyAtTick 单调递增
+        // 因此已就绪的元素一定连续位于队头
         while (!pendingTeleports.isEmpty() && processed < 100) {
-            PendingTeleport pending = pendingTeleports.poll();
+            PendingTeleport pending = pendingTeleports.peekFirst();
             if (pending == null) return;
-            if (pending.delayTicks > 0) {
-                pendingTeleports.add(new PendingTeleport(pending.playerId, pending.spaceId, pending.delayTicks - 1));
-                processed++;
-                continue;
-            }
+            if (pending.readyAtTick > currentTick) return;
+            pendingTeleports.pollFirst();
             ServerPlayer player = server.getPlayerList().getPlayer(pending.playerId);
             SpaceData space = SpaceManager.getInstance().getSpace(pending.spaceId);
             if (player != null && space != null) {
@@ -161,5 +163,5 @@ public class PocketDimensionManager {
     }
 
     private record ReturnAnchor(ResourceKey<Level> dimension, Vec3 position, float yRot, float xRot) {}
-    private record PendingTeleport(UUID playerId, UUID spaceId, int delayTicks) {}
+    private record PendingTeleport(UUID playerId, UUID spaceId, long readyAtTick) {}
 }

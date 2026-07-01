@@ -29,30 +29,38 @@ public final class Theme {
     private static final int TEX_SIZE = TEX_RADIUS * 4;
     private static int roundTexId = -1;
 
+    private static volatile boolean textureReady = false;
+
     private static void ensureTexture() {
-        if (roundTexId != -1) return;
-        roundTexId = TextureUtil.generateTextureId();
+        if (textureReady) return;
+        synchronized (Theme.class) {
+            if (textureReady) return;
+            int texId = TextureUtil.generateTextureId();
 
-        NativeImage image = new NativeImage(TEX_SIZE, TEX_SIZE, false);
-        for (int py = 0; py < TEX_SIZE; py++) {
-            for (int px = 0; px < TEX_SIZE; px++) {
-                int a = Math.round(roundedAlpha(px, py) * 255);
-                image.setPixelRGBA(px, py, (a << 24) | 0x00FFFFFF);
+            NativeImage image = new NativeImage(TEX_SIZE, TEX_SIZE, false);
+            for (int py = 0; py < TEX_SIZE; py++) {
+                for (int px = 0; px < TEX_SIZE; px++) {
+                    int a = Math.round(roundedAlpha(px, py) * 255);
+                    image.setPixelRGBA(px, py, (a << 24) | 0x00FFFFFF);
+                }
             }
-        }
 
-        GlStateManager._bindTexture(roundTexId);
-        GlStateManager._texParameter(
-                org.lwjgl.opengl.GL11.GL_TEXTURE_2D,
-                org.lwjgl.opengl.GL11.GL_TEXTURE_MIN_FILTER,
-                org.lwjgl.opengl.GL11.GL_LINEAR);
-        GlStateManager._texParameter(
-                org.lwjgl.opengl.GL11.GL_TEXTURE_2D,
-                org.lwjgl.opengl.GL11.GL_TEXTURE_MAG_FILTER,
-                org.lwjgl.opengl.GL11.GL_LINEAR);
-        TextureUtil.prepareImage(roundTexId, TEX_SIZE, TEX_SIZE);
-        image.upload(0, 0, 0, false);
-        image.close();
+            GlStateManager._bindTexture(texId);
+            GlStateManager._texParameter(
+                    org.lwjgl.opengl.GL11.GL_TEXTURE_2D,
+                    org.lwjgl.opengl.GL11.GL_TEXTURE_MIN_FILTER,
+                    org.lwjgl.opengl.GL11.GL_LINEAR);
+            GlStateManager._texParameter(
+                    org.lwjgl.opengl.GL11.GL_TEXTURE_2D,
+                    org.lwjgl.opengl.GL11.GL_TEXTURE_MAG_FILTER,
+                    org.lwjgl.opengl.GL11.GL_LINEAR);
+            TextureUtil.prepareImage(texId, TEX_SIZE, TEX_SIZE);
+            image.upload(0, 0, 0, false);
+            image.close();
+
+            roundTexId = texId;
+            textureReady = true;
+        }
     }
 
     /** 计算纹理中某像素的圆角 alpha 值（0=透明, 1=不透明），含约 2px 抗锯齿过渡带 */

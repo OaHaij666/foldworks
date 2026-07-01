@@ -113,6 +113,10 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     // 所有者UUID
     protected UUID ownerUUID = null;
 
+    // 所属口袋空间缓存：避免 canChest 热路径每次查 SpaceManager.dimensionIndex。
+    // SpaceData.markDeleted() 会使缓存失效；空间删除后重新查找返回 null（非口袋维度）。
+    private SpaceData cachedContainingSpace;
+
     // 传输图权限层级
     protected GraphKey.Kind graphKind = GraphKey.Kind.PRIVATE;
     protected UUID graphTeamId = null;
@@ -136,7 +140,10 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     protected double trustScore = 1.0;
 
     // GUI 存货区滚动行偏移（服务端持有，供 VirtualChestContainer.refill 读取）
-    public int viewScrollRow = 0;
+    private int viewScrollRow = 0;
+
+    public int getViewScrollRow() { return viewScrollRow; }
+    public void setViewScrollRow(int row) { this.viewScrollRow = Math.max(0, row); }
 
     // 标记位：Map 存储变更后需同步到 VirtualChestContainer
     public boolean storageDirty = false;
@@ -158,6 +165,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     @Override
     public void onLoad() {
         super.onLoad();
+        logChestLifecycle("onLoad");
         if (level instanceof ServerLevel serverLevel) {
             OfflineChestSnapshotStorage.get(serverLevel.getServer()).applySnapshotToLoadedChest(this, serverLevel.getGameTime());
         }
@@ -173,6 +181,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         if (level == null || level.isClientSide) return;
         if (registered) return;
         if (ownerUUID == null || chestId.isEmpty()) return;
+        logChestLifecycle("registerIfReady");
         ChestRegistryManager.getInstance().registerChest(ownerUUID, chestId, level, worldPosition);
         registered = true;
         refreshProductionInventorySnapshot();
@@ -183,6 +192,8 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
 
     @Override
     public void setRemoved() {
+        if (isRemoved()) return;
+        logChestLifecycle("setRemoved:start");
         // 服务端卸载时从全局管理器注销
         if (level != null && !level.isClientSide && ownerUUID != null && !chestId.isEmpty()) {
             if (level instanceof ServerLevel serverLevel) {
@@ -196,6 +207,25 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
             registered = false;
         }
         super.setRemoved();
+        logChestLifecycle("setRemoved:end");
+    }
+
+    protected void logChestLifecycle(String phase) {
+        if (!com.pockethomestead.debug.ShutdownDiagnostics.enabled()) return;
+        String dimension = level == null ? "null" : level.dimension().location().toString();
+        com.pockethomestead.PocketHomestead.LOGGER.warn(
+                "[chest-lifecycle] phase={} class={} dim={} pos={} id={} owner={} registered={} destroyedForOfflineSnapshot={} removed={} thread={}",
+                phase,
+                getClass().getSimpleName(),
+                dimension,
+                worldPosition,
+                chestId,
+                ownerUUID,
+                registered,
+                destroyedForOfflineSnapshot,
+                isRemoved(),
+                Thread.currentThread().getName()
+        );
     }
 
     // ===== 容量系统方法 =====
@@ -587,7 +617,10 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     }
 
     public List<StoredItemStack> getStoredItems() {
-        List<StoredItemStack> items = new ArrayList<>(itemStorage);
+        List<StoredItemStack> items = new ArrayList<>();
+        for (StoredItemStack stored : itemStorage) {
+            items.add(new StoredItemStack(stored.prototype(), stored.count()));
+        }
         items.sort(Comparator.comparing(StoredItemStack::sortKey));
         return Collections.unmodifiableList(items);
     }
@@ -1097,6 +1130,17 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     public UUID getOwnerUUID() { return ownerUUID; }
     public void setOwnerUUID(UUID uuid) { this.ownerUUID = uuid; setChanged(); }
 
+    /**
+     * 返回箱子所在维度所属的口袋空间（null 表示非口袋维度）。
+     * 缓存查找结果，空间删除时通过 SpaceData.isDeleted() 失效。
+     */
+    public SpaceData getContainingSpace() {
+        if (cachedContainingSpace != null && !cachedContainingSpace.isDeleted()) return cachedContainingSpace;
+        if (level == null) return null;
+        cachedContainingSpace = SpaceManager.getInstance().getSpaceByDimension(level.dimension().location());
+        return cachedContainingSpace;
+    }
+
     public GraphKey.Kind getGraphKind() { return graphKind; }
     public UUID getGraphTeamId() { return graphTeamId; }
 
@@ -1268,7 +1312,6 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         if (routeBudget <= 0 || bandwidth.remaining() <= 0) return 0;
         if (!edge.isEnabled() || !edge.getPageId().equals(pageId)) return 0;
         long gameTime = serverLevel.getGameTime();
-        if (!edge.canTransferAt(gameTime)) return 0;
 
         scopePort = intersectPorts(scopePort, edge.getFromPortKey());
         if (scopePort == null) return 0;

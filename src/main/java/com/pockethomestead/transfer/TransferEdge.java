@@ -64,9 +64,6 @@ public class TransferEdge {
     public String getFromPortKey() { return fromPortKey; }
     public String getToPortKey() { return toPortKey; }
     public boolean isEnabled() { return enabled; }
-    public boolean isRateLimitEnabled() { return false; }
-    public int getRateLimitSeconds() { return 1; }
-    public int getRateLimitItems() { return 64; }
     public void setPageId(String pageId) { this.pageId = pageId; }
     public void setRateLimit(boolean enabled, int seconds, int items) {
         if (isItemPort() || isFluidPort()) setItemRate(resourceId(), enabled, seconds, items);
@@ -103,24 +100,23 @@ public class TransferEdge {
         return rows;
     }
 
-    public boolean canTransferAt(long gameTime) {
-        return true;
-    }
-
     public boolean canTransferAt(long gameTime, String itemId) {
         return remainingRateBudget(gameTime, itemId) > 0;
     }
 
-    public int remainingRateBudget(long gameTime) {
-        return Integer.MAX_VALUE;
-    }
-
     public int remainingRateBudget(long gameTime, String itemId) {
         ItemRate row = itemRates.get(itemId);
-        if (row == null && itemId != null && itemId.startsWith(FLUID_PREFIX)) row = itemRates.get(FLUID_ALL);
+        if (row == null) row = wildcardFor(itemId);
         if (row == null || !row.rateLimitEnabled) return Integer.MAX_VALUE;
         row.refreshRateWindow(gameTime);
         return Math.max(0, row.rateLimitItems - row.movedInRateWindow);
+    }
+
+    private ItemRate wildcardFor(String itemId) {
+        if (itemId == null) return null;
+        if (itemId.startsWith(FLUID_PREFIX) && !FLUID_ALL.equals(itemId)) return itemRates.get(FLUID_ALL);
+        if (itemId.startsWith(ITEM_PREFIX) && !ITEM_ALL.equals(itemId)) return itemRates.get(ITEM_ALL);
+        return null;
     }
 
     public void recordMoved(long gameTime, int amount) {
@@ -139,7 +135,7 @@ public class TransferEdge {
         row.attemptedInStatsWindow += amount;
         row.movedInStatsWindow += amount;
         row.updateHealth();
-        ItemRate wildcard = itemId != null && itemId.startsWith(FLUID_PREFIX) ? itemRates.get(FLUID_ALL) : null;
+        ItemRate wildcard = wildcardFor(itemId);
         if (wildcard != null && wildcard != row) {
             wildcard.observed = true;
             if (wildcard.rateLimitEnabled) {
@@ -184,7 +180,7 @@ public class TransferEdge {
     }
 
     private void recordWildcardSourceBlocked(long gameTime, String itemId, ItemRate exact) {
-        ItemRate wildcard = itemId != null && itemId.startsWith(FLUID_PREFIX) ? itemRates.get(FLUID_ALL) : null;
+        ItemRate wildcard = wildcardFor(itemId);
         if (wildcard == null || wildcard == exact) return;
         wildcard.observed = true;
         wildcard.refreshStatsWindow(gameTime);
@@ -194,7 +190,7 @@ public class TransferEdge {
     }
 
     private void recordWildcardReceiverBlocked(long gameTime, String itemId, ItemRate exact) {
-        ItemRate wildcard = itemId != null && itemId.startsWith(FLUID_PREFIX) ? itemRates.get(FLUID_ALL) : null;
+        ItemRate wildcard = wildcardFor(itemId);
         if (wildcard == null || wildcard == exact) return;
         wildcard.observed = true;
         wildcard.refreshStatsWindow(gameTime);
@@ -318,6 +314,7 @@ public class TransferEdge {
         if (itemId == null) return false;
         if (ENERGY_FE.equals(itemId) || STRESS_SU.equals(itemId)) return true;
         if (itemId.startsWith(ITEM_PREFIX)) {
+            if (ITEM_ALL.equals(itemId)) return true;
             ResourceLocation id = ResourceLocation.tryParse(itemId.substring(ITEM_PREFIX.length()));
             return id != null && BuiltInRegistries.ITEM.get(id) != Items.AIR;
         }

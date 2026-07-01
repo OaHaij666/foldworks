@@ -30,6 +30,10 @@ public class TransferGraphStorage extends SavedData {
         return graphs.computeIfAbsent(safeKey, TransferGraph::new);
     }
 
+    public TransferGraph getGraph(GraphKey key) {
+        return key == null ? null : graphs.get(key);
+    }
+
     public void replaceGraph(UUID owner, TransferGraph graph) {
         replaceGraph(GraphKey.privateGraph(owner), graph);
     }

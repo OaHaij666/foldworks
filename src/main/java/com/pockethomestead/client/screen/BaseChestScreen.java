@@ -1,11 +1,5 @@
 package com.pockethomestead.client.screen;
 
-import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.BufferBuilder;
-import com.mojang.blaze3d.vertex.BufferUploader;
-import com.mojang.blaze3d.vertex.DefaultVertexFormat;
-import com.mojang.blaze3d.vertex.Tesselator;
-import com.mojang.blaze3d.vertex.VertexFormat;
 import com.pockethomestead.client.ClientProductionStatsCache;
 import com.pockethomestead.client.ClientTransferGraphCache;
 import com.pockethomestead.client.ui.Theme;
@@ -22,10 +16,10 @@ import com.pockethomestead.network.UpdateProductionStatsPacket;
 import com.pockethomestead.registration.ModItems;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -38,7 +32,6 @@ import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.Fluids;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.network.PacketDistributor;
-import org.joml.Matrix4f;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -56,33 +49,15 @@ import java.util.Map;
  * 箱子区无真实槽位，存取全部通过网络包；服务端 itemStorage 为唯一权威，
  * 客户端通过 ChestSyncPacket 接收物品快照 cacheItems。
  */
-public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractContainerScreen<T> {
-    private static final ResourceLocation CHEST_FACE_SIDE_TEXTURE = ResourceLocation.fromNamespaceAndPath("pockethomestead", "textures/block/chest_face_side.png");
-    private static final ResourceLocation CHEST_FACE_CAP_TEXTURE = ResourceLocation.fromNamespaceAndPath("pockethomestead", "textures/block/chest_face_cap.png");
-    private static final ResourceLocation CHEST_ITEM_PORT_TEXTURE = ResourceLocation.fromNamespaceAndPath("pockethomestead", "textures/block/chest_item_port.png");
-    private static final ResourceLocation CHEST_FLUID_WINDOW_TEXTURE = ResourceLocation.fromNamespaceAndPath("pockethomestead", "textures/block/chest_fluid_window.png");
-    private static final ResourceLocation CHEST_ENERGY_CORE_TEXTURE = ResourceLocation.fromNamespaceAndPath("pockethomestead", "textures/block/chest_energy_core.png");
-    private static final ResourceLocation CHEST_BEARING_RING_TEXTURE = ResourceLocation.fromNamespaceAndPath("pockethomestead", "textures/block/chest_bearing_ring.png");
-    private static final ResourceLocation CHEST_BEARING_SHAFT_TEXTURE = ResourceLocation.fromNamespaceAndPath("pockethomestead", "textures/block/chest_bearing_shaft.png");
-    private static final int FACE_CUBE_HEIGHT = 116;
-    private static final int FACE_CUBE_CENTER_Y_OFFSET = 65;
-    private static final int FACE_CUBE_SCALE = 38;
-    private static final int[] STRESS_SPEED_OPTIONS = {0, 16, 32, 64, 128, 256};
-
+public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractContainerScreen<T> implements ChestScreenHost {
     /** 当前页：0=物品，1=流体(可选)，倒数第二=面配置，最后=设置 */
     private int currentPage = 0;
 
     private int localScrollRow = 0;
     private int settingsScroll = 0;
-    private RelativeSide selectedSide = RelativeSide.FRONT;
-    private double faceYaw = -34.0;
-    private double facePitch = 24.0;
-    private boolean rotatingFaceCube;
-    private boolean faceCubeMoved;
-    private int faceCubeDragX;
-    private int faceCubeDragY;
-    private boolean faceKindDropdownOpen;
     private String lastSyncedChestEditId = "";
+
+    private final ChestFaceConfigPanel faceConfigPanel = new ChestFaceConfigPanel(this);
 
     private int cacheMaxCapacity = 4096;
     private int cacheMaxFluidCapacityMb = 16000;
@@ -243,7 +218,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             PacketDistributor.sendToServer(new ChestConfigPacket(action, value, stack == null ? ItemStack.EMPTY : stack.copyWithCount(1)));
     }
 
-    private boolean hasFluidPage() {
+    @Override public boolean hasFluidPage() {
         return BaseChestMenu.isCreateLoaded();
     }
 
@@ -315,7 +290,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
     private void rebuildPageWidgets() {
         graphButton = null;
         statsGroupDropdownOpen = false;
-        faceKindDropdownOpen = false;
+        faceConfigPanel.reset();
         if (chestIdEdit != null) {
             chestIdEdit.visible = isSettingsPage();
             chestIdEdit.setFocused(false);
@@ -401,7 +376,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         } else if (isFluidPage()) {
             renderFluidPage(g, mx, my);
         } else if (isFacePage()) {
-            renderFacePage(g, mx, my, partialTick);
+            faceConfigPanel.render(g, mx, my, partialTick);
         } else {
             renderConfigPage(g, mx, my, partialTick);
         }
@@ -702,325 +677,6 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         return cardX + cardW - 48;
     }
 
-    private void renderFacePage(GuiGraphics g, int mx, int my, float partialTick) {
-        int cardX = leftPos + BaseChestMenu.PANEL_PADDING;
-        int cardW = panelW - BaseChestMenu.PANEL_PADDING * 2;
-        int cubeY = topPos + BaseChestMenu.HEADER_HEIGHT + 10;
-        int cubeH = FACE_CUBE_HEIGHT;
-        Theme.panel(g, cardX, cubeY, cardW, cubeH, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
-        Theme.text(g, font, "面配置", cardX + 10, cubeY + 8, Theme.TEXT);
-        Theme.textRight(g, font, sideLabel(selectedSide), cardX + cardW - 10, cubeY + 8, Theme.PRIMARY_PRESS);
-        renderFaceCube(g, mx, my, cardX + cardW / 2, cubeY + FACE_CUBE_CENTER_Y_OFFSET, FACE_CUBE_SCALE);
-
-        int controlsY = cubeY + cubeH + 8;
-        int controlsH = Math.max(72, topPos + panelH - controlsY - BaseChestMenu.PANEL_PADDING);
-        Theme.panel(g, cardX, controlsY, cardW, controlsH, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
-        Theme.text(g, font, sideLabel(selectedSide) + "面", cardX + 10, controlsY + 8, Theme.TEXT);
-        renderFaceControls(g, mx, my, cardX, controlsY, cardW);
-    }
-
-    private void renderFaceControls(GuiGraphics g, int mx, int my, int x, int y, int w) {
-        ResourceKind activeKind = activeSideKind(selectedSide);
-        int functionX = x + 9;
-        int functionY = y + 28;
-        int functionW = 50;
-        int settingsX = functionX + functionW + 9;
-        int settingsW = Math.max(90, x + w - settingsX - 9);
-
-        Theme.vLine(g, functionX + functionW + 4, y + 19, Math.max(54, topPos + panelH - y - BaseChestMenu.PANEL_PADDING - 26), Theme.DIVIDER);
-        Theme.text(g, font, "功能", functionX, y + 17, Theme.TEXT_MUTED);
-        renderFaceFunctionSelector(g, mx, my, functionX, functionY, functionW, activeKind);
-
-        Theme.text(g, font, kindLabel(activeKind) + "模式", settingsX, y + 17, Theme.TEXT_MUTED);
-        int bx = settingsX;
-        int by = y + 28;
-        for (SideMode mode : sideModesFor(activeKind)) {
-            int bw = 21;
-            renderFaceModeButton(g, mx, my, bx, by, bw, activeKind, mode);
-            bx += bw + 3;
-        }
-        if (activeKind == ResourceKind.STRESS && cachedSideMode(activeKind, selectedSide) == SideMode.OUTPUT) {
-            renderStressOutputControls(g, mx, my, settingsX, y + 52, settingsW);
-        }
-    }
-
-    private void renderFaceFunctionSelector(GuiGraphics g, int mx, int my, int x, int y, int w, ResourceKind activeKind) {
-        boolean hover = Theme.inside(mx, my, x, y, w, 18);
-        Theme.panel(g, x, y, w, 18, 5, hover ? Theme.PRIMARY_SOFT_H : Theme.SURFACE, hover ? Theme.PRIMARY : Theme.BORDER);
-        Theme.text(g, font, Theme.ellipsize(font, kindLabel(activeKind), w - 16), x + 6, y + 6, Theme.PRIMARY_PRESS);
-        if (faceKindDropdownOpen) Theme.chevronUp(g, x + w - 8, y + 9, 5, Theme.TEXT_MUTED);
-        else Theme.chevronDown(g, x + w - 8, y + 9, 5, Theme.TEXT_MUTED);
-
-        if (!faceKindDropdownOpen) return;
-        List<ResourceKind> kinds = availableSideKinds();
-        int rowH = 17;
-        int listY = y + 20;
-        Theme.panel(g, x, listY, w, kinds.size() * rowH + 4, 5, Theme.SURFACE, Theme.BORDER);
-        for (int i = 0; i < kinds.size(); i++) {
-            ResourceKind kind = kinds.get(i);
-            int rowY = listY + 2 + i * rowH;
-            boolean selected = kind == activeKind;
-            boolean rowHover = Theme.inside(mx, my, x + 2, rowY, w - 4, rowH);
-            if (selected || rowHover) Theme.fillRound(g, x + 2, rowY, w - 4, rowH, 4, selected ? Theme.PRIMARY_SOFT : Theme.SURFACE_ALT);
-            Theme.textCentered(g, font, kindLabel(kind), x + w / 2, rowY + 5, selected ? Theme.PRIMARY_PRESS : Theme.TEXT);
-        }
-    }
-
-    private void renderStressOutputControls(GuiGraphics g, int mx, int my, int x, int y, int w) {
-        Theme.text(g, font, "方向", x, y + 3, Theme.TEXT_MUTED);
-        renderStressToggle(g, mx, my, x + 25, y, 28, "同向", !cacheStressOutputReversed);
-        renderStressToggle(g, mx, my, x + 56, y, 28, "反向", cacheStressOutputReversed);
-        Theme.text(g, font, "转速", x, y + 20, Theme.TEXT_MUTED);
-        renderStressToggle(g, mx, my, x + 25, y + 17, Math.min(58, w - 25), stressSpeedLabel(cacheStressOutputSpeedRpm), true);
-    }
-
-    private void renderStressToggle(GuiGraphics g, int mx, int my, int x, int y, int w, String label, boolean selected) {
-        boolean hover = Theme.inside(mx, my, x, y, w, 15);
-        int fill = selected ? Theme.PRIMARY_SOFT : Theme.SURFACE;
-        int border = hover ? Theme.PRIMARY : selected ? Theme.PRIMARY : Theme.BORDER;
-        Theme.panel(g, x, y, w, 15, 4, fill, border);
-        Theme.textCentered(g, font, label, x + w / 2, y + 4, selected ? Theme.PRIMARY_PRESS : Theme.TEXT);
-    }
-
-    private void renderFaceModeButton(GuiGraphics g, int mx, int my, int x, int y, int w, ResourceKind kind, SideMode mode) {
-        boolean selected = cachedSideMode(kind, selectedSide) == mode;
-        boolean hover = Theme.inside(mx, my, x, y, w, 18);
-        int fill = selected ? sideModeFill(mode) : Theme.SURFACE;
-        int border = hover ? Theme.PRIMARY : selected ? sideModeText(mode) : Theme.BORDER;
-        Theme.panel(g, x, y, w, 18, 5, fill, border);
-        Theme.textCentered(g, font, sideModeLabel(mode), x + w / 2, y + 6, sideModeText(mode));
-    }
-
-    private SideMode[] sideModesFor(ResourceKind kind) {
-        return kind == ResourceKind.STRESS
-                ? new SideMode[]{SideMode.DISABLED, SideMode.INPUT, SideMode.OUTPUT}
-                : new SideMode[]{SideMode.DISABLED, SideMode.INPUT, SideMode.OUTPUT, SideMode.BOTH};
-    }
-
-    private void renderFaceCube(GuiGraphics g, int mx, int my, int cx, int cy, int scale) {
-        List<ProjectedFace> faces = projectedFaces(cx, cy, scale, true);
-        for (ProjectedFace face : faces) {
-            drawTexturedQuad(g, face.xs(), face.ys(), faceBaseTexture(face.side()), 0xFFFFFFFF);
-            drawFaceModule(g, face);
-            fillQuad(g, face.xs(), face.ys(), faceOverlay(face.side(), face.side() == selectedSide));
-        }
-        for (ProjectedFace face : faces) {
-            Theme.textCentered(g, font, sideLabel(face.side()), (int) Math.round(face.cx()), (int) Math.round(face.cy()) - 4,
-                    face.side() == selectedSide ? Theme.PRIMARY_PRESS : Theme.TEXT);
-        }
-        RelativeSide hover = faceAt(mx, my, cx, cy, scale);
-        if (hover != null) {
-            ProjectedFace face = findProjectedFace(faces, hover);
-            if (face != null) fillQuad(g, face.xs(), face.ys(), 0x22FFFFFF);
-        }
-    }
-
-    private ResourceLocation faceBaseTexture(RelativeSide side) {
-        return side == RelativeSide.UP || side == RelativeSide.DOWN ? CHEST_FACE_CAP_TEXTURE : CHEST_FACE_SIDE_TEXTURE;
-    }
-
-    private void drawFaceModule(GuiGraphics g, ProjectedFace face) {
-        ResourceKind kind = activeSideKind(face.side());
-        SideMode mode = cachedSideMode(kind, face.side());
-        if (mode == SideMode.DISABLED) return;
-
-        double[] xs = inset(face.xs(), 0.25);
-        double[] ys = inset(face.ys(), 0.25);
-        int tint = moduleTint(kind, mode);
-        switch (kind) {
-            case ITEM -> drawAnimatedTexture(g, xs, ys, CHEST_ITEM_PORT_TEXTURE, tint, 12, 4);
-            case FLUID -> drawAnimatedTexture(g, xs, ys, CHEST_FLUID_WINDOW_TEXTURE, tint, 10, 8);
-            case ENERGY -> drawAnimatedTexture(g, xs, ys, CHEST_ENERGY_CORE_TEXTURE, tint, 8, 5);
-            case STRESS -> {
-                drawAnimatedTexture(g, xs, ys, CHEST_BEARING_RING_TEXTURE, tint, 8, 4);
-                drawTexturedQuad(g, inset(face.xs(), 0.75), inset(face.ys(), 0.75), CHEST_BEARING_SHAFT_TEXTURE,
-                        0xFFFFFFFF, 0.375f, 0.375f, 0.625f, 0.625f);
-            }
-        }
-    }
-
-    private void drawAnimatedTexture(GuiGraphics g, double[] xs, double[] ys, ResourceLocation texture, int color, int frames, int frameTime) {
-        long tick = minecraft != null && minecraft.level != null ? minecraft.level.getGameTime() : System.currentTimeMillis() / 50L;
-        int frame = (int) ((tick / Math.max(1, frameTime)) % Math.max(1, frames));
-        float v0 = (float) frame / frames;
-        float v1 = (float) (frame + 1) / frames;
-        drawTexturedQuad(g, xs, ys, texture, color, 0.0f, v0, 1.0f, v1);
-    }
-
-    private int moduleTint(ResourceKind kind, SideMode mode) {
-        if (kind == ResourceKind.STRESS || kind == ResourceKind.ENERGY) return 0xFFFFFFFF;
-        return switch (mode) {
-            case INPUT -> 0xFFE4FFF0;
-            case OUTPUT -> 0xFFE2EEFF;
-            case BOTH -> 0xFFFFF1BC;
-            case DISABLED -> 0xFFFFFFFF;
-        };
-    }
-
-    private int faceOverlay(RelativeSide side, boolean selected) {
-        SideMode mode = cachedSideMode(activeSideKind(side), side);
-        boolean in = mode.canInput();
-        boolean out = mode.canOutput();
-        int color = in && out ? 0xFFEFE2AC : in ? 0xFFDDF4E7 : out ? 0xFFDCEBFF : 0xFFE6EDF4;
-        int mixed = selected ? mixColor(color, 0xFFFFFFFF, 0.22f) : color;
-        return ((selected ? 0x64 : 0x2D) << 24) | (mixed & 0x00FFFFFF);
-    }
-
-    private double[] inset(double[] values, double amount) {
-        double center = 0.0;
-        for (double value : values) center += value;
-        center /= values.length;
-        double[] out = new double[values.length];
-        for (int i = 0; i < values.length; i++) out[i] = center + (values[i] - center) * (1.0 - amount);
-        return out;
-    }
-
-    private List<ProjectedFace> projectedFaces(int cx, int cy, int scale, boolean visibleOnly) {
-        List<ProjectedFace> faces = new ArrayList<>();
-        for (RelativeSide side : RelativeSide.values()) {
-            double[][] vertices = sideVertices(side);
-            double[] xs = new double[4];
-            double[] ys = new double[4];
-            double depth = 0.0;
-            double centerX = 0.0;
-            double centerY = 0.0;
-            for (int i = 0; i < 4; i++) {
-                double[] p = rotate(vertices[i][0], vertices[i][1], vertices[i][2]);
-                xs[i] = cx + p[0] * scale;
-                ys[i] = cy - p[1] * scale;
-                depth += p[2];
-                centerX += xs[i];
-                centerY += ys[i];
-            }
-            double[] normal = sideNormal(side);
-            double normalDepth = rotate(normal[0], normal[1], normal[2])[2];
-            if (!visibleOnly || normalDepth > 0.015) {
-                faces.add(new ProjectedFace(side, xs, ys, centerX / 4.0, centerY / 4.0, depth / 4.0, normalDepth));
-            }
-        }
-        faces.sort(Comparator.comparingDouble(ProjectedFace::depth));
-        return faces;
-    }
-
-    private ProjectedFace findProjectedFace(List<ProjectedFace> faces, RelativeSide side) {
-        for (ProjectedFace face : faces) if (face.side() == side) return face;
-        return null;
-    }
-
-    private RelativeSide faceAt(double mx, double my, int cx, int cy, int scale) {
-        List<ProjectedFace> faces = projectedFaces(cx, cy, scale, true);
-        faces.sort(Comparator.comparingDouble(ProjectedFace::depth).reversed());
-        for (ProjectedFace face : faces) {
-            if (pointInPolygon(mx, my, face.xs(), face.ys())) return face.side();
-        }
-        return null;
-    }
-
-    private boolean pointInPolygon(double px, double py, double[] xs, double[] ys) {
-        boolean inside = false;
-        for (int i = 0, j = xs.length - 1; i < xs.length; j = i++) {
-            boolean cross = (ys[i] > py) != (ys[j] > py)
-                    && px < (xs[j] - xs[i]) * (py - ys[i]) / (ys[j] - ys[i] + 0.00001) + xs[i];
-            if (cross) inside = !inside;
-        }
-        return inside;
-    }
-
-    private double[] rotate(double x, double y, double z) {
-        double yaw = Math.toRadians(faceYaw);
-        double pitch = Math.toRadians(facePitch);
-        double cy = Math.cos(yaw);
-        double sy = Math.sin(yaw);
-        double cp = Math.cos(pitch);
-        double sp = Math.sin(pitch);
-        double rx = x * cy + z * sy;
-        double rz = -x * sy + z * cy;
-        double ry = y * cp - rz * sp;
-        double rz2 = y * sp + rz * cp;
-        return new double[]{rx, ry, rz2};
-    }
-
-    private double[][] sideVertices(RelativeSide side) {
-        return switch (side) {
-            case FRONT -> new double[][]{{-1, -1, 1}, {1, -1, 1}, {1, 1, 1}, {-1, 1, 1}};
-            case BACK -> new double[][]{{1, -1, -1}, {-1, -1, -1}, {-1, 1, -1}, {1, 1, -1}};
-            case LEFT -> new double[][]{{-1, -1, -1}, {-1, -1, 1}, {-1, 1, 1}, {-1, 1, -1}};
-            case RIGHT -> new double[][]{{1, -1, 1}, {1, -1, -1}, {1, 1, -1}, {1, 1, 1}};
-            case UP -> new double[][]{{-1, 1, 1}, {1, 1, 1}, {1, 1, -1}, {-1, 1, -1}};
-            case DOWN -> new double[][]{{-1, -1, -1}, {1, -1, -1}, {1, -1, 1}, {-1, -1, 1}};
-        };
-    }
-
-    private double[] sideNormal(RelativeSide side) {
-        return switch (side) {
-            case FRONT -> new double[]{0, 0, 1};
-            case BACK -> new double[]{0, 0, -1};
-            case LEFT -> new double[]{-1, 0, 0};
-            case RIGHT -> new double[]{1, 0, 0};
-            case UP -> new double[]{0, 1, 0};
-            case DOWN -> new double[]{0, -1, 0};
-        };
-    }
-
-    private void fillQuad(GuiGraphics g, double[] xs, double[] ys, int color) {
-        Matrix4f matrix = g.pose().last().pose();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        BufferBuilder buf = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
-        for (int i = 0; i < 4; i++) vertex(buf, matrix, (float) xs[i], (float) ys[i], color);
-        BufferUploader.drawWithShader(buf.buildOrThrow());
-        RenderSystem.disableBlend();
-    }
-
-    private void drawTexturedQuad(GuiGraphics g, double[] xs, double[] ys, ResourceLocation texture, int color) {
-        drawTexturedQuad(g, xs, ys, texture, color, 0.0f, 0.0f, 1.0f, 1.0f);
-    }
-
-    private void drawTexturedQuad(GuiGraphics g, double[] xs, double[] ys, ResourceLocation texture, int color, float u0, float v0, float u1, float v1) {
-        Matrix4f matrix = g.pose().last().pose();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.setShader(GameRenderer::getPositionTexColorShader);
-        RenderSystem.setShaderTexture(0, texture);
-        BufferBuilder buf = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX_COLOR);
-        vertexTex(buf, matrix, (float) xs[0], (float) ys[0], u0, v1, color);
-        vertexTex(buf, matrix, (float) xs[1], (float) ys[1], u1, v1, color);
-        vertexTex(buf, matrix, (float) xs[2], (float) ys[2], u1, v0, color);
-        vertexTex(buf, matrix, (float) xs[3], (float) ys[3], u0, v0, color);
-        BufferUploader.drawWithShader(buf.buildOrThrow());
-        RenderSystem.disableBlend();
-    }
-
-    private void vertex(BufferBuilder buf, Matrix4f matrix, float x, float y, int color) {
-        float a = ((color >>> 24) & 0xFF) / 255f;
-        float r = ((color >> 16) & 0xFF) / 255f;
-        float gr = ((color >> 8) & 0xFF) / 255f;
-        float b = (color & 0xFF) / 255f;
-        buf.addVertex(matrix, x, y, 0).setColor(r, gr, b, a);
-    }
-
-    private void vertexTex(BufferBuilder buf, Matrix4f matrix, float x, float y, float u, float v, int color) {
-        float a = ((color >>> 24) & 0xFF) / 255f;
-        float r = ((color >> 16) & 0xFF) / 255f;
-        float gr = ((color >> 8) & 0xFF) / 255f;
-        float b = (color & 0xFF) / 255f;
-        buf.addVertex(matrix, x, y, 0).setUv(u, v).setColor(r, gr, b, a);
-    }
-
-    private int mixColor(int a, int b, float t) {
-        t = Math.max(0f, Math.min(1f, t));
-        int ar = (a >> 16) & 0xFF, ag = (a >> 8) & 0xFF, ab = a & 0xFF;
-        int br = (b >> 16) & 0xFF, bg = (b >> 8) & 0xFF, bb = b & 0xFF;
-        int r = Math.round(ar + (br - ar) * t);
-        int g = Math.round(ag + (bg - ag) * t);
-        int bl = Math.round(ab + (bb - ab) * t);
-        return 0xFF000000 | (r << 16) | (g << 8) | bl;
-    }
-
-    private record ProjectedFace(RelativeSide side, double[] xs, double[] ys, double cx, double cy, double depth, double normalDepth) {
-    }
-
     private void renderUpgradeSlots(GuiGraphics g, int mx, int my, int x, int y, int w, boolean compact) {
         int h = compact ? BaseChestMenu.UPGRADE_SECTION_HEIGHT : 48;
         Theme.panel(g, x, y, w, h, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
@@ -1250,7 +906,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         if (pageButton != null && pageButton.mouseClicked(mx, my, button)) return true;
 
         if (isFacePage()) {
-            if (handleFacePageClick(mx, my, button)) return true;
+            if (faceConfigPanel.mouseClicked(mx, my, button)) return true;
             return true;
         }
 
@@ -1290,28 +946,13 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
 
     @Override
     public boolean mouseReleased(double mx, double my, int button) {
-        if (button == 0 && rotatingFaceCube) {
-            rotatingFaceCube = false;
-            if (!faceCubeMoved) {
-                int cardX = leftPos + BaseChestMenu.PANEL_PADDING;
-                int cardW = panelW - BaseChestMenu.PANEL_PADDING * 2;
-                int cubeY = topPos + BaseChestMenu.HEADER_HEIGHT + 10;
-                RelativeSide hit = faceAt(mx, my, cardX + cardW / 2, cubeY + FACE_CUBE_CENTER_Y_OFFSET, FACE_CUBE_SCALE);
-                if (hit != null) selectFace(hit);
-            }
-            return true;
-        }
+        if (isFacePage() && faceConfigPanel.mouseReleased(mx, my, button)) return true;
         return super.mouseReleased(mx, my, button);
     }
 
     @Override
     public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
-        if (isFacePage() && rotatingFaceCube && button == 0) {
-            faceYaw += dx * 0.8;
-            facePitch = Math.max(-84.0, Math.min(84.0, facePitch - dy * 0.8));
-            if (Math.abs(mx - faceCubeDragX) > 2 || Math.abs(my - faceCubeDragY) > 2) faceCubeMoved = true;
-            return true;
-        }
+        if (isFacePage() && faceConfigPanel.mouseDragged(mx, my, button, dx, dy)) return true;
         return super.mouseDragged(mx, my, button, dx, dy);
     }
 
@@ -1435,242 +1076,6 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         return Theme.inside(mx, my, cardX + 10, cardY + 25, Math.max(68, cardW - 62), 16);
     }
 
-    private boolean handleFacePageClick(double mx, double my, int button) {
-        if (button != 0) return true;
-        int cardX = leftPos + BaseChestMenu.PANEL_PADDING;
-        int cardW = panelW - BaseChestMenu.PANEL_PADDING * 2;
-        int cubeY = topPos + BaseChestMenu.HEADER_HEIGHT + 10;
-        if (Theme.inside(mx, my, cardX, cubeY, cardW, FACE_CUBE_HEIGHT)) {
-            faceKindDropdownOpen = false;
-            rotatingFaceCube = true;
-            faceCubeMoved = false;
-            faceCubeDragX = (int) mx;
-            faceCubeDragY = (int) my;
-            return true;
-        }
-        int controlsY = cubeY + FACE_CUBE_HEIGHT + 8;
-        if (handleFaceModeClick(mx, my, cardX, controlsY, cardW)) return true;
-        faceKindDropdownOpen = false;
-        return true;
-    }
-
-    private boolean handleFaceModeClick(double mx, double my, int x, int y, int w) {
-        int functionX = x + 9;
-        int functionY = y + 28;
-        int functionW = 50;
-        int settingsX = functionX + functionW + 9;
-        int settingsW = Math.max(90, x + w - settingsX - 9);
-
-        if (Theme.inside(mx, my, functionX, functionY, functionW, 18)) {
-            faceKindDropdownOpen = !faceKindDropdownOpen;
-            return true;
-        }
-        if (faceKindDropdownOpen) {
-            List<ResourceKind> kinds = availableSideKinds();
-            int rowH = 17;
-            int listY = functionY + 20;
-            for (int i = 0; i < kinds.size(); i++) {
-                int rowY = listY + 2 + i * rowH;
-                if (Theme.inside(mx, my, functionX + 2, rowY, functionW - 4, rowH)) {
-                    setFaceFunction(kinds.get(i));
-                    faceKindDropdownOpen = false;
-                    return true;
-                }
-            }
-            if (Theme.inside(mx, my, functionX, listY, functionW, kinds.size() * rowH + 4)) {
-                return true;
-            }
-            faceKindDropdownOpen = false;
-        }
-
-        ResourceKind activeKind = activeSideKind(selectedSide);
-        int bx = settingsX;
-        int by = y + 28;
-        for (SideMode mode : sideModesFor(activeKind)) {
-            int bw = 21;
-            if (Theme.inside(mx, my, bx, by, bw, 18)) {
-                setFaceMode(activeKind, mode);
-                return true;
-            }
-            bx += bw + 3;
-        }
-        if (activeKind == ResourceKind.STRESS && cachedSideMode(activeKind, selectedSide) == SideMode.OUTPUT) {
-            if (handleStressOutputConfigClick(mx, my, settingsX, y + 52, settingsW)) return true;
-        }
-        return false;
-    }
-
-    private boolean handleStressOutputConfigClick(double mx, double my, int x, int y, int w) {
-        if (Theme.inside(mx, my, x + 25, y, 28, 15)) {
-            setStressOutputReversed(false);
-            return true;
-        }
-        if (Theme.inside(mx, my, x + 56, y, 28, 15)) {
-            setStressOutputReversed(true);
-            return true;
-        }
-        if (Theme.inside(mx, my, x + 25, y + 17, Math.min(58, w - 25), 15)) {
-            setStressOutputSpeed(nextStressOutputSpeed(cacheStressOutputSpeedRpm));
-            return true;
-        }
-        return false;
-    }
-
-    private void selectFace(RelativeSide side) {
-        if (side == null) return;
-        faceKindDropdownOpen = false;
-        selectedSide = side;
-        switch (side) {
-            case FRONT -> { faceYaw = 0; facePitch = 0; }
-            case BACK -> { faceYaw = 180; facePitch = 0; }
-            case LEFT -> { faceYaw = 90; facePitch = 0; }
-            case RIGHT -> { faceYaw = -90; facePitch = 0; }
-            case UP -> { faceYaw = 0; facePitch = 82; }
-            case DOWN -> { faceYaw = 0; facePitch = -82; }
-        }
-    }
-
-    private boolean canEditSideKind(ResourceKind kind) {
-        if (kind == ResourceKind.STRESS) return cacheCreateLoaded;
-        return true;
-    }
-
-    private List<ResourceKind> availableSideKinds() {
-        List<ResourceKind> kinds = new ArrayList<>();
-        kinds.add(ResourceKind.ITEM);
-        if (hasFluidPage()) kinds.add(ResourceKind.FLUID);
-        kinds.add(ResourceKind.ENERGY);
-        if (cacheCreateLoaded) kinds.add(ResourceKind.STRESS);
-        return kinds;
-    }
-
-    private ResourceKind activeSideKind(RelativeSide side) {
-        List<ResourceKind> available = availableSideKinds();
-        for (ResourceKind kind : available) {
-            if (cachedSideMode(kind, side) != SideMode.DISABLED) return kind;
-        }
-        for (ResourceKind kind : ResourceKind.values()) {
-            if (cachedSideMode(kind, side) != SideMode.DISABLED) return available.contains(kind) ? kind : ResourceKind.ITEM;
-        }
-        return ResourceKind.ITEM;
-    }
-
-    private int faceFunctionButtonWidth(ResourceKind kind) {
-        return Math.max(36, font.width(kindLabel(kind)) + 16);
-    }
-
-    private SideMode defaultModeForKind(ResourceKind kind) {
-        return kind == ResourceKind.STRESS ? SideMode.INPUT : SideMode.BOTH;
-    }
-
-    private void setFaceFunction(ResourceKind kind) {
-        if (!canEditSideKind(kind)) return;
-        setFaceConfig(kind, defaultModeForKind(kind));
-    }
-
-    private void setFaceMode(ResourceKind kind, SideMode mode) {
-        if (!canEditSideKind(kind)) return;
-        setFaceConfig(kind, mode);
-    }
-
-    private void setFaceConfig(ResourceKind kind, SideMode mode) {
-        for (ResourceKind other : ResourceKind.values()) {
-            SideMode next = other == kind ? mode : SideMode.DISABLED;
-            cacheSideConfig.computeIfAbsent(other, k -> new EnumMap<>(RelativeSide.class)).put(selectedSide, next);
-        }
-        send(18, selectedSide.name() + "|" + kind.name() + "|" + mode.name());
-    }
-
-    private void setStressOutputReversed(boolean reversed) {
-        cacheStressOutputReversed = reversed;
-        send(20, reversed ? "1" : "0");
-    }
-
-    private void setStressOutputSpeed(int rpm) {
-        cacheStressOutputSpeedRpm = rpm;
-        send(19, String.valueOf(rpm));
-    }
-
-    private int nextStressOutputSpeed(int current) {
-        for (int i = 0; i < STRESS_SPEED_OPTIONS.length; i++) {
-            if (STRESS_SPEED_OPTIONS[i] == current) return STRESS_SPEED_OPTIONS[(i + 1) % STRESS_SPEED_OPTIONS.length];
-        }
-        return 0;
-    }
-
-    private SideMode cachedSideMode(ResourceKind kind, RelativeSide side) {
-        EnumMap<RelativeSide, SideMode> modes = cacheSideConfig.get(kind);
-        if (modes == null) return SideMode.DISABLED;
-        return modes.getOrDefault(side, SideMode.DISABLED);
-    }
-
-    private SideMode nextSideMode(ResourceKind kind, SideMode mode) {
-        if (kind == ResourceKind.STRESS) {
-            return switch (mode) {
-                case DISABLED -> SideMode.INPUT;
-                case INPUT -> SideMode.OUTPUT;
-                case OUTPUT, BOTH -> SideMode.DISABLED;
-            };
-        }
-        return switch (mode) {
-            case DISABLED -> SideMode.INPUT;
-            case INPUT -> SideMode.OUTPUT;
-            case OUTPUT -> SideMode.BOTH;
-            case BOTH -> SideMode.DISABLED;
-        };
-    }
-
-    private String kindLabel(ResourceKind kind) {
-        return switch (kind) {
-            case ITEM -> "物品";
-            case FLUID -> "流体";
-            case ENERGY -> "电力";
-            case STRESS -> "应力";
-        };
-    }
-
-    private String sideLabel(RelativeSide side) {
-        return switch (side) {
-            case FRONT -> "前";
-            case BACK -> "后";
-            case LEFT -> "左";
-            case RIGHT -> "右";
-            case UP -> "上";
-            case DOWN -> "下";
-        };
-    }
-
-    private String sideModeLabel(SideMode mode) {
-        return switch (mode) {
-            case DISABLED -> "关";
-            case INPUT -> "入";
-            case OUTPUT -> "出";
-            case BOTH -> "双";
-        };
-    }
-
-    private String stressSpeedLabel(int rpm) {
-        return rpm <= 0 ? "同速" : rpm + "rpm";
-    }
-
-    private int sideModeFill(SideMode mode) {
-        return switch (mode) {
-            case DISABLED -> Theme.SURFACE;
-            case INPUT -> 0xFFE8F5EE;
-            case OUTPUT -> 0xFFEAF2FF;
-            case BOTH -> 0xFFFFF5DA;
-        };
-    }
-
-    private int sideModeText(SideMode mode) {
-        return switch (mode) {
-            case DISABLED -> Theme.TEXT_FAINT;
-            case INPUT -> Theme.SUCCESS;
-            case OUTPUT -> Theme.PRIMARY_PRESS;
-            case BOTH -> 0xFF986A00;
-        };
-    }
-
     private boolean handleUpgradeSlotClick(double mx, double my, int button) {
         if (button != 0 && button != 1) return false;
         int upgradeStartX = leftPos + upgradeAreaX + 42;
@@ -1693,4 +1098,20 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
     protected void renderLabels(GuiGraphics g, int mx, int my) {
         // 标签由自定义 renderLabels(g) 处理，禁用 vanilla 标签
     }
+
+    // ── ChestScreenHost 实现 ──
+
+    @Override public Font font() { return font; }
+    @Override public Minecraft minecraft() { return minecraft; }
+    @Override public int leftPos() { return leftPos; }
+    @Override public int topPos() { return topPos; }
+    @Override public int panelWidth() { return panelW; }
+    @Override public int panelHeight() { return panelH; }
+    @Override public void sendConfig(int action, String value) { send(action, value); }
+    @Override public EnumMap<ResourceKind, EnumMap<RelativeSide, SideMode>> sideConfigMap() { return cacheSideConfig; }
+    @Override public int stressOutputSpeedRpm() { return cacheStressOutputSpeedRpm; }
+    @Override public void stressOutputSpeedRpm(int rpm) { cacheStressOutputSpeedRpm = rpm; }
+    @Override public boolean stressOutputReversed() { return cacheStressOutputReversed; }
+    @Override public void stressOutputReversed(boolean reversed) { cacheStressOutputReversed = reversed; }
+    @Override public boolean createLoaded() { return cacheCreateLoaded; }
 }

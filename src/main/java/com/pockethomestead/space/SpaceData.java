@@ -30,6 +30,8 @@ public class SpaceData {
     private SpacePermission permission;
     private String name;
     private boolean offlineSimulationEnabled;
+    // 标记空间已被删除：SpaceManager.deleteSpace 时置位，BaseChestBlockEntity 的缓存据此失效
+    private volatile boolean deleted = false;
 
     public SpaceData(UUID spaceId, UUID ownerId, int width, int height, int depth,
                      TerrainType terrainType, String biome, ResourceLocation sourceDimension,
@@ -89,6 +91,10 @@ public class SpaceData {
     public boolean canAccess(UUID playerId) { return can(playerId, SpacePermission.AccessLevel.USE); }
     public boolean canView(UUID playerId) { return can(playerId, SpacePermission.AccessLevel.VIEW); }
     public boolean can(UUID playerId, SpacePermission.AccessLevel required) { return permission.can(playerId, isOwner(playerId), required); }
+
+    /** 由 SpaceManager.deleteSpace 调用，使 BaseChestBlockEntity 的缓存失效。 */
+    public void markDeleted() { this.deleted = true; }
+    public boolean isDeleted() { return deleted; }
 
     public static ResourceLocation defaultDimensionId(UUID spaceId) {
         return ResourceLocation.fromNamespaceAndPath(PocketHomestead.MODID, "space_" + spaceId.toString().replace('-', '_'));

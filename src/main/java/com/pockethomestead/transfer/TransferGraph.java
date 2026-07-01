@@ -57,6 +57,7 @@ public class TransferGraph {
     }
 
     public void removePage(String pageId) {
+        if (DEFAULT_PAGE_ID.equals(pageId)) return;
         pages.remove(pageId);
         nodes.values().removeIf(node -> node.getPageId().equals(pageId));
         edges.values().removeIf(edge -> edge.getPageId().equals(pageId));

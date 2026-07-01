@@ -63,7 +63,7 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
             BaseChestBlockEntity be = menu.getBlockEntity();
             if (be == null) return;
             SpacePermission.AccessLevel required = requiredLevel(packet.action);
-            if (required != null && !AccessControl.canChest(player.getUUID(), be, required)) {
+            if (!AccessControl.canChest(player.getUUID(), be, required)) {
                 AccessControl.deny(player);
                 return;
             }
@@ -88,7 +88,7 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
                 }
                 case 5 -> { be.setTransferRateLimit(Math.min(be.getTransferRateLimit() + 10, 10000)); sendSyncToClient(player, be); }
                 case 6 -> { be.setTransferRateLimit(Math.max(be.getTransferRateLimit() - 10, 0)); sendSyncToClient(player, be); }
-                case 7 -> { try { be.viewScrollRow = Math.max(0, Integer.parseInt(packet.value)); } catch (NumberFormatException ignored) {} }
+                case 7 -> { try { be.setViewScrollRow(Integer.parseInt(packet.value)); } catch (NumberFormatException ignored) {} }
                 case 8 -> putFromCarried(menu, be, false);
                 case 12 -> putFromCarried(menu, be, true);
                 case 9 -> takeToCarried(menu, be, packet.value, packet.stack, false);
@@ -118,7 +118,7 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
             case 0, 1, 2, 5, 6, 14, 15, 16, 17, 18, 19, 20, 22 -> SpacePermission.AccessLevel.WRITE;
             case 21 -> SpacePermission.AccessLevel.MANAGE;
             case 7, 8, 9, 10, 11, 12 -> SpacePermission.AccessLevel.USE;
-            default -> null;
+            default -> SpacePermission.AccessLevel.MANAGE;
         };
     }
 

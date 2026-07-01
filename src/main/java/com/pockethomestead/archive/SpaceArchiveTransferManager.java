@@ -23,8 +23,11 @@ import java.util.Map;
 import java.util.UUID;
 
 public final class SpaceArchiveTransferManager {
+    // 线程模型：UPLOADS/DOWNLOADS 仅在主线程访问（packet handler enqueueWork + server tick），LinkedHashMap 即可
     private static final Map<String, UploadSession> UPLOADS = new LinkedHashMap<>();
     private static final Map<String, DownloadSession> DOWNLOADS = new LinkedHashMap<>();
+    // 上传会话超时：60 秒无分块则清理，避免玩家下线后 staging 文件泄漏 + 占用并发名额
+    private static final int UPLOAD_TIMEOUT_TICKS = 60 * 20;
 
     private SpaceArchiveTransferManager() {
     }
@@ -63,7 +66,8 @@ public final class SpaceArchiveTransferManager {
                     .resolve(sessionId + SpaceArchiveService.EXTENSION + ".upload");
             Files.createDirectories(staging.getParent());
             Files.deleteIfExists(staging);
-            UPLOADS.put(sessionId, new UploadSession(player.getUUID(), staging, fileName, totalBytes, sha256));
+            UPLOADS.put(sessionId, new UploadSession(player.getUUID(), staging, fileName, totalBytes, sha256,
+                    player.server.overworld().getGameTime()));
             PacketDistributor.sendToPlayer(player, SpaceArchiveServerPacket.simple("UPLOAD_READY", sessionId, fileName, "准备上传"));
         } catch (Exception e) {
             PocketHomestead.LOGGER.error("创建空间包上传会话失败", e);
@@ -87,13 +91,16 @@ public final class SpaceArchiveTransferManager {
                 failUpload(player, packet.sessionId(), "上传分块超过服务器限制");
                 return;
             }
-            Files.write(session.path, packet.data(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-            session.receivedBytes += packet.data().length;
-            session.nextIndex++;
-            if (session.receivedBytes > session.totalBytes || Files.size(session.path) > ModConfig.SPACE_ARCHIVE_MAX_BYTES.get()) {
+            // 先校验累计字节上限，再写入文件；receivedBytes 已是权威计数，无需 Files.size 二次校验
+            long next = session.receivedBytes + packet.data().length;
+            if (next > session.totalBytes || next > ModConfig.SPACE_ARCHIVE_MAX_BYTES.get()) {
                 failUpload(player, packet.sessionId(), "上传超过服务器限制");
                 return;
             }
+            Files.write(session.path, packet.data(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            session.receivedBytes = next;
+            session.nextIndex++;
+            session.lastActivityTick = player.server.overworld().getGameTime();
             if (session.receivedBytes == session.totalBytes) {
                 finishUpload(player, packet.sessionId(), session);
             }
@@ -137,7 +144,25 @@ public final class SpaceArchiveTransferManager {
     }
 
     public static void tick(MinecraftServer server) {
-        if (server == null || DOWNLOADS.isEmpty()) return;
+        if (server == null) return;
+        long currentTick = server.overworld().getGameTime();
+        // 清理超时的上传会话：玩家下线或停止上传后 staging 文件会被回收
+        if (!UPLOADS.isEmpty()) {
+            Iterator<Map.Entry<String, UploadSession>> uploadIter = UPLOADS.entrySet().iterator();
+            while (uploadIter.hasNext()) {
+                Map.Entry<String, UploadSession> entry = uploadIter.next();
+                UploadSession session = entry.getValue();
+                if (currentTick - session.lastActivityTick > UPLOAD_TIMEOUT_TICKS) {
+                    PocketHomestead.LOGGER.warn("上传会话 {} 超时未活动，清理", entry.getKey());
+                    try {
+                        Files.deleteIfExists(session.path);
+                    } catch (IOException ignored) {
+                    }
+                    uploadIter.remove();
+                }
+            }
+        }
+        if (DOWNLOADS.isEmpty()) return;
         Iterator<Map.Entry<String, DownloadSession>> iterator = DOWNLOADS.entrySet().iterator();
         while (iterator.hasNext()) {
             Map.Entry<String, DownloadSession> entry = iterator.next();
@@ -150,14 +175,20 @@ public final class SpaceArchiveTransferManager {
                 continue;
             }
             try {
-                byte[] buffer = session.input.readNBytes(session.chunkSize);
-                if (buffer.length > 0) {
+                int read = session.input.readNBytes(session.buffer, 0, session.chunkSize);
+                if (read > 0) {
+                    byte[] chunk;
+                    if (read == session.buffer.length) {
+                        chunk = session.buffer;
+                    } else {
+                        chunk = java.util.Arrays.copyOf(session.buffer, read);
+                    }
                     PacketDistributor.sendToPlayer(player, SpaceArchiveServerPacket.downloadChunk(
-                            sessionId, session.fileName, session.index, session.totalChunks(), session.totalBytes, buffer));
+                            sessionId, session.fileName, session.index, session.totalChunks(), session.totalBytes, chunk));
                     session.index++;
-                    session.sentBytes += buffer.length;
+                    session.sentBytes += read;
                 }
-                if (buffer.length == 0 || session.sentBytes >= session.totalBytes) {
+                if (read == 0 || session.sentBytes >= session.totalBytes) {
                     PacketDistributor.sendToPlayer(player, SpaceArchiveServerPacket.simple("DOWNLOAD_END", sessionId, session.fileName, "下载完成"));
                     session.closeAndDelete();
                     iterator.remove();
@@ -224,13 +255,15 @@ public final class SpaceArchiveTransferManager {
         private final String sha256;
         private int nextIndex;
         private long receivedBytes;
+        private long lastActivityTick;
 
-        private UploadSession(UUID playerId, Path path, String fileName, long totalBytes, String sha256) {
+        private UploadSession(UUID playerId, Path path, String fileName, long totalBytes, String sha256, long startTick) {
             this.playerId = playerId;
             this.path = path;
             this.fileName = fileName == null || fileName.isBlank() ? "upload.phspace" : fileName;
             this.totalBytes = totalBytes;
             this.sha256 = sha256;
+            this.lastActivityTick = startTick;
         }
     }
 
@@ -242,6 +275,7 @@ public final class SpaceArchiveTransferManager {
         private final InputStream input;
         private final int chunkSize;
         private final int totalChunks;
+        private final byte[] buffer;
         private int index;
         private long sentBytes;
 
@@ -254,6 +288,7 @@ public final class SpaceArchiveTransferManager {
                     Math.max(4096, ModConfig.SPACE_ARCHIVE_BYTES_PER_SECOND_PER_PLAYER.get() / 20));
             this.totalChunks = Math.max(1, (int) Math.ceil(totalBytes / (double) chunkSize));
             this.input = Files.newInputStream(path);
+            this.buffer = new byte[chunkSize];
         }
 
         private int totalChunks() {

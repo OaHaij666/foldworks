@@ -13,6 +13,7 @@ public record GraphKey(Kind kind, UUID id) {
         PUBLIC
     }
 
+    // PUBLIC 图是全局共享图，所有玩家共用同一个实例，因此使用固定的零 UUID 作为主键，避免每个玩家产生不同的 PUBLIC 图。
     public static final UUID PUBLIC_ID = new UUID(0L, 0L);
 
     public GraphKey {

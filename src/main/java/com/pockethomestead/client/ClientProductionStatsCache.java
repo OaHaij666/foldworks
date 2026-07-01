@@ -24,6 +24,12 @@ public final class ClientProductionStatsCache {
     private static List<ProductionStatsSyncPacket.MemberData> members = List.of();
     private static Set<String> favoriteResources = Set.of();
 
+    private static long dataVersion = 0;
+    private static long cachedRowsVersion = -1;
+    private static String cachedRowsGroupId;
+    private static int cachedRowsMinutes = -1;
+    private static List<ProductionRow> cachedRows;
+
     public static void update(ProductionStatsSyncPacket packet) {
         serverGameTime = packet.serverGameTime();
         groups = List.copyOf(packet.groups());
@@ -31,6 +37,7 @@ public final class ClientProductionStatsCache {
         inventories = List.copyOf(packet.inventories());
         members = List.copyOf(packet.members());
         favoriteResources = new LinkedHashSet<>(packet.favoriteResources());
+        dataVersion++;
     }
 
     public static long serverGameTime() { return serverGameTime; }
@@ -73,6 +80,11 @@ public final class ClientProductionStatsCache {
     }
 
     public static List<ProductionRow> rowsFor(String groupId, int minutes) {
+        if (cachedRows != null && cachedRowsVersion == dataVersion
+                && cachedRowsMinutes == minutes && minutes >= 1
+                && groupId != null && groupId.equals(cachedRowsGroupId)) {
+            return cachedRows;
+        }
         int safeMinutes = Math.max(1, minutes);
         long rangeTicks = safeMinutes * 60L * 20L;
         long cutoff = serverGameTime - rangeTicks;
@@ -114,6 +126,10 @@ public final class ClientProductionStatsCache {
             rows.add(new ProductionRow(entry.getKey(), acc.current, inputRate, outputRate, inputRate - outputRate,
                     trendInput, trendOutput, trendNet));
         }
+        cachedRows = rows;
+        cachedRowsVersion = dataVersion;
+        cachedRowsGroupId = groupId;
+        cachedRowsMinutes = minutes;
         return rows;
     }
 

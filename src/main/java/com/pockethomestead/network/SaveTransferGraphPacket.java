@@ -121,7 +121,7 @@ public record SaveTransferGraphPacket(
         }
         for (TransferGraphSyncPacket.EdgeData edge : packet.edges) {
             if (graph.getNode(edge.fromNodeId()) == null || graph.getNode(edge.toNodeId()) == null) continue;
-            TransferEdge transferEdge = new TransferEdge(edge.id(), edge.pageId(), edge.fromNodeId(), edge.toNodeId(), edge.fromPortKey(), edge.toPortKey(), edge.rateLimitEnabled(), edge.rateLimitSeconds(), edge.rateLimitItems(), edge.enabled());
+            TransferEdge transferEdge = new TransferEdge(edge.id(), edge.pageId(), edge.fromNodeId(), edge.toNodeId(), edge.fromPortKey(), edge.toPortKey(), false, 1, 64, edge.enabled());
             for (TransferGraphSyncPacket.EdgeItemRateData row : edge.itemRates()) {
                 if (row.configured()) transferEdge.setItemRate(row.itemId(), row.rateLimitEnabled(), row.rateLimitSeconds(), row.rateLimitItems());
             }

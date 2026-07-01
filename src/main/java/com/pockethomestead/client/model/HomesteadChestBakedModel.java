@@ -37,6 +37,7 @@ public class HomesteadChestBakedModel extends BakedModelWrapper<BakedModel> {
     private static final float MODULE_MIN = 2.0f;
     private static final float MODULE_MAX = 14.0f;
     private static final float SURFACE_OFFSET = 0.02f;
+    private static final FaceBakery FACE_BAKERY = new FaceBakery();
 
     private final Map<Direction, Map<ResourceKind, Map<SideMode, List<BakedQuad>>>> moduleQuads;
 
@@ -67,27 +68,32 @@ public class HomesteadChestBakedModel extends BakedModelWrapper<BakedModel> {
     @Override
     public List<BakedQuad> getQuads(@Nullable BlockState state, @Nullable Direction side, RandomSource rand,
                                     ModelData extraData, @Nullable RenderType renderType) {
-        boolean modulePass = renderType == null || RenderType.cutout().equals(renderType);
         List<Direction> stressSides = stressSidesFor(state, extraData);
+
+        // 按 Direction 查询（cullface pass）：返回基础几何，stress 面被移除
         if (side != null) {
             if (stressSides.contains(side)) return List.of();
             return originalModel.getQuads(state, side, rand, extraData, renderType);
         }
-        if (!modulePass) {
-            return filterStressFaces(originalModel.getQuads(state, side, rand, extraData, renderType), stressSides);
+
+        // 通用查询（renderType == null，如物品栏渲染）：返回 base + modules
+        if (renderType == null) {
+            List<BakedQuad> base = filterStressFaces(originalModel.getQuads(state, null, rand, extraData, null), stressSides);
+            List<BakedQuad> modules = moduleQuadsFor(state, extraData);
+            if (modules.isEmpty()) return base;
+            List<BakedQuad> combined = new ArrayList<>(base.size() + modules.size());
+            combined.addAll(base);
+            combined.addAll(modules);
+            return combined;
         }
 
-        List<BakedQuad> modules = moduleQuadsFor(state, extraData);
+        // cutout pass：仅返回模块几何
         if (RenderType.cutout().equals(renderType)) {
-            return modules;
+            return moduleQuadsFor(state, extraData);
         }
 
-        List<BakedQuad> base = filterStressFaces(originalModel.getQuads(state, side, rand, extraData, renderType), stressSides);
-        if (modules.isEmpty()) return base;
-        List<BakedQuad> combined = new ArrayList<>(base.size() + modules.size());
-        combined.addAll(base);
-        combined.addAll(modules);
-        return combined;
+        // 其他 render type pass（solid 等）：返回过滤掉 stress 面的基础几何
+        return filterStressFaces(originalModel.getQuads(state, null, rand, extraData, renderType), stressSides);
     }
 
     @Override
@@ -162,7 +168,7 @@ public class HomesteadChestBakedModel extends BakedModelWrapper<BakedModel> {
         Vector3f to = moduleTo(direction);
         float[] uv = flipV ? new float[]{0, 16, 16, 0} : new float[]{0, 0, 16, 16};
         BlockElementFace face = new BlockElementFace(null, BlockElementFace.NO_TINT, "", new BlockFaceUV(uv, 0));
-        BakedQuad quad = new FaceBakery().bakeQuad(from, to, face, sprite, direction, BlockModelRotation.X0_Y0, null, true);
+        BakedQuad quad = FACE_BAKERY.bakeQuad(from, to, face, sprite, direction, BlockModelRotation.X0_Y0, null, true);
         return List.of(quad);
     }
 
@@ -199,7 +205,7 @@ public class HomesteadChestBakedModel extends BakedModelWrapper<BakedModel> {
                 Math.max(a.z(), b.z())
         );
         BlockElementFace face = new BlockElementFace(null, BlockElementFace.NO_TINT, "", new BlockFaceUV(uv, 0));
-        quads.add(new FaceBakery().bakeQuad(from, to, face, sprite, faceDirection, BlockModelRotation.X0_Y0, null, true));
+        quads.add(FACE_BAKERY.bakeQuad(from, to, face, sprite, faceDirection, BlockModelRotation.X0_Y0, null, true));
     }
 
     private static Vector3f localToWorld(Direction direction, float x, float y, float z) {

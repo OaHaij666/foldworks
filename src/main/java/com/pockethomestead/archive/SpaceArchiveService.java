@@ -61,6 +61,12 @@ public final class SpaceArchiveService {
     private static final String DIMENSION_DIR = "dimension/";
     private static final String CHEST_BE_ID = PocketHomestead.MODID + ":homestead_chest";
     private static final Pattern REGION_NAME = Pattern.compile("r\\.(-?\\d+)\\.(-?\\d+)\\.mca");
+    // Zip Bomb 防护：限制解压后总字节数、entry 数量、单 entry 大小
+    private static final long MAX_UNCOMPRESSED_BYTES = 1024L * 1024 * 1024; // 1GB
+    private static final int MAX_ZIP_ENTRIES = 10000;
+    private static final long MAX_SINGLE_ENTRY_BYTES = 512L * 1024 * 1024; // 512MB
+    // NbtAccounter 限制：解析 NBT 时最大堆使用，超过则抛异常而非 OOM
+    private static final long NBT_HEAP_LIMIT = 512L * 1024 * 1024; // 512MB
 
     private SpaceArchiveService() {
     }
@@ -122,20 +128,26 @@ public final class SpaceArchiveService {
         try {
             unzip(archive, work);
             Properties manifest = readManifest(work.resolve(MANIFEST));
-            if (!FORMAT_VERSION.equals(manifest.getProperty("format"))) {
-                throw new IOException("不支持的空间包版本: " + manifest.getProperty("format"));
+            String archiveVersion = manifest.getProperty("format", "0");
+            // 仅比较主版本号，兼容未来 1.1 等小版本升级
+            if (!majorVersion(archiveVersion).equals(majorVersion(FORMAT_VERSION))) {
+                throw new IOException("不支持的空间包版本: " + archiveVersion + "，当前支持主版本 " + majorVersion(FORMAT_VERSION));
             }
-            CompoundTag originalSpaceTag = NbtIo.readCompressed(work.resolve(SPACE_NBT), NbtAccounter.unlimitedHeap());
+            CompoundTag originalSpaceTag = NbtIo.readCompressed(work.resolve(SPACE_NBT), NbtAccounter.create(NBT_HEAP_LIMIT));
             SpaceData original = readSpace(originalSpaceTag);
             UUID newSpaceId = UUID.randomUUID();
             ResourceLocation newDimension = SpaceData.defaultDimensionId(newSpaceId);
+            // 夹紧尺寸到安全范围，防止恶意 archive 设置超大尺寸导致 PocketChunkGenerator 边界墙循环崩服
+            int clampedWidth = Math.max(16, Math.min(original.getWidth(), 512));
+            int clampedHeight = Math.max(16, Math.min(original.getHeight(), 512));
+            int clampedDepth = Math.max(16, Math.min(original.getDepth(), 512));
             SpaceData imported = new SpaceData(
                     newSpaceId,
                     targetOwner,
                     newDimension,
-                    original.getWidth(),
-                    original.getHeight(),
-                    original.getDepth(),
+                    clampedWidth,
+                    clampedHeight,
+                    clampedDepth,
                     original.getTerrainType(),
                     original.getBiome(),
                     original.getSourceDimension(),
@@ -179,7 +191,7 @@ public final class SpaceArchiveService {
     public static String sha256(Path path) throws IOException {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] buffer = new byte[8192];
+            byte[] buffer = new byte[64 * 1024];
             try (InputStream in = Files.newInputStream(path)) {
                 int read;
                 while ((read = in.read(buffer)) >= 0) {
@@ -213,11 +225,16 @@ public final class SpaceArchiveService {
         return tag;
     }
 
-    private static SpaceData readSpace(CompoundTag tag) {
+    private static SpaceData readSpace(CompoundTag tag) throws IOException {
         UUID spaceId = tag.getUUID("SpaceId");
         UUID ownerId = tag.getUUID("OwnerId");
         ResourceLocation dimension = ResourceLocation.parse(tag.getString("DimensionId"));
-        SpaceData.TerrainType terrain = SpaceData.TerrainType.valueOf(tag.getString("TerrainType"));
+        SpaceData.TerrainType terrain;
+        try {
+            terrain = SpaceData.TerrainType.valueOf(tag.getString("TerrainType"));
+        } catch (IllegalArgumentException e) {
+            throw new IOException("无法识别的地形类型: " + tag.getString("TerrainType"), e);
+        }
         ResourceLocation source = tag.contains("SourceDimension")
                 ? ResourceLocation.parse(tag.getString("SourceDimension"))
                 : ResourceLocation.parse("minecraft:overworld");
@@ -279,7 +296,7 @@ public final class SpaceArchiveService {
                                          ResourceLocation newDimension, UUID newSpaceId,
                                          Map<String, String> chestIdMap) throws IOException {
         if (!Files.isRegularFile(graphPath)) return 0;
-        CompoundTag graphTag = NbtIo.readCompressed(graphPath, NbtAccounter.unlimitedHeap());
+        CompoundTag graphTag = NbtIo.readCompressed(graphPath, NbtAccounter.create(NBT_HEAP_LIMIT));
         ListTag oldPages = graphTag.getList("Pages", Tag.TAG_COMPOUND);
         ListTag oldNodes = graphTag.getList("Nodes", Tag.TAG_COMPOUND);
         ListTag oldEdges = graphTag.getList("Edges", Tag.TAG_COMPOUND);
@@ -437,9 +454,14 @@ public final class SpaceArchiveService {
     }
 
     private static void unzip(Path archive, Path target) throws IOException {
+        long totalUncompressed = 0;
+        int entryCount = 0;
         try (ZipInputStream zip = new ZipInputStream(Files.newInputStream(archive))) {
             ZipEntry entry;
             while ((entry = zip.getNextEntry()) != null) {
+                if (++entryCount > MAX_ZIP_ENTRIES) {
+                    throw new IOException("空间包条目过多（>" + MAX_ZIP_ENTRIES + "），疑似 Zip Bomb");
+                }
                 Path out = target.resolve(entry.getName()).normalize();
                 if (!out.startsWith(target)) throw new IOException("空间包路径非法: " + entry.getName());
                 if (entry.isDirectory()) {
@@ -447,7 +469,21 @@ public final class SpaceArchiveService {
                 } else {
                     Files.createDirectories(out.getParent());
                     try (OutputStream output = Files.newOutputStream(out)) {
-                        zip.transferTo(output);
+                        byte[] buffer = new byte[64 * 1024];
+                        int read;
+                        long entryTotal = 0;
+                        while ((read = zip.read(buffer)) >= 0) {
+                            if (read == 0) continue;
+                            output.write(buffer, 0, read);
+                            entryTotal += read;
+                            totalUncompressed += read;
+                            if (entryTotal > MAX_SINGLE_ENTRY_BYTES) {
+                                throw new IOException("空间包单条目过大（>" + MAX_SINGLE_ENTRY_BYTES + "）: " + entry.getName());
+                            }
+                            if (totalUncompressed > MAX_UNCOMPRESSED_BYTES) {
+                                throw new IOException("空间包解压后总字节超过限制（>" + MAX_UNCOMPRESSED_BYTES + "），疑似 Zip Bomb");
+                            }
+                        }
                     }
                 }
                 zip.closeEntry();
@@ -489,13 +525,23 @@ public final class SpaceArchiveService {
     }
 
     private static String sanitizeFileName(String value) {
+        // 过滤路径危险字符与控制字符（U+0000-U+001F、U+007F-U+009F），保留中文等正常 Unicode
         String name = value == null || value.isBlank() ? "space" : value.trim();
-        return name.replaceAll("[\\\\/:*?\"<>|\\s]+", "_");
+        name = name.replaceAll("[\\p{Cntrl}\\\\/:*?\"<>|]+", "_");
+        if (name.isEmpty() || ".".equals(name) || "..".equals(name)) name = "space";
+        return name;
     }
 
     private static String uniqueImportedName(String base) {
         String clean = base == null || base.isBlank() ? "导入空间" : base.trim();
-        if (clean.length() > 20) clean = clean.substring(0, 20);
-        return clean + "-导入";
+        // 用代码点截断避免在 Unicode 代理对中间切断导致乱码
+        int[] cps = clean.codePoints().limit(20).toArray();
+        return new String(cps, 0, cps.length) + "-导入";
+    }
+
+    private static String majorVersion(String version) {
+        if (version == null) return "0";
+        int dot = version.indexOf('.');
+        return dot < 0 ? version : version.substring(0, dot);
     }
 }

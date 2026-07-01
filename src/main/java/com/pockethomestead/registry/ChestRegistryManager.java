@@ -3,6 +3,7 @@ package com.pockethomestead.registry;
 import com.pockethomestead.blockentity.BaseChestBlockEntity;
 import com.pockethomestead.blockentity.HomesteadChestAccess;
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 
@@ -55,7 +56,10 @@ public class ChestRegistryManager {
         ChestLocation location = new ChestLocation(dimKey, pos);
         List<ChestLocation> locations = playerChests.computeIfAbsent(ownerUUID, k -> new ConcurrentHashMap<>())
                 .computeIfAbsent(chestId, k -> Collections.synchronizedList(new ArrayList<>()));
-        if (!locations.contains(location)) locations.add(location);
+        // 复合操作 contains+add 必须在同步块内原子完成，否则并发线程可能重复添加
+        synchronized (locations) {
+            if (!locations.contains(location)) locations.add(location);
+        }
     }
 
     public void unregisterChest(UUID ownerUUID, String chestId, Level level, BlockPos pos) {
@@ -65,8 +69,12 @@ public class ChestRegistryManager {
         List<ChestLocation> locations = chests.get(chestId);
         if (locations == null) return;
         String dimKey = level.dimension().location().toString();
-        locations.removeIf(loc -> loc.dimensionKey.equals(dimKey) && loc.pos.equals(pos));
-        if (locations.isEmpty()) chests.remove(chestId);
+        // removeIf+isEmpty+remove 序列非原子：另一线程可能在 removeIf 后、isEmpty 前添加新位置，
+        // 导致 isEmpty 返回 false 而不清理空列表。用 synchronized 保护整个序列。
+        synchronized (locations) {
+            locations.removeIf(loc -> loc.dimensionKey.equals(dimKey) && loc.pos.equals(pos));
+            if (locations.isEmpty()) chests.remove(chestId);
+        }
         if (chests.isEmpty()) playerChests.remove(ownerUUID);
     }
 
@@ -103,10 +111,12 @@ public class ChestRegistryManager {
 
     public BaseChestBlockEntity findChest(UUID ownerUUID, String chestId, ServerLevel currentLevel) {
         if (ownerUUID == null || chestId == null || currentLevel == null) return null;
+        MinecraftServer server = currentLevel.getServer();
+        if (server == null) return null;
         for (ChestLocation loc : getChestLocations(ownerUUID, chestId)) {
             net.minecraft.resources.ResourceLocation dimLoc = net.minecraft.resources.ResourceLocation.tryParse(loc.dimensionKey);
             if (dimLoc == null) continue;
-            ServerLevel targetLevel = currentLevel.getServer().getLevel(net.minecraft.resources.ResourceKey.create(
+            ServerLevel targetLevel = server.getLevel(net.minecraft.resources.ResourceKey.create(
                     net.minecraft.core.registries.Registries.DIMENSION,
                     dimLoc
             ));

@@ -49,8 +49,11 @@ public final class AccessControl {
     public static boolean canChest(UUID playerId, BaseChestBlockEntity chest, SpacePermission.AccessLevel required) {
         if (playerId == null || chest == null) return false;
         if (playerId.equals(chest.getOwnerUUID())) return true;
-        SpaceData space = containingSpace(chest.getLevel());
-        return space != null && space.can(playerId, required);
+        // 使用 BE 缓存的所属空间引用，避免热路径每次查 SpaceManager.dimensionIndex
+        SpaceData space = chest.getContainingSpace();
+        // 非口袋维度（主世界等）无空间限制：任何玩家都可操作箱子，遵循原版 Minecraft 行为
+        if (space == null) return true;
+        return space.can(playerId, required);
     }
 
     public static BaseChestBlockEntity loadedChest(ServerPlayer player, String dimensionKey, BlockPos pos) {
@@ -71,7 +74,7 @@ public final class AccessControl {
 
     public static void deny(ServerPlayer player) {
         if (player != null) {
-            player.displayClientMessage(Component.literal("没有权限执行此操作"), true);
+            player.displayClientMessage(Component.translatable("pockethomestead.permission.denied"), true);
         }
     }
 }

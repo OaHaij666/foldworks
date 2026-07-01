@@ -42,12 +42,29 @@ public record TransferGraphSyncPacket(
     public record EdgeItemRateData(String itemId, boolean rateLimitEnabled, int rateLimitSeconds, int rateLimitItems,
                                    String health, int actualRatePerMinute, boolean configured) {}
     public record EdgeData(String id, String pageId, String fromNodeId, String toNodeId, String fromPortKey, String toPortKey,
-                           boolean enabled, boolean rateLimitEnabled, int rateLimitSeconds, int rateLimitItems,
+                           boolean enabled,
                            String health, int actualRatePerMinute, List<EdgeItemRateData> itemRates) {}
     public record ChestData(String chestId, String dimensionKey, long pos,
                             int networkBandwidth, int stressBandwidthUsed, int remainingTransferBandwidth,
                             String graphKind, String graphId, String status, long lastSimulatedGameTime,
                             String statusMessage, boolean offlineSnapshotEnabled) {}
+
+    private static final int MAX_GRAPH_OPTIONS = 256;
+    private static final int MAX_TEAMS = 64;
+    private static final int MAX_PAGES = 64;
+    private static final int MAX_NODES = 512;
+    private static final int MAX_EDGES = 1024;
+    private static final int MAX_CHESTS = 512;
+    private static final int MAX_STRINGS = 1024;
+    private static final int MAX_TEAM_MEMBERS = 256;
+    private static final int MAX_REPLENISH_RULES = 256;
+    private static final int MAX_NODE_FLOW_STATS = 256;
+    private static final int MAX_EDGE_ITEM_RATES = 256;
+
+    private static int checkCount(int count, int max) {
+        if (count < 0 || count > max) throw new io.netty.handler.codec.DecoderException("List count out of range: " + count + " > " + max);
+        return count;
+    }
 
     public static final StreamCodec<ByteBuf, TransferGraphSyncPacket> STREAM_CODEC = new StreamCodec<>() {
         @Override
@@ -58,17 +75,17 @@ public record TransferGraphSyncPacket(
             List<TeamData> teams = decodeTeams(buf);
 
             List<PageData> pages = new ArrayList<>();
-            int pageCount = ByteBufCodecs.VAR_INT.decode(buf);
+            int pageCount = checkCount(ByteBufCodecs.VAR_INT.decode(buf), MAX_PAGES);
             for (int i = 0; i < pageCount; i++) {
                 pages.add(new PageData(ByteBufCodecs.STRING_UTF8.decode(buf), ByteBufCodecs.STRING_UTF8.decode(buf), buf.readBoolean(), ByteBufCodecs.VAR_INT.decode(buf)));
             }
 
             List<NodeData> nodes = new ArrayList<>();
-            int nodeCount = ByteBufCodecs.VAR_INT.decode(buf);
+            int nodeCount = checkCount(ByteBufCodecs.VAR_INT.decode(buf), MAX_NODES);
             for (int i = 0; i < nodeCount; i++) nodes.add(decodeNode(buf));
 
             List<EdgeData> edges = new ArrayList<>();
-            int edgeCount = ByteBufCodecs.VAR_INT.decode(buf);
+            int edgeCount = checkCount(ByteBufCodecs.VAR_INT.decode(buf), MAX_EDGES);
             for (int i = 0; i < edgeCount; i++) edges.add(decodeEdge(buf));
 
             return new TransferGraphSyncPacket(graphKind, graphId, graphOptions, teams, pages, nodes, edges, decodeChests(buf));
@@ -146,9 +163,6 @@ public record TransferGraphSyncPacket(
                 ByteBufCodecs.STRING_UTF8.decode(buf),
                 ByteBufCodecs.STRING_UTF8.decode(buf),
                 buf.readBoolean(),
-                buf.readBoolean(),
-                ByteBufCodecs.VAR_INT.decode(buf),
-                ByteBufCodecs.VAR_INT.decode(buf),
                 ByteBufCodecs.STRING_UTF8.decode(buf),
                 ByteBufCodecs.VAR_INT.decode(buf),
                 decodeEdgeItemRates(buf)
@@ -163,17 +177,14 @@ public record TransferGraphSyncPacket(
         ByteBufCodecs.STRING_UTF8.encode(buf, edge.fromPortKey);
         ByteBufCodecs.STRING_UTF8.encode(buf, edge.toPortKey);
         buf.writeBoolean(edge.enabled);
-        buf.writeBoolean(edge.rateLimitEnabled);
-        ByteBufCodecs.VAR_INT.encode(buf, edge.rateLimitSeconds);
-        ByteBufCodecs.VAR_INT.encode(buf, edge.rateLimitItems);
         ByteBufCodecs.STRING_UTF8.encode(buf, edge.health);
         ByteBufCodecs.VAR_INT.encode(buf, edge.actualRatePerMinute);
         encodeEdgeItemRates(buf, edge.itemRates);
     }
 
     private static List<String> decodeStrings(ByteBuf buf) {
-        List<String> strings = new ArrayList<>();
-        int count = ByteBufCodecs.VAR_INT.decode(buf);
+        int count = checkCount(ByteBufCodecs.VAR_INT.decode(buf), MAX_STRINGS);
+        List<String> strings = new ArrayList<>(count);
         for (int i = 0; i < count; i++) strings.add(ByteBufCodecs.STRING_UTF8.decode(buf));
         return strings;
     }
@@ -184,8 +195,8 @@ public record TransferGraphSyncPacket(
     }
 
     private static List<GraphOptionData> decodeGraphOptions(ByteBuf buf) {
-        List<GraphOptionData> rows = new ArrayList<>();
-        int count = ByteBufCodecs.VAR_INT.decode(buf);
+        int count = checkCount(ByteBufCodecs.VAR_INT.decode(buf), MAX_GRAPH_OPTIONS);
+        List<GraphOptionData> rows = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             rows.add(new GraphOptionData(
                     ByteBufCodecs.STRING_UTF8.decode(buf),
@@ -208,8 +219,8 @@ public record TransferGraphSyncPacket(
     }
 
     private static List<TeamData> decodeTeams(ByteBuf buf) {
-        List<TeamData> rows = new ArrayList<>();
-        int count = ByteBufCodecs.VAR_INT.decode(buf);
+        int count = checkCount(ByteBufCodecs.VAR_INT.decode(buf), MAX_TEAMS);
+        List<TeamData> rows = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             rows.add(new TeamData(
                     ByteBufCodecs.STRING_UTF8.decode(buf),
@@ -234,8 +245,8 @@ public record TransferGraphSyncPacket(
     }
 
     private static List<TeamMemberData> decodeTeamMembers(ByteBuf buf) {
-        List<TeamMemberData> rows = new ArrayList<>();
-        int count = ByteBufCodecs.VAR_INT.decode(buf);
+        int count = checkCount(ByteBufCodecs.VAR_INT.decode(buf), MAX_TEAM_MEMBERS);
+        List<TeamMemberData> rows = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             rows.add(new TeamMemberData(
                     ByteBufCodecs.STRING_UTF8.decode(buf),
@@ -255,8 +266,8 @@ public record TransferGraphSyncPacket(
     }
 
     private static List<ReplenishRuleData> decodeReplenishRules(ByteBuf buf) {
-        List<ReplenishRuleData> rows = new ArrayList<>();
-        int count = ByteBufCodecs.VAR_INT.decode(buf);
+        int count = checkCount(ByteBufCodecs.VAR_INT.decode(buf), MAX_REPLENISH_RULES);
+        List<ReplenishRuleData> rows = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             rows.add(new ReplenishRuleData(ByteBufCodecs.STRING_UTF8.decode(buf), ByteBufCodecs.VAR_INT.decode(buf)));
         }
@@ -272,8 +283,8 @@ public record TransferGraphSyncPacket(
     }
 
     private static List<NodeFlowData> decodeNodeFlowStats(ByteBuf buf) {
-        List<NodeFlowData> rows = new ArrayList<>();
-        int count = ByteBufCodecs.VAR_INT.decode(buf);
+        int count = checkCount(ByteBufCodecs.VAR_INT.decode(buf), MAX_NODE_FLOW_STATS);
+        List<NodeFlowData> rows = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             rows.add(new NodeFlowData(
                     ByteBufCodecs.STRING_UTF8.decode(buf),
@@ -298,8 +309,8 @@ public record TransferGraphSyncPacket(
     }
 
     private static List<EdgeItemRateData> decodeEdgeItemRates(ByteBuf buf) {
-        List<EdgeItemRateData> rows = new ArrayList<>();
-        int count = ByteBufCodecs.VAR_INT.decode(buf);
+        int count = checkCount(ByteBufCodecs.VAR_INT.decode(buf), MAX_EDGE_ITEM_RATES);
+        List<EdgeItemRateData> rows = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             rows.add(new EdgeItemRateData(
                     ByteBufCodecs.STRING_UTF8.decode(buf),
@@ -328,8 +339,8 @@ public record TransferGraphSyncPacket(
     }
 
     private static List<ChestData> decodeChests(ByteBuf buf) {
-        List<ChestData> chests = new ArrayList<>();
-        int count = ByteBufCodecs.VAR_INT.decode(buf);
+        int count = checkCount(ByteBufCodecs.VAR_INT.decode(buf), MAX_CHESTS);
+        List<ChestData> chests = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             chests.add(new ChestData(
                     ByteBufCodecs.STRING_UTF8.decode(buf),
@@ -392,7 +403,7 @@ public record TransferGraphSyncPacket(
                         row.health(), row.actualRatePerMinute(), row.configured()));
             }
             edges.add(new EdgeData(edge.getId(), edge.getPageId(), edge.getFromNodeId(), edge.getToNodeId(), edge.getFromPortKey(), edge.getToPortKey(),
-                    edge.isEnabled(), edge.isRateLimitEnabled(), edge.getRateLimitSeconds(), edge.getRateLimitItems(), edge.getHealth(), edge.getActualRatePerMinute(), rows));
+                    edge.isEnabled(), edge.getHealth(), edge.getActualRatePerMinute(), rows));
         }
         return new TransferGraphSyncPacket(key.kind().name(), key.id() == null ? "" : key.id().toString(), graphOptions, teams, pages, nodes, edges, chests);
     }

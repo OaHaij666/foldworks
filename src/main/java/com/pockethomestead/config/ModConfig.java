@@ -27,6 +27,31 @@ public class ModConfig {
             .comment("默认空间尺寸")
             .define("defaultSpaceSize", "64x64x24");
 
+    // 命令 /pockethomestead create 使用的默认参数（UI 路径由玩家在界面选择，不受这些配置影响）
+    public static final ModConfigSpec.IntValue DEFAULT_SPACE_HEIGHT = BUILDER
+            .comment("命令创建空间的默认高度")
+            .defineInRange("defaultSpaceHeight", 64, 8, 1024);
+
+    public static final ModConfigSpec.ConfigValue<String> DEFAULT_SPACE_BIOME = BUILDER
+            .comment("命令创建空间的默认群系（设为 random 则按继承维度随机）")
+            .define("defaultSpaceBiome", "minecraft:plains");
+
+    public static final ModConfigSpec.ConfigValue<String> DEFAULT_SPACE_SOURCE_DIMENSION = BUILDER
+            .comment("命令创建空间默认继承的维度")
+            .define("defaultSpaceSourceDimension", "minecraft:overworld");
+
+    public static final ModConfigSpec.BooleanValue DEFAULT_SPACE_MOB_SPAWNING = BUILDER
+            .comment("命令创建空间是否默认允许刷怪")
+            .define("defaultSpaceMobSpawning", false);
+
+    public static final ModConfigSpec.BooleanValue DEFAULT_SPACE_STRUCTURES = BUILDER
+            .comment("命令创建空间是否默认生成建筑结构")
+            .define("defaultSpaceStructures", false);
+
+    public static final ModConfigSpec.DoubleValue DEFAULT_SPACE_AMPLITUDE = BUILDER
+            .comment("命令创建空间默认的地势起伏（0=平坦，1=陡峭）")
+            .defineInRange("defaultSpaceAmplitude", 0.4, 0.0, 1.0);
+
     // 空间单边最大尺寸（宽/深），同时用于创建界面输入校验与服务端夹紧
     public static final ModConfigSpec.IntValue MAX_SPACE_SIZE = BUILDER
             .comment("口袋空间单边最大尺寸（宽/深）。注意：尺寸越大首次生成与占用越高")
@@ -36,6 +61,11 @@ public class ModConfig {
     public static final ModConfigSpec.IntValue MIN_SPACE_SIZE = BUILDER
             .comment("口袋空间单边最小尺寸（宽/深）")
             .defineInRange("minSpaceSize", 32, 8, 4096);
+
+    // 单玩家最大空间数量（0 = 不限制）
+    public static final ModConfigSpec.IntValue MAX_SPACES_PER_PLAYER = BUILDER
+            .comment("每个玩家最多可创建的口袋空间数量（0 = 不限制）")
+            .defineInRange("maxSpacesPerPlayer", 16, 0, 1024);
 
     // ── 箱子传输配置 ──────────────────────────────────────────────────────────
 
@@ -139,9 +169,13 @@ public class ModConfig {
             .comment("每秒最多推进的离线箱子快照数量")
             .defineInRange("offlineSimulationSnapshotsPerSecond", 64, 1, 4096);
 
+    public static final ModConfigSpec.BooleanValue SHUTDOWN_DIAGNOSTICS = BUILDER
+            .comment("临时诊断：关服时周期性输出 chunk 卸载队列、服务器线程栈和箱子卸载生命周期日志")
+            .define("shutdownDiagnostics", true);
+
     public static final ModConfigSpec.IntValue SPACE_ARCHIVE_MAX_BYTES = BUILDER
             .comment("实验性空间迁移：单个 .phspace 空间包允许的最大字节数")
-            .defineInRange("spaceArchiveMaxBytes", 256 * 1024 * 1024, 1024 * 1024, Integer.MAX_VALUE);
+            .defineInRange("spaceArchiveMaxBytes", 256 * 1024 * 1024, 1024 * 1024, 1024 * 1024 * 1024);
 
     public static final ModConfigSpec.IntValue SPACE_ARCHIVE_CHUNK_BYTES = BUILDER
             .comment("实验性空间迁移：网络分块大小（字节）")

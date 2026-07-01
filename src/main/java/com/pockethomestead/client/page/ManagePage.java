@@ -45,6 +45,7 @@ public class ManagePage extends Page {
     private SpaceInfo target;
     private EditBox permNameInput;
     private EditBox ownerFilterInput;
+    private long lastSeenSpaceVersion = -1;
 
     private static final int ROW_H = 60;
     private static final int ROW_GAP = 6;
@@ -83,6 +84,7 @@ public class ManagePage extends Page {
                 && PocketDimensionManager.getInstance().isPocketDimension(mc.player.level().dimension());
         spaces.clear();
         spaces.addAll(ClientSpaceCache.get());
+        lastSeenSpaceVersion = ClientSpaceCache.version();
         modal = Modal.NONE;
         target = null;
         PacketDistributor.sendToServer(new RequestSpaceListPayload());
@@ -91,10 +93,11 @@ public class ManagePage extends Page {
 
     @Override
     public void tick() {
-        List<SpaceInfo> fresh = ClientSpaceCache.get();
-        if (fresh.size() != spaces.size() || !spaces.containsAll(fresh)) {
+        long v = ClientSpaceCache.version();
+        if (v != lastSeenSpaceVersion) {
+            lastSeenSpaceVersion = v;
             spaces.clear();
-            spaces.addAll(fresh);
+            spaces.addAll(ClientSpaceCache.get());
         }
         // 模态打开时刷新 target（反映服务端权限变更）
         if (modal == Modal.PERMISSION && target != null) {

@@ -1,6 +1,7 @@
 package com.pockethomestead.client;
 
 import com.pockethomestead.archive.SpaceArchiveService;
+import com.pockethomestead.config.ModConfig;
 import com.pockethomestead.network.SpaceArchiveClientChunkPacket;
 import com.pockethomestead.network.SpaceArchiveRequestPacket;
 import com.pockethomestead.network.SpaceArchiveServerPacket;
@@ -19,12 +20,18 @@ import java.util.Locale;
 import java.util.UUID;
 
 public final class ClientSpaceArchiveTransfer {
-    private static final int UPLOAD_CHUNK_BYTES = 4096;
     private static String status = "空间迁移是实验性功能，不稳定，请谨慎使用";
     private static Upload upload;
     private static Download download;
 
     private ClientSpaceArchiveTransfer() {
+    }
+
+    /** 每客户端 tick 上传分块大小：取配置分块大小与每秒限速/20 的较小值，保证不超限速。 */
+    private static int uploadChunkBytes() {
+        int chunk = ModConfig.SPACE_ARCHIVE_CHUNK_BYTES.get();
+        int perTick = Math.max(4096, ModConfig.SPACE_ARCHIVE_BYTES_PER_SECOND_PER_PLAYER.get() / 20);
+        return Math.min(chunk, perTick);
     }
 
     public static Path archiveDir() {
@@ -75,7 +82,7 @@ public final class ClientSpaceArchiveTransfer {
         if (upload == null || !upload.ready) return;
         try {
             if (upload.input == null) upload.input = Files.newInputStream(upload.path);
-            byte[] data = upload.input.readNBytes(UPLOAD_CHUNK_BYTES);
+            byte[] data = upload.input.readNBytes(upload.chunkBytes);
             if (data.length <= 0) return;
             PacketDistributor.sendToServer(new SpaceArchiveClientChunkPacket(upload.sessionId, upload.index, upload.totalChunks, data));
             upload.index++;
@@ -210,6 +217,7 @@ public final class ClientSpaceArchiveTransfer {
         private final Path path;
         private final String fileName;
         private final int totalChunks;
+        private final int chunkBytes;
         private InputStream input;
         private int index;
         private boolean ready;
@@ -218,7 +226,8 @@ public final class ClientSpaceArchiveTransfer {
             this.sessionId = sessionId;
             this.path = path;
             this.fileName = fileName;
-            this.totalChunks = Math.max(1, (int) Math.ceil(totalBytes / (double) UPLOAD_CHUNK_BYTES));
+            this.chunkBytes = uploadChunkBytes();
+            this.totalChunks = Math.max(1, (int) Math.ceil(totalBytes / (double) chunkBytes));
         }
 
         private void close() {

@@ -114,7 +114,9 @@ public record RequestTransferGraphPacket(String graphKind, String graphId) imple
     private static List<TransferGraphSyncPacket.ChestData> chestsFor(ServerPlayer player, GraphKey key) {
         Map<String, TransferGraphSyncPacket.ChestData> byLocation = new LinkedHashMap<>();
         long gameTime = player.server.overworld().getGameTime();
+        int chestLimit = 512;
         for (ChestRegistryManager.RegisteredChest registered : ChestRegistryManager.getInstance().getAllRegisteredChests()) {
+            if (byLocation.size() >= chestLimit) break;
             BaseChestBlockEntity be = loadedChest(player, registered.location().dimensionKey, registered.location().pos);
             if (be == null || !be.hasNetworkUpgrade() || !TransferGraphAccess.chestMatchesGraph(be, key)) continue;
             GraphKey chestKey = be.getGraphKey();
@@ -137,6 +139,7 @@ public record RequestTransferGraphPacket(String graphKind, String graphId) imple
 
         OfflineChestSnapshotStorage snapshotStorage = OfflineChestSnapshotStorage.get(player.server);
         for (OfflineChestSnapshotStorage.Snapshot snapshot : snapshotStorage.snapshots()) {
+            if (byLocation.size() >= chestLimit) break;
             if (!snapshot.hasNetworkUpgrade() || !snapshot.matchesGraph(key)) continue;
             String snapshotStatus = snapshot.loaded() ? "LOADED"
                     : snapshot.shouldSimulate(player.server) ? "OFFLINE_SIMULATED" : "OFFLINE_DISABLED";

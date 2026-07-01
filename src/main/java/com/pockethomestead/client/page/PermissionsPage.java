@@ -47,6 +47,7 @@ public class PermissionsPage extends Page {
     private EditBox privateMemberInput;
     private SpacePermission.AccessLevel teamAddLevel = SpacePermission.AccessLevel.WRITE;
     private SpacePermission.AccessLevel privateAddLevel = SpacePermission.AccessLevel.USE;
+    private long lastSeenSpaceVersion = -1;
 
     @Override
     public String id() {
@@ -68,6 +69,7 @@ public class PermissionsPage extends Page {
         ensureInputs();
         spaces.clear();
         spaces.addAll(ClientSpaceCache.get());
+        lastSeenSpaceVersion = ClientSpaceCache.version();
         requestFreshData();
         ensureTeamSelection();
     }
@@ -81,10 +83,11 @@ public class PermissionsPage extends Page {
 
     @Override
     public void tick() {
-        List<SpaceInfo> fresh = ClientSpaceCache.get();
-        if (fresh.size() != spaces.size() || !spaces.containsAll(fresh)) {
+        long v = ClientSpaceCache.version();
+        if (v != lastSeenSpaceVersion) {
+            lastSeenSpaceVersion = v;
             spaces.clear();
-            spaces.addAll(fresh);
+            spaces.addAll(ClientSpaceCache.get());
         }
         ensureTeamSelection();
         if (++syncTicker >= 40) {

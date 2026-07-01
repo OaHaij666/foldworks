@@ -24,8 +24,9 @@ public class HomesteadScreen extends Screen {
     private static final int NAV_ITEM_GAP = 4;
     private static final int NAV_TOP_PAD = 6;
 
-    // 跨开启持久化的状态
+    // 跨开启持久化的状态（敏感页面不持久化，避免信息短暂泄露）
     private static String lastPageId = "manage";
+    private static final String SAFE_DEFAULT_PAGE = "manage";
 
     private final Router router = new Router();
 
@@ -47,7 +48,13 @@ public class HomesteadScreen extends Screen {
         router.register(new PermissionsPage());
         router.register(new ProductionStatsPage());
         router.register(new MigrationPage());
-        router.selectInitial(initialPageId != null ? initialPageId : lastPageId);
+        String initial = initialPageId != null ? initialPageId : safeLastPageId();
+        router.selectInitial(initial);
+    }
+
+    /** 权限页含其他玩家权限信息，不跨会话持久化，避免下次打开短暂显示旧数据。 */
+    private static String safeLastPageId() {
+        return "permissions".equals(lastPageId) ? SAFE_DEFAULT_PAGE : lastPageId;
     }
 
     @Override
@@ -263,7 +270,6 @@ public class HomesteadScreen extends Screen {
         if (cur != null && cur.mouseClicked(mx, my, button)) return true;
         return super.mouseClicked(mx, my, button);
     }
-
     @Override
     public boolean mouseScrolled(double mx, double my, double sx, double sy) {
         Page cur = router.current();

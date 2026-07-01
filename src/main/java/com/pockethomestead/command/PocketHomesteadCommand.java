@@ -4,6 +4,7 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
+import com.pockethomestead.config.ModConfig;
 import com.pockethomestead.dimension.PocketDimensionManager;
 import com.pockethomestead.space.SpaceData;
 import com.pockethomestead.space.SpaceManager;
@@ -51,12 +52,23 @@ public final class PocketHomesteadCommand {
         }
 
         MinecraftServer server = context.getSource().getServer();
-        SpaceData space = SpaceManager.getInstance().createSpace(server, player.getUUID(), size, 64, size,
-                terrain, "minecraft:plains", net.minecraft.resources.ResourceLocation.parse("minecraft:overworld"),
-                false, false, false, 0.4f);
-        space.setName(name);
-        PocketDimensionManager.getInstance().queueTeleportToSpace(player, space);
-        send(context, Component.translatable("commands.pockethomestead.create.success", name, shortId(space)), ChatFormatting.GREEN);
+        try {
+            int height = ModConfig.DEFAULT_SPACE_HEIGHT.get();
+            String biome = ModConfig.DEFAULT_SPACE_BIOME.get();
+            net.minecraft.resources.ResourceLocation sourceDim =
+                    net.minecraft.resources.ResourceLocation.parse(ModConfig.DEFAULT_SPACE_SOURCE_DIMENSION.get());
+            boolean mobSpawning = ModConfig.DEFAULT_SPACE_MOB_SPAWNING.get();
+            boolean structures = ModConfig.DEFAULT_SPACE_STRUCTURES.get();
+            float amplitude = (float) ModConfig.DEFAULT_SPACE_AMPLITUDE.get().doubleValue();
+            SpaceData space = SpaceManager.getInstance().createSpace(server, player.getUUID(), size, height, size,
+                    terrain, biome, sourceDim,
+                    mobSpawning, structures, false, amplitude);
+            space.setName(name);
+            PocketDimensionManager.getInstance().queueTeleportToSpace(player, space);
+            send(context, Component.translatable("commands.pockethomestead.create.success", name, shortId(space)), ChatFormatting.GREEN);
+        } catch (com.pockethomestead.space.SpaceLimitExceededException e) {
+            send(context, Component.translatable("commands.pockethomestead.create.limit_exceeded", e.max()), ChatFormatting.RED);
+        }
         return 1;
     }
 

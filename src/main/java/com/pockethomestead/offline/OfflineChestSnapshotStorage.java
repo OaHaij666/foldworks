@@ -17,9 +17,12 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.level.saveddata.SavedData;
@@ -35,9 +38,12 @@ import java.util.UUID;
 public class OfflineChestSnapshotStorage extends SavedData {
     public static final String DATA_NAME = "pockethomestead_offline_chest_snapshots";
     private static final int BUCKET_TICKS = 20 * 10;
+    private static final int PRUNE_INTERVAL_TICKS = 20 * 10;
 
     private final Map<String, Snapshot> snapshots = new LinkedHashMap<>();
     private final Map<String, Map<String, LinkedHashMap<Long, RateBucket>>> externalRates = new LinkedHashMap<>();
+    private final List<Snapshot> tickSortBuffer = new ArrayList<>();
+    private long lastPruneGameTime = Long.MIN_VALUE;
 
     public static OfflineChestSnapshotStorage get(MinecraftServer server) {
         return server.overworld().getDataStorage().computeIfAbsent(factory(), DATA_NAME);
@@ -86,6 +92,13 @@ public class OfflineChestSnapshotStorage extends SavedData {
         setDirty();
     }
 
+    /**
+     * 将离线快照合并到刚加载的箱子。
+     *
+     * 调用点约束：仅可在 {@link BaseChestBlockEntity#onLoad()} 中调用——此时箱子刚从磁盘加载、
+     * 尚未被玩家修改，合并离线进度安全。若在加载后被调用（如玩家正在操作箱子），会覆盖玩家修改。
+     * 已通过 {@code snapshot.lastSimulatedGameTime > snapshot.lastLoadedGameTime} 校验确保只应用离线期间产生的变化。
+     */
     public void applySnapshotToLoadedChest(BaseChestBlockEntity chest, long gameTime) {
         if (!validChest(chest)) return;
         Snapshot snapshot = findSnapshot(chest.getLevel().dimension().location().toString(), chest.getBlockPos(), chest.getChestId());
@@ -120,7 +133,11 @@ public class OfflineChestSnapshotStorage extends SavedData {
                 .computeIfAbsent(start, RateBucket::new);
         if (input) bucket.input += amount;
         else bucket.output += amount;
-        pruneRates(gameTime);
+        // 节流：仅当距上次 prune 超过 PRUNE_INTERVAL_TICKS（10 秒）才执行，避免每次外部变更都全量遍历
+        if (gameTime - lastPruneGameTime >= PRUNE_INTERVAL_TICKS) {
+            pruneRates(gameTime);
+            lastPruneGameTime = gameTime;
+        }
         setDirty();
     }
 
@@ -129,15 +146,18 @@ public class OfflineChestSnapshotStorage extends SavedData {
         long gameTime = server.overworld().getGameTime();
         int budget = Math.max(1, ModConfig.OFFLINE_SIMULATION_SNAPSHOTS_PER_SECOND.get());
         int processed = 0;
-        List<Snapshot> ordered = new ArrayList<>(snapshots.values());
-        ordered.sort(Comparator.comparingLong(snapshot -> snapshot.lastSimulatedGameTime));
-        for (Snapshot snapshot : ordered) {
+        // 复用排序缓冲区避免每秒 new ArrayList 的 GC 压力；sort 本身仍 O(n log n) 但数百快照下开销可接受
+        tickSortBuffer.clear();
+        tickSortBuffer.addAll(snapshots.values());
+        tickSortBuffer.sort(Comparator.comparingLong(snapshot -> snapshot.lastSimulatedGameTime));
+        for (Snapshot snapshot : tickSortBuffer) {
             if (processed >= budget) break;
             if (snapshot.loaded) continue;
             processed++;
             tickSnapshot(server, snapshot, gameTime);
         }
         pruneRates(gameTime);
+        lastPruneGameTime = gameTime;
     }
 
     private void tickSnapshot(MinecraftServer server, Snapshot snapshot, long gameTime) {
@@ -185,6 +205,9 @@ public class OfflineChestSnapshotStorage extends SavedData {
                 first = Math.min(first, bucket.start);
                 last = Math.max(last, bucket.start + BUCKET_TICKS);
             }
+            // 时间窗上限 gameTime：最新桶 start+BUCKET_TICKS 可能超过当前 gameTime，
+            // 导致分母偏大、估算速率偏低。用 gameTime 作为上界避免高估时间窗。
+            last = Math.min(gameTime, last);
             if (first == Long.MAX_VALUE || last - first < minSampleTicks) continue;
             double net = (input - output) * (double) elapsedTicks / Math.max(1, last - first);
             double withResidual = snapshot.residuals.getOrDefault(resource, 0.0) + net;
@@ -252,7 +275,7 @@ public class OfflineChestSnapshotStorage extends SavedData {
         snapshot.configuredStressOutputSides = chest.configuredStressOutputSides();
         snapshot.stressOutputSpeedRpm = chest.getStressOutputSpeedRpm();
         snapshot.stressOutputReversed = chest.isStressOutputReversed();
-        HomesteadStressEndpoint stressEndpoint = stressEndpoint(chest);
+        HomesteadStressEndpoint stressEndpoint = loaded ? stressEndpoint(chest) : null;
         if (stressEndpoint != null && stressEndpoint.canSendGraphStress()) {
             snapshot.sampledStressSpeed = stressEndpoint.graphStressSpeed();
             snapshot.sampledStressCapacity = Math.max(0, stressEndpoint.graphStressCapacity());
@@ -272,8 +295,11 @@ public class OfflineChestSnapshotStorage extends SavedData {
     }
 
     private static HomesteadStressEndpoint stressEndpoint(BaseChestBlockEntity chest) {
-        if (chest == null || chest.getLevel() == null) return null;
-        if (chest.getLevel().getBlockEntity(chest.getBlockPos()) instanceof HomesteadStressEndpoint endpoint
+        if (chest == null || chest.isRemoved() || !(chest.getLevel() instanceof ServerLevel serverLevel)) return null;
+        LevelChunk chunk = serverLevel.getChunkSource().getChunkNow(chest.getBlockPos().getX() >> 4, chest.getBlockPos().getZ() >> 4);
+        if (chunk == null) return null;
+        BlockEntity blockEntity = chunk.getBlockEntity(chest.getBlockPos(), LevelChunk.EntityCreationType.CHECK);
+        if (blockEntity instanceof HomesteadStressEndpoint endpoint
                 && endpoint.homesteadChest() == chest) {
             return endpoint;
         }

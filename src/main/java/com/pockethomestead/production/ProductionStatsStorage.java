@@ -165,12 +165,14 @@ public class ProductionStatsStorage extends SavedData {
     }
 
     public static final class PlayerStats {
+        private static final int FAVORITE_RESOURCES_MAX = 64;
         private final Map<String, Group> groups = new LinkedHashMap<>();
         private final Map<String, String> chestGroups = new LinkedHashMap<>();
         private final Map<String, Map<String, Integer>> chestInventories = new LinkedHashMap<>();
         private final Map<String, Map<String, Integer>> groupInventories = new LinkedHashMap<>();
         private final Map<String, Map<String, LinkedHashMap<Long, Bucket>>> buckets = new LinkedHashMap<>();
         private final Set<String> favoriteResources = new LinkedHashSet<>();
+        private long lastPruneGameTime = Long.MIN_VALUE;
 
         private PlayerStats() {
             ensureDefaultGroup();
@@ -276,7 +278,11 @@ public class ProductionStatsStorage extends SavedData {
 
             adjustItem(groupInventories.computeIfAbsent(groupId, id -> new LinkedHashMap<>()), itemId, input ? amount : -amount);
             adjustItem(chestInventories.computeIfAbsent(chestKey, id -> new LinkedHashMap<>()), itemId, input ? amount : -amount);
-            prune(gameTime);
+            // 节流：仅当距上次 prune 超过一个桶时长（10 秒）才执行，避免每次箱子产出都全量遍历
+            if (gameTime - lastPruneGameTime >= BUCKET_TICKS) {
+                prune(gameTime);
+                lastPruneGameTime = gameTime;
+            }
             return true;
         }
 
@@ -299,7 +305,17 @@ public class ProductionStatsStorage extends SavedData {
         private boolean toggleFavoriteResource(String itemId) {
             String normalized = itemId == null ? "" : itemId.trim();
             if (normalized.isEmpty()) return false;
-            if (!favoriteResources.remove(normalized)) favoriteResources.add(normalized);
+            if (!favoriteResources.remove(normalized)) {
+                favoriteResources.add(normalized);
+                // 超过上限时移除最旧（LinkedHashSet 迭代顺序即插入顺序）
+                while (favoriteResources.size() > FAVORITE_RESOURCES_MAX) {
+                    java.util.Iterator<String> it = favoriteResources.iterator();
+                    if (it.hasNext()) {
+                        it.next();
+                        it.remove();
+                    } else break;
+                }
+            }
             return true;
         }
 
@@ -339,9 +355,38 @@ public class ProductionStatsStorage extends SavedData {
                     adjustGroupInventory(DEFAULT_GROUP_ID, inv, 1);
                 }
                 groupInventories.remove(groupId);
-                buckets.remove(groupId);
+                // 历史分桶归档到默认组：按 itemId + bucketStart 合并，input/output 累加，
+                // 避免直接删除导致箱子迁回默认组后历史产出无法追溯
+                archiveBucketsToDefault(groupId);
             }
             groups.remove(groupId);
+            compactOrder();
+        }
+
+        private void archiveBucketsToDefault(String deletedGroupId) {
+            Map<String, LinkedHashMap<Long, Bucket>> deleted = buckets.remove(deletedGroupId);
+            if (deleted == null || deleted.isEmpty()) return;
+            Map<String, LinkedHashMap<Long, Bucket>> target = buckets.computeIfAbsent(DEFAULT_GROUP_ID, id -> new LinkedHashMap<>());
+            for (Map.Entry<String, LinkedHashMap<Long, Bucket>> itemEntry : deleted.entrySet()) {
+                String itemId = itemEntry.getKey();
+                LinkedHashMap<Long, Bucket> targetBuckets = target.computeIfAbsent(itemId, id -> new LinkedHashMap<>());
+                for (Map.Entry<Long, Bucket> bucketEntry : itemEntry.getValue().entrySet()) {
+                    long start = bucketEntry.getKey();
+                    Bucket src = bucketEntry.getValue();
+                    Bucket dst = targetBuckets.get(start);
+                    if (dst == null) {
+                        dst = new Bucket(start);
+                        targetBuckets.put(start, dst);
+                    }
+                    dst.input += src.input;
+                    dst.output += src.output;
+                }
+            }
+        }
+
+        private void compactOrder() {
+            int order = 0;
+            for (Group group : groups.values()) group.order(order++);
         }
 
         private void ensureDefaultGroup() {
@@ -484,8 +529,8 @@ public class ProductionStatsStorage extends SavedData {
                 String chestKey = chest.getString("ChestKey");
                 Map<String, Integer> items = loadItems(chest.getList("Items", Tag.TAG_COMPOUND));
                 stats.chestInventories.put(chestKey, items);
-                String groupId = stats.chestGroups.get(chestKey);
-                if (groupId != null) stats.adjustGroupInventory(groupId, items, 1);
+                // 不在此处调 adjustGroupInventory：依赖 chestGroups 已加载，且会与后续重建重复累加。
+                // groupInventories 在所有数据加载完成后统一重建。
             }
 
             ListTag bucketList = tag.getList("Buckets", Tag.TAG_COMPOUND);
@@ -506,6 +551,14 @@ public class ProductionStatsStorage extends SavedData {
             for (int i = 0; i < favorites.size(); i++) {
                 String id = favorites.getCompound(i).getString("Id").trim();
                 if (!id.isEmpty()) stats.favoriteResources.add(id);
+            }
+
+            // 统一重建 groupInventories：解耦 load 顺序对 chestGroups 已加载的依赖。
+            // 即使未来调整各段加载顺序，只要 chestGroups 与 chestInventories 都已加载即可正确重建。
+            stats.groupInventories.clear();
+            for (Map.Entry<String, String> entry : stats.chestGroups.entrySet()) {
+                Map<String, Integer> items = stats.chestInventories.get(entry.getKey());
+                if (items != null && !items.isEmpty()) stats.adjustGroupInventory(entry.getValue(), items, 1);
             }
             return stats;
         }
@@ -536,13 +589,17 @@ public class ProductionStatsStorage extends SavedData {
         private final String id;
         private String name;
         private final boolean aggregate;
-        private final int order;
+        private int order;
         private final List<String> childIds = new ArrayList<>();
 
         private Group(String id, String name, boolean aggregate, int order) {
             this.id = id;
             this.name = name;
             this.aggregate = aggregate;
+            this.order = order;
+        }
+
+        private void order(int order) {
             this.order = order;
         }
 

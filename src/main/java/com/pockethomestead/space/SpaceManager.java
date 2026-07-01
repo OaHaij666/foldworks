@@ -31,24 +31,29 @@ public class SpaceManager {
     public SpaceData createSpace(MinecraftServer server, UUID ownerId, int width, int height, int depth,
                                  SpaceData.TerrainType terrainType, String biome, ResourceLocation sourceDimension,
                                  boolean mobSpawning, boolean structureGeneration, boolean infinite, float terrainAmplitude) {
+        int max = com.pockethomestead.config.ModConfig.MAX_SPACES_PER_PLAYER.get();
+        if (max > 0) {
+            long owned = spaces.values().stream().filter(s -> s.isOwner(ownerId)).count();
+            if (owned >= max) {
+                throw new SpaceLimitExceededException(max);
+            }
+        }
+        // 夹紧尺寸到安全范围，防止恶意/误传参数导致 PocketChunkGenerator 边界墙循环到世界边界
+        int clampedWidth = Math.max(16, Math.min(width, 512));
+        int clampedHeight = Math.max(16, Math.min(height, 512));
+        int clampedDepth = Math.max(16, Math.min(depth, 512));
         UUID spaceId = UUID.randomUUID();
         // 随机群系（或无效）时，按所选维度的可用群系解析
         String resolvedBiome = (biome == null || biome.isBlank() || biome.equals("random"))
                 ? randomBiomeFromDimension(server, sourceDimension)
                 : biome;
-        SpaceData space = new SpaceData(spaceId, ownerId, width, height, depth,
+        SpaceData space = new SpaceData(spaceId, ownerId, clampedWidth, clampedHeight, clampedDepth,
                 terrainType, resolvedBiome, sourceDimension, mobSpawning, structureGeneration, infinite, terrainAmplitude);
-        inheritedPermission(ownerId).ifPresent(template -> space.getPermission().copyFrom(template.getPermission()));
         spaces.put(spaceId, space);
         dimensionIndex.put(space.getDimensionId(), space);
         SpaceDimensionService.getInstance().loadOrCreate(server, space);
         SpaceStorage.markDirty();
         return space;
-    }
-
-    private Optional<SpaceData> inheritedPermission(UUID ownerId) {
-        if (ownerId == null) return Optional.empty();
-        return spaces.values().stream().filter(s -> s.isOwner(ownerId)).findFirst();
     }
 
     private String randomBiomeFromDimension(MinecraftServer server, ResourceLocation sourceDimension) {
@@ -61,7 +66,8 @@ public class SpaceManager {
                         .filter(Objects::nonNull)
                         .map(k -> k.location().toString())
                         .toList();
-                if (!ids.isEmpty()) return ids.get(new Random().nextInt(ids.size()));
+                // 复用 server 随机源而非每次 new Random()，保证可复现且无对象分配
+                if (!ids.isEmpty()) return ids.get(server.overworld().getRandom().nextInt(ids.size()));
             }
         } catch (Exception e) {
             PocketHomestead.LOGGER.warn("随机群系解析失败，回退 plains", e);
@@ -93,9 +99,10 @@ public class SpaceManager {
         }
 
         SpaceDimensionService.getInstance().delete(server, space);
+        // 标记删除使 BaseChestBlockEntity 的缓存失效，避免残留引用导致权限检查用过时数据
+        space.markDeleted();
         spaces.remove(spaceId);
         dimensionIndex.remove(space.getDimensionId());
-        SpaceItemRegistry.removeSpace(spaceId);
         SpaceStorage.markDirty();
         return true;
     }

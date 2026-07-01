@@ -2,6 +2,7 @@ package com.pockethomestead.network;
 
 import com.pockethomestead.space.SpacePermission;
 import com.pockethomestead.transfer.GraphKey;
+import com.pockethomestead.transfer.TransferGraph;
 import com.pockethomestead.transfer.TransferGraphAccess;
 import com.pockethomestead.transfer.TransferGraphStorage;
 import com.pockethomestead.transfer.TransferTeam;
@@ -51,6 +52,12 @@ public record TransferTeamPacket(String action, String teamId, String value) imp
             TransferTeam team = storage.getTeam(teamId);
             if (team == null) return;
             if ("DELETE".equals(packet.action)) {
+                TransferGraph protectedGraph = TransferGraphStorage.get(player.server).getGraph(GraphKey.protectedGraph(teamId));
+                if (protectedGraph != null && (!protectedGraph.getNodes().isEmpty() || !protectedGraph.getEdges().isEmpty())) {
+                    player.displayClientMessage(net.minecraft.network.chat.Component.translatable(
+                            "pockethomestead.team.delete.not_empty"), false);
+                    return;
+                }
                 if (storage.deleteTeam(teamId, player.getUUID())) {
                     TransferGraphStorage.get(player.server).removeGraph(GraphKey.protectedGraph(teamId));
                     RequestTransferGraphPacket.sendGraphTo(player, GraphKey.privateGraph(player.getUUID()));
@@ -61,12 +68,15 @@ public record TransferTeamPacket(String action, String teamId, String value) imp
                 team.setName(packet.value);
                 storage.setDirty();
             } else if ("SET_MEMBER".equals(packet.action)) {
+                // value 格式: "memberUuid|AccessLevel"
                 String[] parts = packet.value == null ? new String[0] : packet.value.split("\\|", -1);
-                UUID memberId = parts.length > 0 ? parseUuid(parts[0]) : null;
-                SpacePermission.AccessLevel level = SpacePermission.AccessLevel.NONE;
+                if (parts.length != 2) return;
+                UUID memberId = parseUuid(parts[0]);
+                SpacePermission.AccessLevel level;
                 try {
-                    if (parts.length > 1) level = SpacePermission.AccessLevel.valueOf(parts[1]);
+                    level = SpacePermission.AccessLevel.valueOf(parts[1]);
                 } catch (IllegalArgumentException ignored) {
+                    return;
                 }
                 if (memberId != null) {
                     team.setMember(memberId, level);

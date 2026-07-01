@@ -75,6 +75,7 @@
   "pockethomestead.permission.name_hint": "玩家名",
   "pockethomestead.permission.no_list_hint": "该模式无需名单",
   "pockethomestead.permission.player_not_found": "找不到玩家：%s",
+  "pockethomestead.permission.denied": "没有权限执行此操作",
 
   "pockethomestead.space.list.title": "口袋家园列表",
   "pockethomestead.space.list.in_space": "你正在访问一个小世界",
@@ -109,5 +110,9 @@
   "pockethomestead.chest.void_off": "虚空:关",
   "pockethomestead.chest.energy": "电力",
   "pockethomestead.chest.stress": "应力",
-  "pockethomestead.chest.side_config": "面配置"
+  "pockethomestead.chest.side_config": "面配置",
+
+  "pockethomestead.team.delete.not_empty": "团队下的传输图不为空，请先清空节点与连线后再删除",
+
+  "pockethomestead.space.create.limit_exceeded": "已达空间数量上限 (%s)"
 }

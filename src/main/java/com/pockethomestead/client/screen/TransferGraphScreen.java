@@ -1,11 +1,5 @@
 package com.pockethomestead.client.screen;
 
-import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.BufferBuilder;
-import com.mojang.blaze3d.vertex.BufferUploader;
-import com.mojang.blaze3d.vertex.DefaultVertexFormat;
-import com.mojang.blaze3d.vertex.Tesselator;
-import com.mojang.blaze3d.vertex.VertexFormat;
 import com.pockethomestead.client.ClientTransferGraphCache;
 import com.pockethomestead.client.ui.Theme;
 import com.pockethomestead.network.RequestTransferGraphPacket;
@@ -19,7 +13,6 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -31,7 +24,6 @@ import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.Fluids;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.network.PacketDistributor;
-import org.joml.Matrix4f;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -58,6 +50,8 @@ public class TransferGraphScreen extends Screen {
     private static final int PORT_INSET = 12;
     private static final int COLLAPSED_CHEST_H = 128;
     private static final int COLLAPSED_REROUTE_H = 92;
+
+    private final GraphCanvas canvas = new GraphCanvas();
 
     private int panX = 70;
     private int panY = 70;
@@ -161,6 +155,7 @@ public class TransferGraphScreen extends Screen {
     public void render(GuiGraphics g, int mx, int my, float partialTick) {
         ensureDraft();
         syncWidgets();
+        canvas.setZoom(zoom);
         g.fill(0, 0, width, height, 0xFFF7FBFF);
         renderGrid(g);
         renderTabs(g, mx, my);
@@ -337,7 +332,7 @@ public class TransferGraphScreen extends Screen {
             Theme.fillRound(g, 2, 2, NODE_W - 4, 22, CARD_RADIUS - 1, header);
             text(g, (node.enabled() ? "" : "⊘ ") + "传输箱 " + node.chestId(), 8, 7, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
             drawExpandButton(g, node, NODE_W);
-            text(g, shortPos(node.pos()), 8, 30, Theme.TEXT_MUTED);
+            text(g, GraphResourceUtils.shortPos(node.pos()), 8, 30, Theme.TEXT_MUTED);
             drawChestStatusMarker(g, node, 72, 34);
             renderBandwidthStatus(g, node, 82, 29);
             renderChestNode(g, node, 0, 0);
@@ -360,14 +355,14 @@ public class TransferGraphScreen extends Screen {
         } else {
             text(g, "输出 " + rerouteOutputPorts(node).size() + " 项", 92, 34, Theme.TEXT_MUTED);
         }
-        drawPort(g, inputPortLocalX(), h / 2, node.enabled() ? Theme.SUCCESS : Theme.TEXT_FAINT);
+        drawPort(g, GraphNodeLayout.inputPortLocalX(), h / 2, node.enabled() ? Theme.SUCCESS : Theme.TEXT_FAINT);
 
         Map<String, TransferGraphSyncPacket.NodeFlowData> flows = rerouteFlowMap(node);
         List<String> ports = visibleRerouteOutputPorts(node);
         for (String port : ports) {
             int py = rerouteOutputLocalY(node, port);
             TransferGraphSyncPacket.NodeFlowData flow = flowForPort(port, flows);
-            drawPort(g, rerouteOutputPortLocalX(), py, node.enabled() ? Theme.PRIMARY : Theme.TEXT_FAINT);
+            drawPort(g, GraphNodeLayout.rerouteOutputPortLocalX(), py, node.enabled() ? Theme.PRIMARY : Theme.TEXT_FAINT);
             if (TransferEdge.PORT_ALL.equals(port)) {
                 Theme.fillRound(g, 12, py - 6, 12, 12, 6, node.enabled() ? Theme.PRIMARY_SOFT_H : Theme.SURFACE_SUNK);
                 text(g, "全部物品", 32, py - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
@@ -382,17 +377,17 @@ public class TransferGraphScreen extends Screen {
                 text(g, "应力 SU", 32, py - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
             } else if (port.startsWith(TransferEdge.FLUID_PREFIX)) {
                 if (zoom > 0.24) g.renderItem(new ItemStack(Items.WATER_BUCKET), 12, py - 8);
-                text(g, Theme.ellipsize(font, shortResource(port), 62), 32, py - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
+                text(g, Theme.ellipsize(font, GraphResourceUtils.shortResource(port), 62), 32, py - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
             } else if (port.startsWith(TransferEdge.ITEM_PREFIX) && zoom > 0.24) {
-                Item item = resolveItem(port.substring(TransferEdge.ITEM_PREFIX.length()));
+                Item item = GraphResourceUtils.resolveItem(port.substring(TransferEdge.ITEM_PREFIX.length()));
                 if (item != null) g.renderItem(new ItemStack(item), 12, py - 8);
-                text(g, Theme.ellipsize(font, shortResource(port), 62), 32, py - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
+                text(g, Theme.ellipsize(font, GraphResourceUtils.shortResource(port), 62), 32, py - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
             }
             if (isExpanded(node)) {
-                text(g, resourceRateLabel(flow.inputRatePerMinute(), flow.itemId()), 104, py - 4, node.enabled() ? Theme.SUCCESS : Theme.TEXT_FAINT);
-                text(g, resourceRateLabel(flow.outputRatePerMinute(), flow.itemId()), 148, py - 4, node.enabled() ? Theme.PRIMARY_PRESS : Theme.TEXT_FAINT);
+                text(g, GraphResourceUtils.resourceRateLabel(flow.inputRatePerMinute(), flow.itemId()), 104, py - 4, node.enabled() ? Theme.SUCCESS : Theme.TEXT_FAINT);
+                text(g, GraphResourceUtils.resourceRateLabel(flow.outputRatePerMinute(), flow.itemId()), 148, py - 4, node.enabled() ? Theme.PRIMARY_PRESS : Theme.TEXT_FAINT);
             }
-            if (isExpanded(node) && node.filterItemIds().contains(filterFromPort(port))) {
+            if (isExpanded(node) && node.filterItemIds().contains(GraphResourceUtils.filterFromPort(port))) {
                 text(g, "×", REROUTE_W - 28, py - 4, Theme.DANGER);
             }
         }
@@ -408,7 +403,7 @@ public class TransferGraphScreen extends Screen {
         Theme.fillRound(g, 2, 2, TRASH_W - 4, 24, CARD_RADIUS - 1, node.enabled() ? 0xFFFFEFF3 : 0xFFDDE3EA);
         text(g, (node.enabled() ? "" : "⊘ ") + "销毁节点", 10, 8, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
         drawExpandButton(g, node, TRASH_W);
-        drawPort(g, inputPortLocalX(), h / 2, node.enabled() ? 0xFFE05768 : Theme.TEXT_FAINT);
+        drawPort(g, GraphNodeLayout.inputPortLocalX(), h / 2, node.enabled() ? 0xFFE05768 : Theme.TEXT_FAINT);
         text(g, "剩余产物终点", 12, 36, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
         if (isExpanded(node)) text(g, "按连线限速销毁", 12, 52, node.enabled() ? Theme.TEXT_MUTED : Theme.TEXT_FAINT);
         Theme.hLine(g, 8, h - 28, TRASH_W - 16, Theme.DIVIDER);
@@ -423,7 +418,7 @@ public class TransferGraphScreen extends Screen {
         Theme.fillRound(g, 2, 2, TRASH_W - 4, 24, CARD_RADIUS - 1, node.enabled() ? 0xFFEAF6FF : 0xFFDDE3EA);
         text(g, Theme.ellipsize(font, (node.enabled() ? "" : "⊘ ") + playerInventoryTitle(node), TRASH_W - 36), 10, 8, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
         drawExpandButton(g, node, TRASH_W);
-        drawPort(g, inputPortLocalX(), h / 2, node.enabled() ? Theme.SUCCESS : Theme.TEXT_FAINT);
+        drawPort(g, GraphNodeLayout.inputPortLocalX(), h / 2, node.enabled() ? Theme.SUCCESS : Theme.TEXT_FAINT);
         text(g, "补货目标", 12, 36, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
         String playerLabel = playerInventoryLabel(node);
         text(g, playerLabel, 82, 36, Theme.TEXT_MUTED);
@@ -434,9 +429,9 @@ public class TransferGraphScreen extends Screen {
                 text(g, "默认补到一组", 12, y, Theme.TEXT_MUTED);
             } else {
                 for (TransferGraphSyncPacket.ReplenishRuleData rule : node.replenishRules()) {
-                    Item item = resolveItem(rule.itemId());
+                    Item item = GraphResourceUtils.resolveItem(rule.itemId());
                     if (item != null && zoom > 0.22) g.renderItem(new ItemStack(item), 12, y - 8);
-                    text(g, Theme.ellipsize(font, shortResource(rule.itemId()), 80), 32, y - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
+                    text(g, Theme.ellipsize(font, GraphResourceUtils.shortResource(rule.itemId()), 80), 32, y - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
                     boolean editing = editingReplenishTarget && node.id().equals(selectedNodeId) && rule.itemId().equals(selectedReplenishItemId);
                     text(g, editing ? "目标 " + replenishTargetValue + "_" : "目标 " + rule.targetCount(), 104, y - 4, editing ? Theme.SUCCESS : Theme.PRIMARY_PRESS);
                     text(g, "×", TRASH_W - 22, y - 4, Theme.DANGER);
@@ -465,21 +460,21 @@ public class TransferGraphScreen extends Screen {
 
     private void renderChestNode(GuiGraphics g, TransferGraphSyncPacket.NodeData node, int x, int y) {
         renderBandwidthBar(g, node, x + 8, y + 43, NODE_W - 16);
-        drawResourceRow(g, node, x, y + chestItemLocalY(), "物品输入", "物品输出", Theme.SUCCESS, Theme.PRIMARY, SearchKind.ITEM);
-        drawResourceRow(g, node, x, y + chestFluidLocalY(), "流体输入", "流体输出", 0xFF62CDBD, 0xFF359E92, SearchKind.FLUID);
-        drawResourceRow(g, node, x, y + chestEnergyLocalY(), "电力输入", "电力输出", 0xFFE0B43A, 0xFFC48E14, null);
-        drawResourceRow(g, node, x, y + chestStressLocalY(), "应力输入", "应力输出", 0xFFD781D8, 0xFFB560B8, null);
+        drawResourceRow(g, node, x, y + GraphNodeLayout.chestItemLocalY(), "物品输入", "物品输出", Theme.SUCCESS, Theme.PRIMARY, SearchKind.ITEM);
+        drawResourceRow(g, node, x, y + GraphNodeLayout.chestFluidLocalY(), "流体输入", "流体输出", 0xFF62CDBD, 0xFF359E92, SearchKind.FLUID);
+        drawResourceRow(g, node, x, y + GraphNodeLayout.chestEnergyLocalY(), "电力输入", "电力输出", 0xFFE0B43A, 0xFFC48E14, null);
+        drawResourceRow(g, node, x, y + GraphNodeLayout.chestStressLocalY(), "应力输入", "应力输出", 0xFFD781D8, 0xFFB560B8, null);
         if (!isExpanded(node)) return;
-        text(g, "+ 其他过滤", x + 8, y + chestAddFilterLocalY(), node.enabled() ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED);
-        int iy = y + chestFirstFilterLocalY();
+        text(g, "+ 其他过滤", x + 8, y + GraphNodeLayout.chestAddFilterLocalY(), node.enabled() ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED);
+        int iy = y + GraphNodeLayout.chestFirstFilterLocalY();
         for (String filter : node.filterItemIds()) {
-            Item item = resolveItem(filter);
+            Item item = GraphResourceUtils.resolveItem(filter);
             if (item != null && zoom > 0.22) g.renderItem(new ItemStack(item), x + 8, iy - 7);
-            else if (isFluidResource(filter) && zoom > 0.22) g.renderItem(new ItemStack(Items.WATER_BUCKET), x + 8, iy - 7);
-            text(g, Theme.ellipsize(font, shortResource(filter), 112), x + (zoom > 0.22 ? 28 : 8), iy - 3, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
-            Theme.fillRound(g, x + filterRemoveLocalX() - 5, iy - 6, 12, 12, 6, 0x22E05768);
-            text(g, "×", x + filterRemoveLocalX() - 2, iy - 5, Theme.DANGER);
-            drawPort(g, outputPortLocalX(), iy, node.enabled() ? portColor(filterPort(filter), false) : Theme.TEXT_FAINT);
+            else if (GraphResourceUtils.isFluidResource(filter) && zoom > 0.22) g.renderItem(new ItemStack(Items.WATER_BUCKET), x + 8, iy - 7);
+            text(g, Theme.ellipsize(font, GraphResourceUtils.shortResource(filter), 112), x + (zoom > 0.22 ? 28 : 8), iy - 3, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
+            Theme.fillRound(g, x + GraphNodeLayout.filterRemoveLocalX() - 5, iy - 6, 12, 12, 6, 0x22E05768);
+            text(g, "×", x + GraphNodeLayout.filterRemoveLocalX() - 2, iy - 5, Theme.DANGER);
+            drawPort(g, GraphNodeLayout.outputPortLocalX(), iy, node.enabled() ? portColor(GraphResourceUtils.filterPort(filter), false) : Theme.TEXT_FAINT);
             iy += 18;
         }
     }
@@ -534,7 +529,7 @@ public class TransferGraphScreen extends Screen {
     }
 
     private void drawResourceRow(GuiGraphics g, TransferGraphSyncPacket.NodeData node, int x, int y, String inLabel, String outLabel, int inColor, int outColor, SearchKind addKind) {
-        drawPort(g, inputPortLocalX(), y, node.enabled() ? inColor : Theme.TEXT_FAINT);
+        drawPort(g, GraphNodeLayout.inputPortLocalX(), y, node.enabled() ? inColor : Theme.TEXT_FAINT);
         text(g, inLabel, x + 26, y - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
         text(g, outLabel, x + NODE_W - 82, y - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
         if (addKind != null) {
@@ -543,34 +538,18 @@ public class TransferGraphScreen extends Screen {
             chip(g, bx, y - 8, 18, 14, fill, Theme.BORDER);
             text(g, "+", bx + 6, y - 5, node.enabled() ? outColor : Theme.TEXT_FAINT);
         }
-        drawPort(g, outputPortLocalX(), y, node.enabled() ? outColor : Theme.TEXT_FAINT);
+        drawPort(g, GraphNodeLayout.outputPortLocalX(), y, node.enabled() ? outColor : Theme.TEXT_FAINT);
     }
 
     private void drawOutput(GuiGraphics g, int x, int y, String label, int color) {
         text(g, label, x + 8, y - 4, color);
-        drawPort(g, outputPortLocalX(), y, Theme.PRIMARY);
+        drawPort(g, GraphNodeLayout.outputPortLocalX(), y, Theme.PRIMARY);
     }
 
     private void drawExpandButton(GuiGraphics g, TransferGraphSyncPacket.NodeData node, int nodeW) {
         int bx = nodeW - 21;
         Theme.fillRound(g, bx, 6, 14, 12, 4, 0x66FFFFFF);
         text(g, isExpanded(node) ? "▾" : "▸", bx + 4, 8, node.enabled() ? Theme.TEXT_MUTED : Theme.TEXT_FAINT);
-    }
-
-    private int inputPortLocalX() {
-        return PORT_INSET;
-    }
-
-    private int outputPortLocalX() {
-        return NODE_W - PORT_INSET;
-    }
-
-    private int filterRemoveLocalX() {
-        return NODE_W - 33;
-    }
-
-    private int rerouteOutputPortLocalX() {
-        return REROUTE_W - PORT_INSET;
     }
 
     private void drawPort(GuiGraphics g, int cx, int cy, int color) {
@@ -596,7 +575,7 @@ public class TransferGraphScreen extends Screen {
             boolean live = edge.enabled() && from.enabled() && to.enabled() && pageEnabled(edge.pageId());
             boolean selected = edge.id().equals(selectedEdgeId);
             int color = selected ? Theme.PRIMARY_PRESS : edgeColor(edge, live);
-            drawBezier(g, a[0], a[1], b[0], b[1], laneOffset(edge), color, selected);
+            canvas.drawBezier(g, a[0], a[1], b[0], b[1], laneOffset(edge), color, selected);
         }
     }
 
@@ -614,7 +593,7 @@ public class TransferGraphScreen extends Screen {
     }
 
     private void renderEdgeLabel(GuiGraphics g, String label, int cx, int y) {
-        float s = canvasUiScale();
+        float s = canvas.canvasUiScale();
         int tw = Theme.styledWidth(font, label);
         g.pose().pushPose();
         g.pose().translate(cx, y, 0);
@@ -629,111 +608,7 @@ public class TransferGraphScreen extends Screen {
         TransferGraphSyncPacket.NodeData from = node(linkingFromNodeId);
         if (from == null) return;
         int[] a = outputPos(from, linkingFromPort);
-        drawBezier(g, a[0], a[1], mx, my, 0, Theme.PRIMARY_HOVER, true);
-    }
-
-    private void drawBezier(GuiGraphics g, double x0, double y0, double x3, double y3, float laneOffset, int color, boolean thick) {
-        double dx = Math.max(42, Math.abs(x3 - x0) * 0.46);
-        double x1 = x0 + dx;
-        double x2 = x3 - dx;
-        double y1 = y0 + laneOffset;
-        double y2 = y3 + laneOffset;
-        double curveSpan = Math.hypot(x3 - x0, y3 - y0) + Math.abs(laneOffset) * 1.6;
-        int segments = Math.max(72, Math.min(260, (int) Math.ceil(curveSpan / 3.0)));
-        float coreWidth = scaledLineWidth(thick ? 3.1f : 2.25f);
-        drawBezierStroke(g, x0, y0, x1, y1, x2, y2, x3, y3, segments, coreWidth, color);
-        int cap = Math.max(2, Math.round(coreWidth + 0.8f));
-        Theme.fillRound(g, (int) Math.round(x0) - cap / 2, (int) Math.round(y0) - cap / 2, cap, cap, Math.max(1, cap / 2), color);
-        Theme.fillRound(g, (int) Math.round(x3) - cap / 2, (int) Math.round(y3) - cap / 2, cap, cap, Math.max(1, cap / 2), color);
-    }
-
-    private float scaledLineWidth(float base) {
-        return Math.max(0.35f, Math.min(5.0f, base * (float) Math.max(0.12, zoom)));
-    }
-
-    private float canvasUiScale() {
-        return (float) Math.max(0.42, Math.min(1.25, zoom));
-    }
-
-    private void drawBezierStroke(GuiGraphics g, double x0, double y0, double x1, double y1, double x2, double y2,
-                                  double x3, double y3, int segments, float width, int color) {
-        Matrix4f matrix = g.pose().last().pose();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-
-        Tesselator tess = Tesselator.getInstance();
-        BufferBuilder buf = tess.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
-        double px = x0, py = y0;
-        for (int i = 1; i <= segments; i++) {
-            double t = i / (double) segments;
-            double x = cubic(x0, x1, x2, x3, t);
-            double y = cubic(y0, y1, y2, y3, t);
-            addStrokeSegment(buf, matrix, (float) px, (float) py, (float) x, (float) y, width, color);
-            px = x;
-            py = y;
-        }
-        BufferUploader.drawWithShader(buf.buildOrThrow());
-        RenderSystem.disableBlend();
-    }
-
-    private void drawFlowParticles(GuiGraphics g, double x0, double y0, double x1, double y1, double x2, double y2,
-                                   double x3, double y3, int color, int rate, float partialTick) {
-        int visualRate = Math.max(0, rate);
-        int count = clamp(2 + visualRate / 1400, 2, 5);
-        double speed = 0.28 + Math.min(visualRate, 12000) / 24000.0;
-        double time = (System.currentTimeMillis() % 120000L) / 1000.0 + partialTick / 20.0;
-        int glowColor = withAlpha(color, 0x55);
-        int coreColor = mixColor(color, 0xFFFFFFFF, 0.42f);
-        int dot = Math.max(2, Math.round(scaledLineWidth(3.0f)));
-        int glow = dot + 4;
-        for (int i = 0; i < count; i++) {
-            double t = (time * speed + i / (double) count) % 1.0;
-            double px = cubic(x0, x1, x2, x3, t);
-            double py = cubic(y0, y1, y2, y3, t);
-            Theme.fillRound(g, (int) Math.round(px) - glow / 2, (int) Math.round(py) - glow / 2, glow, glow, Math.max(1, glow / 2), glowColor);
-            Theme.fillRound(g, (int) Math.round(px) - dot / 2, (int) Math.round(py) - dot / 2, dot, dot, Math.max(1, dot / 2), coreColor);
-        }
-    }
-
-    private double cubic(double a, double b, double c, double d, double t) {
-        double u = 1.0 - t;
-        return u * u * u * a + 3 * u * u * t * b + 3 * u * t * t * c + t * t * t * d;
-    }
-
-    private void addStrokeSegment(BufferBuilder buf, Matrix4f matrix, float x0, float y0, float x1, float y1, float width, int color) {
-        float dx = x1 - x0;
-        float dy = y1 - y0;
-        float len = (float) Math.sqrt(dx * dx + dy * dy);
-        if (len < 0.001f) return;
-        float nx = -dy / len * width * 0.5f;
-        float ny = dx / len * width * 0.5f;
-        vertex(buf, matrix, x0 + nx, y0 + ny, color);
-        vertex(buf, matrix, x1 + nx, y1 + ny, color);
-        vertex(buf, matrix, x1 - nx, y1 - ny, color);
-        vertex(buf, matrix, x0 - nx, y0 - ny, color);
-    }
-
-    private void vertex(BufferBuilder buf, Matrix4f matrix, float x, float y, int color) {
-        float a = ((color >>> 24) & 0xFF) / 255f;
-        float r = ((color >> 16) & 0xFF) / 255f;
-        float gr = ((color >> 8) & 0xFF) / 255f;
-        float b = (color & 0xFF) / 255f;
-        buf.addVertex(matrix, x, y, 0).setColor(r, gr, b, a);
-    }
-
-    private int withAlpha(int color, int alpha) {
-        return (clamp(alpha, 0, 255) << 24) | (color & 0x00FFFFFF);
-    }
-
-    private int mixColor(int a, int b, float t) {
-        t = Math.max(0f, Math.min(1f, t));
-        int ar = (a >> 16) & 0xFF, ag = (a >> 8) & 0xFF, ab = a & 0xFF;
-        int br = (b >> 16) & 0xFF, bg = (b >> 8) & 0xFF, bb = b & 0xFF;
-        int r = Math.round(ar + (br - ar) * t);
-        int g = Math.round(ag + (bg - ag) * t);
-        int bl = Math.round(ab + (bb - ab) * t);
-        return 0xFF000000 | (r << 16) | (g << 8) | bl;
+        canvas.drawBezier(g, a[0], a[1], mx, my, 0, Theme.PRIMARY_HOVER, true);
     }
 
     private void renderMenu(GuiGraphics g) {
@@ -810,7 +685,7 @@ public class TransferGraphScreen extends Screen {
         for (int i = 0; i < Math.min(10, chests.size()); i++) {
             TransferGraphSyncPacket.ChestData chest = chests.get(i);
             String status = "OFFLINE_SIMULATED".equals(chest.status()) ? " 离线" : "OFFLINE_DISABLED".equals(chest.status()) ? " 未加载" : "";
-            text(g, chest.chestId() + "  " + shortPos(chest.pos()) + status, menuX + 8, menuY + 10 + i * 18, Theme.TEXT);
+            text(g, chest.chestId() + "  " + GraphResourceUtils.shortPos(chest.pos()) + status, menuX + 8, menuY + 10 + i * 18, Theme.TEXT);
         }
     }
 
@@ -876,7 +751,7 @@ public class TransferGraphScreen extends Screen {
     }
 
     private void renderReroutePopup(GuiGraphics g, TransferGraphSyncPacket.NodeData node) {
-        float s = canvasUiScale();
+        float s = canvas.canvasUiScale();
         List<TransferGraphSyncPacket.NodeFlowData> flows = rerouteFlowRows(node);
         int rows = Math.min(5, flows.size());
         int h = reroutePopupHeight(node);
@@ -894,13 +769,13 @@ public class TransferGraphScreen extends Screen {
         } else {
             for (int i = 0; i < rows; i++) {
                 TransferGraphSyncPacket.NodeFlowData flow = flows.get(i);
-                Item item = resolveItem(flow.itemId());
+                Item item = GraphResourceUtils.resolveItem(flow.itemId());
                 if (item != null && zoom > 0.18) g.renderItem(new ItemStack(item), 10, y - 5);
-                else if (isFluidResource(flow.itemId()) && zoom > 0.18) g.renderItem(new ItemStack(Items.WATER_BUCKET), 10, y - 5);
-                text(g, Theme.ellipsize(font, shortResource(flow.itemId()), 66), 30, y, Theme.TEXT);
-                text(g, resourceRateLabel(flow.inputRatePerMinute(), flow.itemId()), 100, y, Theme.SUCCESS);
-                text(g, resourceRateLabel(flow.outputRatePerMinute(), flow.itemId()), 146, y, Theme.PRIMARY_PRESS);
-                if (node.filterItemIds().contains(filterFromPort(flow.itemId()))) text(g, "×", 190, y, Theme.DANGER);
+                else if (GraphResourceUtils.isFluidResource(flow.itemId()) && zoom > 0.18) g.renderItem(new ItemStack(Items.WATER_BUCKET), 10, y - 5);
+                text(g, Theme.ellipsize(font, GraphResourceUtils.shortResource(flow.itemId()), 66), 30, y, Theme.TEXT);
+                text(g, GraphResourceUtils.resourceRateLabel(flow.inputRatePerMinute(), flow.itemId()), 100, y, Theme.SUCCESS);
+                text(g, GraphResourceUtils.resourceRateLabel(flow.outputRatePerMinute(), flow.itemId()), 146, y, Theme.PRIMARY_PRESS);
+                if (node.filterItemIds().contains(GraphResourceUtils.filterFromPort(flow.itemId()))) text(g, "×", 190, y, Theme.DANGER);
                 y += 20;
             }
         }
@@ -912,15 +787,15 @@ public class TransferGraphScreen extends Screen {
     private void renderEdgePopup(GuiGraphics g) {
         TransferGraphSyncPacket.EdgeData edge = edge(selectedEdgeId);
         if (edge == null) return;
-        float s = canvasUiScale();
-        List<TransferGraphSyncPacket.EdgeItemRateData> rows = edgeRateRows(edge);
+        float s = canvas.canvasUiScale();
+        List<TransferGraphSyncPacket.EdgeItemRateData> rows = GraphResourceUtils.edgeRateRows(edge);
         int panelH = 74 + rows.size() * 24 + 28;
         int panelW = edgePopupWidth(rows);
         g.pose().pushPose();
         g.pose().translate(popupX, popupY, 0);
         g.pose().scale(s, s, 1.0f);
         crispPanel(g, 0, 0, panelW, panelH, Theme.SURFACE, hasIssueForEdge(edge.id()) ? Theme.DANGER : Theme.BORDER_STRONG);
-        text(g, portLabel(edge.fromPortKey()), 9, 9, Theme.TEXT);
+        text(g, GraphResourceUtils.portLabel(edge.fromPortKey()), 9, 9, Theme.TEXT);
         text(g, "+ 资源", panelW - 48, 9, Theme.PRIMARY_PRESS);
         text(g, "状态", 9, 29, Theme.TEXT_MUTED);
         text(g, edgeStatusLabel(edge), 38, 29, edgeStatusColor(edge));
@@ -938,13 +813,13 @@ public class TransferGraphScreen extends Screen {
     }
 
     private void renderEdgeRateRow(GuiGraphics g, TransferGraphSyncPacket.EdgeItemRateData row, int y) {
-        Item item = resolveItem(row.itemId());
+        Item item = GraphResourceUtils.resolveItem(row.itemId());
         if (item != null && zoom > 0.18) g.renderItem(new ItemStack(item), 10, y - 5);
-        else if (isFluidResource(row.itemId()) && zoom > 0.18) g.renderItem(new ItemStack(Items.WATER_BUCKET), 10, y - 5);
+        else if (GraphResourceUtils.isFluidResource(row.itemId()) && zoom > 0.18) g.renderItem(new ItemStack(Items.WATER_BUCKET), 10, y - 5);
         chip(g, 31, y - 3, 28, 16, row.rateLimitEnabled() ? Theme.PRIMARY_SOFT : Theme.SURFACE_ALT,
                 row.rateLimitEnabled() ? Theme.PRIMARY : Theme.BORDER);
         text(g, row.rateLimitEnabled() ? "开" : "关", 39, y + 1, row.rateLimitEnabled() ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED);
-        text(g, Theme.ellipsize(font, shortResource(row.itemId()), 58), 64, y, Theme.TEXT);
+        text(g, Theme.ellipsize(font, GraphResourceUtils.shortResource(row.itemId()), 58), 64, y, Theme.TEXT);
         String seconds = row.itemId().equals(selectedRateItemId) ? rateSecondsValue : String.valueOf(row.rateLimitSeconds());
         String items = row.itemId().equals(selectedRateItemId) ? rateItemsValue : String.valueOf(row.rateLimitItems());
         int secX = 126;
@@ -952,8 +827,8 @@ public class TransferGraphScreen extends Screen {
         renderEdgeInput(g, secX, y - 4, 24, seconds, focusedEdgeField == EdgeField.SECONDS && row.itemId().equals(selectedRateItemId));
         text(g, "秒", secX + 28, y + 1, Theme.TEXT_MUTED);
         renderEdgeInput(g, itemX, y - 4, 34, items, focusedEdgeField == EdgeField.ITEMS && row.itemId().equals(selectedRateItemId));
-        text(g, isFluidResource(row.itemId()) ? "mB" : "个", itemX + 38, y + 1, Theme.TEXT_MUTED);
-        text(g, resourceRateLabel(row.actualRatePerMinute(), row.itemId()), 242, y, healthTextColor(row.health()));
+        text(g, GraphResourceUtils.isFluidResource(row.itemId()) ? "mB" : "个", itemX + 38, y + 1, Theme.TEXT_MUTED);
+        text(g, GraphResourceUtils.resourceRateLabel(row.actualRatePerMinute(), row.itemId()), 242, y, GraphResourceUtils.healthTextColor(row.health()));
     }
 
     private int edgePopupWidth(List<TransferGraphSyncPacket.EdgeItemRateData> rows) {
@@ -964,16 +839,6 @@ public class TransferGraphScreen extends Screen {
         Theme.panel(g, x, y, w, 18, 5, focused ? 0xFFFFFFFF : Theme.SURFACE_SUNK, focused ? Theme.PRIMARY : Theme.BORDER);
         String shown = Theme.ellipsize(font, value.isEmpty() ? "0" : value, w - 8);
         text(g, shown, x + 6, y + 5, focused ? Theme.TEXT : Theme.TEXT_MUTED);
-    }
-
-    private int healthTextColor(String health) {
-        return switch (health) {
-            case "HEALTHY" -> Theme.SUCCESS;
-            case "SOURCE_SHORTAGE" -> 0xFFE0B43F;
-            case "RECEIVER_BLOCKED" -> 0xFFE675AE;
-            case "DEADLOCKED" -> 0xFF98283A;
-            default -> Theme.TEXT_MUTED;
-        };
     }
 
     private String edgeStatusLabel(TransferGraphSyncPacket.EdgeData edge) {
@@ -992,13 +857,7 @@ public class TransferGraphScreen extends Screen {
     private int edgeStatusColor(TransferGraphSyncPacket.EdgeData edge) {
         if (!edge.enabled()) return Theme.TEXT_MUTED;
         if (hasIssueForEdge(edge.id())) return Theme.DANGER;
-        return healthTextColor(edge.health());
-    }
-
-    private String ratePerMinuteLabel(int rate) {
-        if (rate >= 1000000) return (rate / 1000000) + "m/分";
-        if (rate >= 10000) return (rate / 1000) + "k/分";
-        return rate + "/分";
+        return GraphResourceUtils.healthTextColor(edge.health());
     }
 
     private void renderSearchPopup(GuiGraphics g, int mx, int my, float partialTick) {
@@ -1019,10 +878,10 @@ public class TransferGraphScreen extends Screen {
         text(g, Theme.ellipsize(font, shown + (searchFocused && (graphSyncTicker / 10) % 2 == 0 ? "_" : ""), SEARCH_W - 28), popupX + 13, popupY + 31, textColor);
         int y = popupY + 55;
         for (String resourceId : results) {
-            Item item = resolveItem(resourceId);
+            Item item = GraphResourceUtils.resolveItem(resourceId);
             if (item != null) g.renderItem(new ItemStack(item), popupX + 10, y - 6);
-            else if (isFluidResource(resourceId)) g.renderItem(new ItemStack(Items.WATER_BUCKET), popupX + 10, y - 6);
-            text(g, Theme.ellipsize(font, shortResource(resourceId), SEARCH_W - 42), popupX + 32, y - 1, Theme.TEXT);
+            else if (GraphResourceUtils.isFluidResource(resourceId)) g.renderItem(new ItemStack(Items.WATER_BUCKET), popupX + 10, y - 6);
+            text(g, Theme.ellipsize(font, GraphResourceUtils.shortResource(resourceId), SEARCH_W - 42), popupX + 32, y - 1, Theme.TEXT);
             y += 20;
         }
     }
@@ -1087,7 +946,7 @@ public class TransferGraphScreen extends Screen {
             focusedEdgeField = EdgeField.NONE;
             TransferGraphSyncPacket.EdgeData edge = edge(edgeId);
             if (edge != null) {
-                selectedRateItemId = defaultRateItemId(edge);
+                selectedRateItemId = GraphResourceUtils.defaultRateItemId(edge);
                 syncRateEditors(edge);
             }
             return true;
@@ -1113,7 +972,7 @@ public class TransferGraphScreen extends Screen {
                     selectedItemId = filter.itemId();
                     popupMode = PopupMode.NONE;
                     linkingFromNodeId = node.id();
-                    linkingFromPort = filterPort(filter.itemId());
+                    linkingFromPort = GraphResourceUtils.filterPort(filter.itemId());
                 }
                 return true;
             }
@@ -1433,12 +1292,12 @@ public class TransferGraphScreen extends Screen {
             double ly = scaledPopupLocalY(my);
             TransferGraphSyncPacket.EdgeData edge = edge(selectedEdgeId);
             if (edge == null) return true;
-            int panelW = edgePopupWidth(edgeRateRows(edge));
+            int panelW = edgePopupWidth(GraphResourceUtils.edgeRateRows(edge));
             if (inside(lx, ly, panelW - 52, 5, 50, 18)) {
                 openEdgeItemSearch(mx, my);
                 return true;
             }
-            List<TransferGraphSyncPacket.EdgeItemRateData> rows = edgeRateRows(edge);
+            List<TransferGraphSyncPacket.EdgeItemRateData> rows = GraphResourceUtils.edgeRateRows(edge);
             int row = ((int) ly - 60) / 24;
             if (row >= 0 && row < rows.size()) {
                 TransferGraphSyncPacket.EdgeItemRateData rate = rows.get(row);
@@ -1515,7 +1374,7 @@ public class TransferGraphScreen extends Screen {
         List<String> ports = visibleRerouteOutputPorts(node);
         for (String port : ports) {
             int py = rerouteOutputLocalY(node, port);
-            String filter = filterFromPort(port);
+            String filter = GraphResourceUtils.filterFromPort(port);
             if (isExpanded(node) && node.filterItemIds().contains(filter)
                     && inside(lx, ly, REROUTE_W - 34, py - 8, 20, 16)) {
                 if (node.filterItemIds().contains(filter)) removeFilterItem(node.id(), filter);
@@ -1689,7 +1548,7 @@ public class TransferGraphScreen extends Screen {
             if (keyCode == 257 || keyCode == 335) {
                 TransferGraphSyncPacket.EdgeData edge = edge(selectedEdgeId);
                 if (edge != null && selectedRateItemId != null) {
-                    TransferGraphSyncPacket.EdgeItemRateData row = edgeRateRow(edge, selectedRateItemId);
+                    TransferGraphSyncPacket.EdgeItemRateData row = GraphResourceUtils.edgeRateRow(edge, selectedRateItemId);
                     updateEdgeItemRate(edge.id(), selectedRateItemId, row == null || row.rateLimitEnabled(), parseRateSeconds(), parseRateItems());
                 }
                 focusedEdgeField = EdgeField.NONE;
@@ -1758,14 +1617,14 @@ public class TransferGraphScreen extends Screen {
             TransferGraphSyncPacket.EdgeData edge = draftEdges.get(i);
             if (edge.fromNodeId().equals(from.id()) && edge.toNodeId().equals(to.id())
                     && edge.fromPortKey().equals(linkingFromPort) && edge.toPortKey().equals(toPortKey)) {
-                draftEdges.set(i, copyEdge(edge, edge.enabled(), edge.itemRates()));
+                draftEdges.set(i, GraphResourceUtils.copyEdge(edge, edge.enabled(), edge.itemRates()));
                 markDirty();
                 linkingFromNodeId = null;
                 return;
             }
         }
         draftEdges.add(new TransferGraphSyncPacket.EdgeData(UUID.randomUUID().toString(), from.pageId(), from.id(), to.id(),
-                linkingFromPort, toPortKey, true, false, 1, 64, "UNMEASURED", 0, defaultItemRatesForPort(linkingFromPort)));
+                linkingFromPort, toPortKey, true, "UNMEASURED", 0, GraphResourceUtils.defaultItemRatesForPort(linkingFromPort)));
         markDirty();
         linkingFromNodeId = null;
     }
@@ -1896,7 +1755,7 @@ public class TransferGraphScreen extends Screen {
     }
 
     private void addFilterItem(String nodeId, String itemId) {
-        itemId = normalizeFilterResource(itemId);
+        itemId = GraphResourceUtils.normalizeFilterResource(itemId);
         TransferGraphSyncPacket.NodeData n = node(nodeId);
         if (n == null || (!n.type().equals("CHEST") && !n.type().equals("REROUTE")) || n.filterItemIds().contains(itemId)) return;
         List<String> filters = new ArrayList<>(n.filterItemIds());
@@ -1906,19 +1765,19 @@ public class TransferGraphScreen extends Screen {
     }
 
     private void removeFilterItem(String nodeId, String itemId) {
-        itemId = normalizeFilterResource(itemId);
+        itemId = GraphResourceUtils.normalizeFilterResource(itemId);
         TransferGraphSyncPacket.NodeData n = node(nodeId);
         if (n == null) return;
         List<String> filters = new ArrayList<>(n.filterItemIds());
         if (!filters.remove(itemId)) return;
         replaceNode(copyNode(n, n.pageId(), n.x(), n.y(), n.expanded(), n.enabled(), filters, n.receiveFilterIds(), n.replenishRules()));
-        String port = filterPort(itemId);
+        String port = GraphResourceUtils.filterPort(itemId);
         draftEdges.removeIf(e -> e.fromNodeId().equals(nodeId) && e.fromPortKey().equals(port));
         markDirty();
     }
 
     private void addReplenishRule(String nodeId, String itemId, int targetCount) {
-        itemId = normalizeFilterResource(itemId);
+        itemId = GraphResourceUtils.normalizeFilterResource(itemId);
         if (itemId.startsWith(TransferEdge.FLUID_PREFIX)) return;
         TransferGraphSyncPacket.NodeData n = node(nodeId);
         if (n == null || !n.type().equals("PLAYER_INVENTORY")) return;
@@ -1941,13 +1800,6 @@ public class TransferGraphScreen extends Screen {
         if (rules.removeIf(rule -> rule.itemId().equals(itemId))) {
             replaceNode(copyNode(n, n.pageId(), n.x(), n.y(), n.expanded(), n.enabled(), n.filterItemIds(), n.receiveFilterIds(), rules));
         }
-    }
-
-    private String normalizeFilterResource(String resourceId) {
-        if (resourceId == null) return "";
-        if (resourceId.startsWith(TransferEdge.ITEM_PREFIX)) return resourceId.substring(TransferEdge.ITEM_PREFIX.length());
-        if (resourceId.startsWith(TransferEdge.FLUID_PREFIX)) return resourceId;
-        return resourceId;
     }
 
     private boolean playerRuleHit(TransferGraphSyncPacket.NodeData node, double mx, double my) {
@@ -2000,7 +1852,7 @@ public class TransferGraphScreen extends Screen {
                     rows.add(new TransferGraphSyncPacket.EdgeItemRateData(itemId, enabled, TransferEdge.clampSeconds(seconds), TransferEdge.clampRate(items),
                             "UNMEASURED", 0, true));
                 }
-                draftEdges.set(i, copyEdge(e, e.enabled(), rows));
+                draftEdges.set(i, GraphResourceUtils.copyEdge(e, e.enabled(), rows));
                 selectedRateItemId = itemId;
                 markDirty();
                 return;
@@ -2012,7 +1864,7 @@ public class TransferGraphScreen extends Screen {
         for (int i = 0; i < draftEdges.size(); i++) {
             TransferGraphSyncPacket.EdgeData e = draftEdges.get(i);
             if (e.id().equals(edgeId)) {
-                draftEdges.set(i, copyEdge(e, !e.enabled(), e.itemRates()));
+                draftEdges.set(i, GraphResourceUtils.copyEdge(e, !e.enabled(), e.itemRates()));
                 markDirty();
                 return;
             }
@@ -2022,73 +1874,6 @@ public class TransferGraphScreen extends Screen {
     private void deleteEdge(String edgeId) {
         draftEdges.removeIf(e -> e.id().equals(edgeId));
         markDirty();
-    }
-
-    private TransferGraphSyncPacket.EdgeData copyEdge(TransferGraphSyncPacket.EdgeData e, boolean enabled, List<TransferGraphSyncPacket.EdgeItemRateData> itemRates) {
-        return new TransferGraphSyncPacket.EdgeData(e.id(), e.pageId(), e.fromNodeId(), e.toNodeId(), e.fromPortKey(), e.toPortKey(),
-                enabled, false, 1, 64, aggregateHealth(itemRates, enabled), aggregateActualRate(itemRates), List.copyOf(itemRates));
-    }
-
-    private List<TransferGraphSyncPacket.EdgeItemRateData> defaultItemRatesForPort(String portKey) {
-        if (portKey != null && (portKey.startsWith(TransferEdge.ITEM_PREFIX) || portKey.startsWith(TransferEdge.FLUID_PREFIX))) {
-            return List.of(new TransferGraphSyncPacket.EdgeItemRateData(portKey, false, 1, 64, "UNMEASURED", 0, false));
-        }
-        return List.of();
-    }
-
-    private List<TransferGraphSyncPacket.EdgeItemRateData> edgeRateRows(TransferGraphSyncPacket.EdgeData edge) {
-        List<TransferGraphSyncPacket.EdgeItemRateData> rows = new ArrayList<>(edge.itemRates());
-        if (edge.fromPortKey().startsWith(TransferEdge.ITEM_PREFIX) || edge.fromPortKey().startsWith(TransferEdge.FLUID_PREFIX)) {
-            String itemId = edge.fromPortKey();
-            boolean exists = false;
-            for (TransferGraphSyncPacket.EdgeItemRateData row : rows) {
-                if (row.itemId().equals(itemId)) {
-                    exists = true;
-                    break;
-                }
-            }
-            if (!exists) rows.add(0, new TransferGraphSyncPacket.EdgeItemRateData(itemId, false, 1, 64, "UNMEASURED", 0, false));
-        }
-        return rows;
-    }
-
-    private TransferGraphSyncPacket.EdgeItemRateData edgeRateRow(TransferGraphSyncPacket.EdgeData edge, String itemId) {
-        if (edge == null || itemId == null) return null;
-        for (TransferGraphSyncPacket.EdgeItemRateData row : edgeRateRows(edge)) {
-            if (row.itemId().equals(itemId)) return row;
-        }
-        return null;
-    }
-
-    private String defaultRateItemId(TransferGraphSyncPacket.EdgeData edge) {
-        List<TransferGraphSyncPacket.EdgeItemRateData> rows = edgeRateRows(edge);
-        return rows.isEmpty() ? null : rows.get(0).itemId();
-    }
-
-    private int edgeVisualRate(TransferGraphSyncPacket.EdgeData edge) {
-        return Math.max(edge.actualRatePerMinute(), aggregateActualRate(edge.itemRates()));
-    }
-
-    private int aggregateActualRate(List<TransferGraphSyncPacket.EdgeItemRateData> rows) {
-        int total = 0;
-        for (TransferGraphSyncPacket.EdgeItemRateData row : rows) total += row.actualRatePerMinute();
-        return total;
-    }
-
-    private String aggregateHealth(List<TransferGraphSyncPacket.EdgeItemRateData> rows, boolean enabled) {
-        if (!enabled) return "DISABLED";
-        boolean healthy = false;
-        boolean source = false;
-        boolean receiver = false;
-        for (TransferGraphSyncPacket.EdgeItemRateData row : rows) {
-            if ("DEADLOCKED".equals(row.health())) return "DEADLOCKED";
-            if ("RECEIVER_BLOCKED".equals(row.health())) receiver = true;
-            else if ("SOURCE_SHORTAGE".equals(row.health())) source = true;
-            else if ("HEALTHY".equals(row.health())) healthy = true;
-        }
-        if (receiver) return "RECEIVER_BLOCKED";
-        if (source) return "SOURCE_SHORTAGE";
-        return healthy ? "HEALTHY" : "UNMEASURED";
     }
 
     private void replaceNode(TransferGraphSyncPacket.NodeData updated) {
@@ -2184,7 +1969,7 @@ public class TransferGraphScreen extends Screen {
         if (node.type().equals("TRASH")) return isExpanded(node) ? 88 : 78;
         if (node.type().equals("PLAYER_INVENTORY")) return isExpanded(node) ? 104 + Math.max(1, node.replenishRules().size()) * 18 : 78;
         if (!isExpanded(node)) return COLLAPSED_CHEST_H;
-        return chestFirstFilterLocalY() + Math.max(1, node.filterItemIds().size()) * 18 + 12;
+        return GraphNodeLayout.chestFirstFilterLocalY() + Math.max(1, node.filterItemIds().size()) * 18 + 12;
     }
 
     private int nodeWidth(TransferGraphSyncPacket.NodeData node) {
@@ -2210,52 +1995,28 @@ public class TransferGraphScreen extends Screen {
     private record PortHit(String nodeId, String portKey) {}
     private record FilterHit(String itemId, boolean consumed) {}
 
-    private int chestItemLocalY() {
-        return 52;
-    }
-
-    private int chestFluidLocalY() {
-        return 70;
-    }
-
-    private int chestEnergyLocalY() {
-        return 88;
-    }
-
-    private int chestStressLocalY() {
-        return 106;
-    }
-
-    private int chestAddFilterLocalY() {
-        return 124;
-    }
-
-    private int chestFirstFilterLocalY() {
-        return 144;
-    }
-
     private int allOutputY(TransferGraphSyncPacket.NodeData node) {
-        return nodeScreenY(node) + scaled(chestItemLocalY());
+        return nodeScreenY(node) + scaled(GraphNodeLayout.chestItemLocalY());
     }
 
     private int fluidOutputY(TransferGraphSyncPacket.NodeData node) {
-        return nodeScreenY(node) + scaled(chestFluidLocalY());
+        return nodeScreenY(node) + scaled(GraphNodeLayout.chestFluidLocalY());
     }
 
     private int energyOutputY(TransferGraphSyncPacket.NodeData node) {
-        return nodeScreenY(node) + scaled(chestEnergyLocalY());
+        return nodeScreenY(node) + scaled(GraphNodeLayout.chestEnergyLocalY());
     }
 
     private int stressOutputY(TransferGraphSyncPacket.NodeData node) {
-        return nodeScreenY(node) + scaled(chestStressLocalY());
+        return nodeScreenY(node) + scaled(GraphNodeLayout.chestStressLocalY());
     }
 
     private int firstFilterY(TransferGraphSyncPacket.NodeData node) {
-        return nodeScreenY(node) + scaled(chestFirstFilterLocalY());
+        return nodeScreenY(node) + scaled(GraphNodeLayout.chestFirstFilterLocalY());
     }
 
     private int inputY(TransferGraphSyncPacket.NodeData node) {
-        return nodeScreenY(node) + scaled(node.type().equals("REROUTE") || node.type().equals("TRASH") || node.type().equals("PLAYER_INVENTORY") ? nodeHeight(node) / 2 : chestItemLocalY());
+        return nodeScreenY(node) + scaled(node.type().equals("REROUTE") || node.type().equals("TRASH") || node.type().equals("PLAYER_INVENTORY") ? nodeHeight(node) / 2 : GraphNodeLayout.chestItemLocalY());
     }
 
     private int chestInputY(TransferGraphSyncPacket.NodeData node, String sourcePort) {
@@ -2280,7 +2041,7 @@ public class TransferGraphScreen extends Screen {
     private PortHit outputAt(double mx, double my) {
         for (TransferGraphSyncPacket.NodeData node : visibleNodes()) {
             if (!node.type().equals("CHEST") && !node.type().equals("REROUTE")) continue;
-            int x = nodeScreenX(node) + scaled(node.type().equals("REROUTE") ? rerouteOutputPortLocalX() : outputPortLocalX());
+            int x = nodeScreenX(node) + scaled(node.type().equals("REROUTE") ? GraphNodeLayout.rerouteOutputPortLocalX() : GraphNodeLayout.outputPortLocalX());
             if (node.type().equals("REROUTE")) {
                 for (String port : visibleRerouteOutputPorts(node)) {
                     if (hit(mx, my, x, rerouteOutputY(node, port))) return new PortHit(node.id(), port);
@@ -2295,7 +2056,7 @@ public class TransferGraphScreen extends Screen {
             if (!isExpanded(node)) continue;
             int iy = firstFilterY(node);
             for (String filter : node.filterItemIds()) {
-                if (hit(mx, my, x, iy)) return new PortHit(node.id(), filterPort(filter));
+                if (hit(mx, my, x, iy)) return new PortHit(node.id(), GraphResourceUtils.filterPort(filter));
                 iy += scaled(18);
             }
         }
@@ -2305,7 +2066,7 @@ public class TransferGraphScreen extends Screen {
     private PortHit inputAt(double mx, double my) {
         for (TransferGraphSyncPacket.NodeData node : visibleNodes()) {
             if (!node.type().equals("CHEST") && !node.type().equals("REROUTE") && !node.type().equals("TRASH") && !node.type().equals("PLAYER_INVENTORY")) continue;
-            int x = nodeScreenX(node) + scaled(inputPortLocalX());
+            int x = nodeScreenX(node) + scaled(GraphNodeLayout.inputPortLocalX());
             if (node.type().equals("CHEST")) {
                 if (hit(mx, my, x, allOutputY(node))) return new PortHit(node.id(), TransferEdge.ITEM_IN);
                 if (hit(mx, my, x, fluidOutputY(node))) return new PortHit(node.id(), TransferEdge.FLUID_IN);
@@ -2328,7 +2089,7 @@ public class TransferGraphScreen extends Screen {
 
     private boolean chestAddHit(TransferGraphSyncPacket.NodeData node, double mx, double my) {
         return node.type().equals("CHEST") && isExpanded(node) && mx >= nodeScreenX(node) + scaled(8) && mx < nodeScreenX(node) + scaled(90)
-                && my >= nodeScreenY(node) + scaled(chestAddFilterLocalY() - 5) && my < nodeScreenY(node) + scaled(chestAddFilterLocalY() + 14);
+                && my >= nodeScreenY(node) + scaled(GraphNodeLayout.chestAddFilterLocalY() - 5) && my < nodeScreenY(node) + scaled(GraphNodeLayout.chestAddFilterLocalY() + 14);
     }
 
     private SearchKind chestQuickFilterHit(TransferGraphSyncPacket.NodeData node, double mx, double my) {
@@ -2336,8 +2097,8 @@ public class TransferGraphScreen extends Screen {
         double lx = nodeLocalX(node, mx);
         double ly = nodeLocalY(node, my);
         int bx = NODE_W - 36;
-        if (inside(lx, ly, bx, chestItemLocalY() - 8, 18, 14)) return SearchKind.ITEM;
-        if (inside(lx, ly, bx, chestFluidLocalY() - 8, 18, 14)) return SearchKind.FLUID;
+        if (inside(lx, ly, bx, GraphNodeLayout.chestItemLocalY() - 8, 18, 14)) return SearchKind.ITEM;
+        if (inside(lx, ly, bx, GraphNodeLayout.chestFluidLocalY() - 8, 18, 14)) return SearchKind.FLUID;
         return null;
     }
 
@@ -2345,12 +2106,12 @@ public class TransferGraphScreen extends Screen {
         if (!node.type().equals("CHEST") || !isExpanded(node)) return null;
         int y = firstFilterY(node);
         for (String filter : node.filterItemIds()) {
-            if (mx >= nodeScreenX(node) + scaled(filterRemoveLocalX() - 8) && mx < nodeScreenX(node) + scaled(filterRemoveLocalX() + 9)
+            if (mx >= nodeScreenX(node) + scaled(GraphNodeLayout.filterRemoveLocalX() - 8) && mx < nodeScreenX(node) + scaled(GraphNodeLayout.filterRemoveLocalX() + 9)
                     && my >= y - scaled(8) && my < y + scaled(8)) {
                 removeFilterItem(node.id(), filter);
                 return new FilterHit(filter, true);
             }
-            if (mx >= nodeScreenX(node) + scaled(6) && mx < nodeScreenX(node) + scaled(filterRemoveLocalX() - 11)
+            if (mx >= nodeScreenX(node) + scaled(6) && mx < nodeScreenX(node) + scaled(GraphNodeLayout.filterRemoveLocalX() - 11)
                     && my >= y - scaled(9) && my < y + scaled(9)) return new FilterHit(filter, false);
             y += scaled(18);
         }
@@ -2362,22 +2123,22 @@ public class TransferGraphScreen extends Screen {
     }
 
     private int[] inputPos(TransferGraphSyncPacket.NodeData node, String sourcePort) {
-        return new int[]{nodeScreenX(node) + scaled(inputPortLocalX()), chestInputY(node, sourcePort)};
+        return new int[]{nodeScreenX(node) + scaled(GraphNodeLayout.inputPortLocalX()), chestInputY(node, sourcePort)};
     }
 
     private int[] outputPos(TransferGraphSyncPacket.NodeData node, String portKey) {
-        if (node.type().equals("REROUTE")) return new int[]{nodeScreenX(node) + scaled(rerouteOutputPortLocalX()), rerouteOutputY(node, portKey)};
-        if (TransferEdge.PORT_ALL.equals(portKey)) return new int[]{nodeScreenX(node) + scaled(outputPortLocalX()), allOutputY(node)};
-        if (TransferEdge.FLUID_ALL.equals(portKey)) return new int[]{nodeScreenX(node) + scaled(outputPortLocalX()), fluidOutputY(node)};
-        if (TransferEdge.ENERGY_FE.equals(portKey)) return new int[]{nodeScreenX(node) + scaled(outputPortLocalX()), energyOutputY(node)};
-        if (TransferEdge.STRESS_SU.equals(portKey)) return new int[]{nodeScreenX(node) + scaled(outputPortLocalX()), stressOutputY(node)};
-        if (!isExpanded(node)) return new int[]{nodeScreenX(node) + scaled(outputPortLocalX()), allOutputY(node)};
+        if (node.type().equals("REROUTE")) return new int[]{nodeScreenX(node) + scaled(GraphNodeLayout.rerouteOutputPortLocalX()), rerouteOutputY(node, portKey)};
+        if (TransferEdge.PORT_ALL.equals(portKey)) return new int[]{nodeScreenX(node) + scaled(GraphNodeLayout.outputPortLocalX()), allOutputY(node)};
+        if (TransferEdge.FLUID_ALL.equals(portKey)) return new int[]{nodeScreenX(node) + scaled(GraphNodeLayout.outputPortLocalX()), fluidOutputY(node)};
+        if (TransferEdge.ENERGY_FE.equals(portKey)) return new int[]{nodeScreenX(node) + scaled(GraphNodeLayout.outputPortLocalX()), energyOutputY(node)};
+        if (TransferEdge.STRESS_SU.equals(portKey)) return new int[]{nodeScreenX(node) + scaled(GraphNodeLayout.outputPortLocalX()), stressOutputY(node)};
+        if (!isExpanded(node)) return new int[]{nodeScreenX(node) + scaled(GraphNodeLayout.outputPortLocalX()), allOutputY(node)};
         int y = firstFilterY(node);
         for (String filter : node.filterItemIds()) {
-            if (filterPort(filter).equals(portKey)) return new int[]{nodeScreenX(node) + scaled(outputPortLocalX()), y};
+            if (GraphResourceUtils.filterPort(filter).equals(portKey)) return new int[]{nodeScreenX(node) + scaled(GraphNodeLayout.outputPortLocalX()), y};
             y += scaled(18);
         }
-        return new int[]{nodeScreenX(node) + scaled(outputPortLocalX()), allOutputY(node)};
+        return new int[]{nodeScreenX(node) + scaled(GraphNodeLayout.outputPortLocalX()), allOutputY(node)};
     }
 
     private float laneOffset(TransferGraphSyncPacket.EdgeData edge) {
@@ -2406,7 +2167,7 @@ public class TransferGraphScreen extends Screen {
                 bestId = edge.id();
             }
         }
-        return bestDistance <= Math.max(7.0, scaledLineWidth(3.1f) + 5.0f) ? bestId : null;
+        return bestDistance <= Math.max(7.0, canvas.scaledLineWidth(3.1f) + 5.0f) ? bestId : null;
     }
 
     private double distanceToBezier(double mx, double my, double x0, double y0, double x3, double y3, float laneOffset) {
@@ -2417,8 +2178,8 @@ public class TransferGraphScreen extends Screen {
         double px = x0, py = y0;
         for (int i = 1; i <= segments; i++) {
             double t = i / (double) segments;
-            double x = cubic(x0, x1, x2, x3, t);
-            double y = cubic(y0, y1, y2, y3, t);
+            double x = GraphCanvas.cubic(x0, x1, x2, x3, t);
+            double y = GraphCanvas.cubic(y0, y1, y2, y3, t);
             best = Math.min(best, distanceToSegment(mx, my, px, py, x, y));
             px = x;
             py = y;
@@ -2449,7 +2210,7 @@ public class TransferGraphScreen extends Screen {
             if (resource.startsWith(TransferEdge.ITEM_PREFIX) || resource.startsWith(TransferEdge.FLUID_PREFIX)
                     || TransferEdge.ENERGY_FE.equals(resource) || TransferEdge.STRESS_SU.equals(resource)) ports.add(resource);
         }
-        for (String filter : node.filterItemIds()) ports.add(filterPort(filter));
+        for (String filter : node.filterItemIds()) ports.add(GraphResourceUtils.filterPort(filter));
         for (TransferGraphSyncPacket.NodeFlowData flow : node.flowStats()) ports.add(flow.itemId());
         for (TransferGraphSyncPacket.EdgeData edge : visibleEdges()) {
             if (edge.fromNodeId().equals(node.id())) ports.add(edge.fromPortKey());
@@ -2469,7 +2230,7 @@ public class TransferGraphScreen extends Screen {
             }
         }
         for (String itemId : node.filterItemIds()) {
-            String resourceId = filterPort(itemId);
+            String resourceId = GraphResourceUtils.filterPort(itemId);
             if (seen.add(resourceId)) rows.add(new TransferGraphSyncPacket.NodeFlowData(resourceId, 0, 0, 0, 0));
         }
         return rows;
@@ -2723,7 +2484,7 @@ public class TransferGraphScreen extends Screen {
         List<TransferGraphSyncPacket.EdgeData> copy = new ArrayList<>();
         for (TransferGraphSyncPacket.EdgeData e : edges) {
             copy.add(new TransferGraphSyncPacket.EdgeData(e.id(), e.pageId(), e.fromNodeId(), e.toNodeId(), e.fromPortKey(), e.toPortKey(),
-                    e.enabled(), false, 1, 64, e.health(), e.actualRatePerMinute(), List.copyOf(e.itemRates())));
+                    e.enabled(), e.health(), e.actualRatePerMinute(), List.copyOf(e.itemRates())));
         }
         return copy;
     }
@@ -2753,7 +2514,7 @@ public class TransferGraphScreen extends Screen {
     }
 
     private void syncRateEditors(TransferGraphSyncPacket.EdgeData edge) {
-        TransferGraphSyncPacket.EdgeItemRateData row = edgeRateRow(edge, selectedRateItemId);
+        TransferGraphSyncPacket.EdgeItemRateData row = GraphResourceUtils.edgeRateRow(edge, selectedRateItemId);
         if (row == null) {
             if (focusedEdgeField != EdgeField.SECONDS) rateSecondsValue = "1";
             if (focusedEdgeField != EdgeField.ITEMS) rateItemsValue = "64";
@@ -2803,11 +2564,11 @@ public class TransferGraphScreen extends Screen {
     }
 
     private double scaledPopupLocalX(double mx) {
-        return (mx - popupX) / canvasUiScale();
+        return (mx - popupX) / canvas.canvasUiScale();
     }
 
     private double scaledPopupLocalY(double my) {
-        return (my - popupY) / canvasUiScale();
+        return (my - popupY) / canvas.canvasUiScale();
     }
 
     private boolean inside(double mx, double my, int x, int y, int w, int h) {
@@ -2816,92 +2577,6 @@ public class TransferGraphScreen extends Screen {
 
     private int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
-    }
-
-    private String edgeRateLabel(TransferGraphSyncPacket.EdgeData edge) {
-        if (edge.itemRates().isEmpty()) return "未测";
-        return edge.itemRates().size() + "项 · " + aggregateActualRate(edge.itemRates()) + "/分";
-    }
-
-    private String portLabel(String portKey) {
-        if (TransferEdge.PORT_ALL.equals(portKey)) return "全部物品";
-        if (TransferEdge.FLUID_ALL.equals(portKey)) return "全部流体";
-        if (TransferEdge.ENERGY_FE.equals(portKey)) return "电力 FE";
-        if (TransferEdge.STRESS_SU.equals(portKey)) return "应力 SU";
-        if (portKey.startsWith(TransferEdge.ITEM_PREFIX) || portKey.startsWith(TransferEdge.FLUID_PREFIX)) return shortResource(portKey);
-        return portKey;
-    }
-
-    private String filterPort(String filter) {
-        if (filter != null && filter.startsWith(TransferEdge.FLUID_PREFIX)) return filter;
-        if (filter != null && filter.startsWith(TransferEdge.ITEM_PREFIX)) return filter;
-        return TransferEdge.itemPort(filter);
-    }
-
-    private String filterFromPort(String port) {
-        if (port != null && port.startsWith(TransferEdge.FLUID_PREFIX)) return port;
-        if (port != null && port.startsWith(TransferEdge.ITEM_PREFIX)) return port.substring(TransferEdge.ITEM_PREFIX.length());
-        return port;
-    }
-
-    private boolean isFilterPort(String port) {
-        return port != null && (port.startsWith(TransferEdge.ITEM_PREFIX) || port.startsWith(TransferEdge.FLUID_PREFIX));
-    }
-
-    private Item resolveItem(String itemId) {
-        if (itemId != null && itemId.startsWith(TransferEdge.ITEM_PREFIX)) itemId = itemId.substring(TransferEdge.ITEM_PREFIX.length());
-        if (itemId != null && itemId.startsWith(TransferEdge.FLUID_PREFIX)) return null;
-        ResourceLocation id = ResourceLocation.tryParse(itemId);
-        if (id == null) return null;
-        Item item = BuiltInRegistries.ITEM.get(id);
-        return item == Items.AIR ? null : item;
-    }
-
-    private Fluid resolveFluid(String resourceId) {
-        if (resourceId != null && resourceId.startsWith(TransferEdge.FLUID_PREFIX)) resourceId = resourceId.substring(TransferEdge.FLUID_PREFIX.length());
-        ResourceLocation id = ResourceLocation.tryParse(resourceId);
-        if (id == null) return null;
-        Fluid fluid = BuiltInRegistries.FLUID.get(id);
-        return fluid == Fluids.EMPTY ? null : fluid;
-    }
-
-    private boolean isFluidResource(String resourceId) {
-        return resourceId != null && resourceId.startsWith(TransferEdge.FLUID_PREFIX);
-    }
-
-    private String shortResource(String resourceId) {
-        if (TransferEdge.FLUID_ALL.equals(resourceId)) return "全部流体";
-        if (TransferEdge.PORT_ALL.equals(resourceId)) return "全部物品";
-        if (TransferEdge.ENERGY_FE.equals(resourceId)) return "电力 FE";
-        if (TransferEdge.STRESS_SU.equals(resourceId)) return "应力 SU";
-        if (resourceId == null) return "";
-        if (resourceId.startsWith(TransferEdge.FLUID_PREFIX)) {
-            Fluid fluid = resolveFluid(resourceId);
-            if (fluid != null) return new FluidStack(fluid, 1).getHoverName().getString();
-        } else {
-            Item item = resolveItem(resourceId);
-            if (item != null) return new ItemStack(item).getHoverName().getString();
-        }
-        String id = resourceId;
-        if (id.startsWith(TransferEdge.ITEM_PREFIX)) id = id.substring(TransferEdge.ITEM_PREFIX.length());
-        if (id.startsWith(TransferEdge.FLUID_PREFIX)) id = id.substring(TransferEdge.FLUID_PREFIX.length());
-        return shortItem(id);
-    }
-
-    private String resourceRateLabel(int value, String resourceId) {
-        if (TransferEdge.ENERGY_FE.equals(resourceId)) return value + "FE/分";
-        if (TransferEdge.STRESS_SU.equals(resourceId)) return value + "SU/分";
-        return value + (isFluidResource(resourceId) ? "mB/分" : "/分");
-    }
-
-    private String shortItem(String itemId) {
-        int slash = itemId.indexOf(':');
-        return slash >= 0 ? itemId.substring(slash + 1) : itemId;
-    }
-
-    private String shortPos(long packed) {
-        BlockPos pos = BlockPos.of(packed);
-        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
 
     @Override

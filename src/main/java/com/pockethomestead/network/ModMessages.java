@@ -89,5 +89,58 @@ public class ModMessages {
                 DimensionBiomesPayload.STREAM_CODEC,
                 DimensionBiomesPayload::handleOnClient
         );
+
+        // 以下原在 PocketHomestead.registerPayloads 中注册，统一到此
+
+        registrar.playToServer(
+                ChestConfigPacket.TYPE,
+                ChestConfigPacket.STREAM_CODEC,
+                ChestConfigPacket::handle
+        );
+        registrar.playToClient(
+                ChestSyncPacket.TYPE,
+                ChestSyncPacket.STREAM_CODEC,
+                ChestSyncPacket::handle
+        );
+        registrar.playToServer(
+                RequestTransferGraphPacket.TYPE,
+                RequestTransferGraphPacket.STREAM_CODEC,
+                RequestTransferGraphPacket::handle
+        );
+        registrar.playToServer(
+                SaveTransferGraphPacket.TYPE,
+                SaveTransferGraphPacket.STREAM_CODEC,
+                SaveTransferGraphPacket::handle
+        );
+        registrar.playToClient(
+                TransferGraphSyncPacket.TYPE,
+                TransferGraphSyncPacket.STREAM_CODEC,
+                TransferGraphSyncPacket::handle
+        );
+        registrar.playToClient(
+                TransferGraphValidationPacket.TYPE,
+                TransferGraphValidationPacket.STREAM_CODEC,
+                TransferGraphValidationPacket::handle
+        );
+        registrar.playToServer(
+                TransferTeamPacket.TYPE,
+                TransferTeamPacket.STREAM_CODEC,
+                TransferTeamPacket::handle
+        );
+        registrar.playToServer(
+                RequestProductionStatsPacket.TYPE,
+                RequestProductionStatsPacket.STREAM_CODEC,
+                RequestProductionStatsPacket::handle
+        );
+        registrar.playToServer(
+                UpdateProductionStatsPacket.TYPE,
+                UpdateProductionStatsPacket.STREAM_CODEC,
+                UpdateProductionStatsPacket::handle
+        );
+        registrar.playToClient(
+                ProductionStatsSyncPacket.TYPE,
+                ProductionStatsSyncPacket.STREAM_CODEC,
+                ProductionStatsSyncPacket::handle
+        );
     }
 }

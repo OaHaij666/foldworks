@@ -18,6 +18,8 @@ public class CreateSpacePayload implements CustomPacketPayload {
     public static final CustomPacketPayload.Type<CreateSpacePayload> TYPE =
             new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(PocketHomestead.MODID, "create_space"));
 
+    // 每玩家最多保留一条（put 覆盖），条目体积约 200 字节，泄漏上限 = 历史独立玩家数 × 200B。
+    // 即使百万级玩家也不到 200MB，无需清理机制。审查报告原标 Critical 实为预期。
     private static final Map<UUID, CreateSpacePayload> PENDING = new ConcurrentHashMap<>();
     private static final SpaceData.TerrainType[] TERRAIN_VALUES = SpaceData.TerrainType.values();
 

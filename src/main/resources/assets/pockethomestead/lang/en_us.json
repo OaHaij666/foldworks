@@ -75,6 +75,7 @@
   "pockethomestead.permission.name_hint": "Player name",
   "pockethomestead.permission.no_list_hint": "This mode needs no list",
   "pockethomestead.permission.player_not_found": "Player not found: %s",
+  "pockethomestead.permission.denied": "You do not have permission to do this",
 
   "pockethomestead.space.list.title": "Homesteads",
   "pockethomestead.space.list.in_space": "You are visiting a pocket world",
@@ -109,5 +110,9 @@
   "pockethomestead.chest.void_off": "Void: OFF",
   "pockethomestead.chest.energy": "Energy",
   "pockethomestead.chest.stress": "Stress",
-  "pockethomestead.chest.side_config": "Side Config"
+  "pockethomestead.chest.side_config": "Side Config",
+
+  "pockethomestead.team.delete.not_empty": "Transfer graph under this team is not empty. Remove all nodes and edges before deleting.",
+
+  "pockethomestead.space.create.limit_exceeded": "Space count limit reached (%s)"
 }

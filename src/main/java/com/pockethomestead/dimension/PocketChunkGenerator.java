@@ -3,6 +3,7 @@ package com.pockethomestead.dimension;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
+import com.pockethomestead.PocketHomestead;
 import com.pockethomestead.space.SpaceData;
 import com.pockethomestead.space.SpaceManager;
 import com.pockethomestead.util.Constants;
@@ -56,9 +57,20 @@ public class PocketChunkGenerator extends ChunkGenerator {
             ).apply(instance, (biomeSource, seed, spaceId) -> new PocketChunkGenerator(
                     biomeSource,
                     seed,
-                    spaceId.isBlank() ? null : UUID.fromString(spaceId)
+                    parseSpaceId(spaceId)
             ))
     );
+
+    /** 容错解析 space_id：格式非法时返回 null 而非抛异常，避免 Codec 解析失败导致维度不可用 */
+    private static UUID parseSpaceId(String spaceId) {
+        if (spaceId == null || spaceId.isBlank()) return null;
+        try {
+            return UUID.fromString(spaceId);
+        } catch (IllegalArgumentException e) {
+            PocketHomestead.LOGGER.warn("无法解析 space_id '{}', 维度将无空间关联", spaceId);
+            return null;
+        }
+    }
 
     private final long seed;
     private final UUID spaceId;
@@ -253,6 +265,26 @@ public class PocketChunkGenerator extends ChunkGenerator {
         int chunkMinX = chunk.getPos().getMinBlockX();
         int chunkMinZ = chunk.getPos().getMinBlockZ();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        BlockState bedrock = Blocks.BEDROCK.defaultBlockState();
+
+        // 预计算 biome 对应的地表/次表层/深层 BlockState（空间内 biome 固定，避免每 block 做 String 切分）
+        BlockState surfaceSt, subSurfaceSt, deepSt;
+        int dirtLayers;
+        switch (space.getTerrainType()) {
+            case NATURAL -> {
+                surfaceSt = surfaceState(space.getBiome());
+                subSurfaceSt = subSurfaceState(space.getBiome());
+                deepSt = deepState(space.getBiome());
+                dirtLayers = 3;
+            }
+            case FLAT, SUPERFLAT -> {
+                surfaceSt = Blocks.GRASS_BLOCK.defaultBlockState();
+                subSurfaceSt = Blocks.DIRT.defaultBlockState();
+                deepSt = Blocks.STONE.defaultBlockState();
+                dirtLayers = FLAT_DIRT_LAYERS;
+            }
+            default -> throw new IllegalStateException("未知的 terrain type: " + space.getTerrainType());
+        }
 
         for (int lx = 0; lx < 16; lx++) {
             int x = chunkMinX + lx;
@@ -263,7 +295,11 @@ public class PocketChunkGenerator extends ChunkGenerator {
                 int surfaceY = getSurfaceY(space, x, z);
                 for (int y = Constants.BEDROCK_LAYER_Y; y <= surfaceY; y++) {
                     pos.set(x, y, z);
-                    BlockState st = stateAt(space, y, surfaceY);
+                    BlockState st;
+                    if (y == Constants.BEDROCK_LAYER_Y) st = bedrock;
+                    else if (y == surfaceY) st = surfaceSt;
+                    else if (surfaceY - y <= dirtLayers) st = subSurfaceSt;
+                    else st = deepSt;
                     chunk.setBlockState(pos, st, false);
                 }
             }
@@ -297,7 +333,7 @@ public class PocketChunkGenerator extends ChunkGenerator {
         sealChunk(level, chunk, space, chunkMinX, chunkMinZ);
     }
 
-    // 先把 footprint 外的列清成空气，再补齐边界屏障墙
+    // 清除 footprint 外列的装饰方块。边界屏障已在 fillFromNoise 的 placeBoundaryWalls 放置，BARRIER 不可破坏，无需重复
     private void sealChunk(WorldGenLevel level, ChunkAccess chunk, SpaceData space, int chunkMinX, int chunkMinZ) {
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         BlockState air = Blocks.AIR.defaultBlockState();
@@ -305,23 +341,10 @@ public class PocketChunkGenerator extends ChunkGenerator {
             int x = chunkMinX + lx;
             for (int lz = 0; lz < 16; lz++) {
                 int z = chunkMinZ + lz;
-                boolean inside = insideSpace(space, x, z);
-                if (inside) continue;
+                if (insideSpace(space, x, z)) continue;
                 for (int y = Constants.BEDROCK_LAYER_Y; y <= SEAL_TOP_Y; y++) {
                     pos.set(x, y, z);
                     chunk.setBlockState(pos, air, false);
-                }
-            }
-        }
-        int topY = Constants.WORLD_MAX_Y;
-        for (int lx = 0; lx < 16; lx++) {
-            int x = chunkMinX + lx;
-            for (int lz = 0; lz < 16; lz++) {
-                int z = chunkMinZ + lz;
-                if (!onBoundary(space, x, z)) continue;
-                for (int y = Constants.BEDROCK_LAYER_Y; y < topY; y++) {
-                    pos.set(x, y, z);
-                    chunk.setBlockState(pos, Blocks.BARRIER.defaultBlockState(), false);
                 }
             }
         }
@@ -363,6 +386,7 @@ public class PocketChunkGenerator extends ChunkGenerator {
         return lerp(lerp(a, b, tx), lerp(c, d, tx), tz);
     }
 
+    // splitmix64 风格的确定性 hash：用固定常量混合坐标生成伪随机值，常量来自 splitmix64 算法
     private static double randomValue(int x, int z, long salt) {
         long h = salt;
         h ^= x * 0x9E3779B97F4A7C15L;

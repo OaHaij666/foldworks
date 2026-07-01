@@ -2,16 +2,16 @@ package com.pockethomestead;
 
 import com.pockethomestead.config.ModConfig;
 import com.pockethomestead.dimension.SpaceDimensionService;
-import com.pockethomestead.network.ChestConfigPacket;
-import com.pockethomestead.network.ChestSyncPacket;
-import com.pockethomestead.network.ProductionStatsSyncPacket;
-import com.pockethomestead.network.RequestProductionStatsPacket;
-import com.pockethomestead.network.RequestTransferGraphPacket;
-import com.pockethomestead.network.SaveTransferGraphPacket;
-import com.pockethomestead.network.TransferGraphSyncPacket;
-import com.pockethomestead.network.TransferGraphValidationPacket;
-import com.pockethomestead.network.TransferTeamPacket;
-import com.pockethomestead.network.UpdateProductionStatsPacket;
+
+
+
+
+
+
+
+
+
+
 import com.pockethomestead.registration.*;
 import com.pockethomestead.space.SpaceData;
 import com.pockethomestead.space.SpaceManager;
@@ -25,6 +25,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.event.config.ModConfigEvent;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import org.slf4j.Logger;
 import com.mojang.logging.LogUtils;
@@ -46,8 +47,12 @@ public class PocketHomestead {
         // 注册配置
         modContainer.registerConfig(net.neoforged.fml.config.ModConfig.Type.COMMON, ModConfig.SPEC);
 
-        // 注册网络数据包
-        modEventBus.addListener(PocketHomestead::registerPayloads);
+        // 配置热更新：管理员通过 /config 修改调度参数后立即生效，无需重启服务器
+        modEventBus.addListener(ModConfigEvent.Reloading.class, event -> {
+            com.pockethomestead.scheduler.SpaceScheduler.getInstance().reloadBudget();
+        });
+
+        // 网络包注册统一在 ModMessages 中处理
         if (net.neoforged.fml.loading.FMLEnvironment.dist == net.neoforged.api.distmarker.Dist.CLIENT) {
             com.pockethomestead.client.ClientEvents.register(modEventBus);
         }
@@ -63,63 +68,6 @@ public class PocketHomestead {
         // 对照 TeamGalacticraft/DynamicDimensions Issue #10 与 PR #9。
         DimensionAddedCallback.register((key, level) -> level.getServer().markWorldsDirty());
         DimensionRemovedCallback.register((key, level) -> level.getServer().markWorldsDirty());
-    }
-
-    /**
-     * 注册自定义网络数据包
-     */
-    private static void registerPayloads(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("1");
-        registrar.playToServer(
-            ChestConfigPacket.TYPE,
-            ChestConfigPacket.STREAM_CODEC,
-            ChestConfigPacket::handle
-        );
-        registrar.playToClient(
-            ChestSyncPacket.TYPE,
-            ChestSyncPacket.STREAM_CODEC,
-            ChestSyncPacket::handle
-        );
-        registrar.playToServer(
-            RequestTransferGraphPacket.TYPE,
-            RequestTransferGraphPacket.STREAM_CODEC,
-            RequestTransferGraphPacket::handle
-        );
-        registrar.playToServer(
-            SaveTransferGraphPacket.TYPE,
-            SaveTransferGraphPacket.STREAM_CODEC,
-            SaveTransferGraphPacket::handle
-        );
-        registrar.playToClient(
-            TransferGraphSyncPacket.TYPE,
-            TransferGraphSyncPacket.STREAM_CODEC,
-            TransferGraphSyncPacket::handle
-        );
-        registrar.playToClient(
-            TransferGraphValidationPacket.TYPE,
-            TransferGraphValidationPacket.STREAM_CODEC,
-            TransferGraphValidationPacket::handle
-        );
-        registrar.playToServer(
-            TransferTeamPacket.TYPE,
-            TransferTeamPacket.STREAM_CODEC,
-            TransferTeamPacket::handle
-        );
-        registrar.playToServer(
-            RequestProductionStatsPacket.TYPE,
-            RequestProductionStatsPacket.STREAM_CODEC,
-            RequestProductionStatsPacket::handle
-        );
-        registrar.playToServer(
-            UpdateProductionStatsPacket.TYPE,
-            UpdateProductionStatsPacket.STREAM_CODEC,
-            UpdateProductionStatsPacket::handle
-        );
-        registrar.playToClient(
-            ProductionStatsSyncPacket.TYPE,
-            ProductionStatsSyncPacket.STREAM_CODEC,
-            ProductionStatsSyncPacket::handle
-        );
     }
 
     private static void loadSavedSpaceDimensions(MinecraftServer server,

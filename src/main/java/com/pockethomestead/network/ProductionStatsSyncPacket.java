@@ -28,12 +28,18 @@ public record ProductionStatsSyncPacket(
     public record InventoryData(String groupId, String itemId, int count) {}
     public record MemberData(String chestKey, String groupId) {}
 
+    private static final int MAX_GROUPS = 256;
+    private static final int MAX_BUCKETS = 4096;
+    private static final int MAX_INVENTORIES = 4096;
+    private static final int MAX_MEMBERS = 1024;
+    private static final int MAX_STRINGS = 1024;
+
     public static final StreamCodec<ByteBuf, ProductionStatsSyncPacket> STREAM_CODEC = new StreamCodec<>() {
         @Override
         public ProductionStatsSyncPacket decode(ByteBuf buf) {
             long gameTime = buf.readLong();
             List<GroupData> groups = new ArrayList<>();
-            int groupCount = ByteBufCodecs.VAR_INT.decode(buf);
+            int groupCount = checkCount(ByteBufCodecs.VAR_INT.decode(buf), MAX_GROUPS);
             for (int i = 0; i < groupCount; i++) {
                 groups.add(new GroupData(
                         ByteBufCodecs.STRING_UTF8.decode(buf),
@@ -44,7 +50,7 @@ public record ProductionStatsSyncPacket(
                 ));
             }
             List<BucketData> buckets = new ArrayList<>();
-            int bucketCount = ByteBufCodecs.VAR_INT.decode(buf);
+            int bucketCount = checkCount(ByteBufCodecs.VAR_INT.decode(buf), MAX_BUCKETS);
             for (int i = 0; i < bucketCount; i++) {
                 buckets.add(new BucketData(
                         ByteBufCodecs.STRING_UTF8.decode(buf),
@@ -55,7 +61,7 @@ public record ProductionStatsSyncPacket(
                 ));
             }
             List<InventoryData> inventories = new ArrayList<>();
-            int inventoryCount = ByteBufCodecs.VAR_INT.decode(buf);
+            int inventoryCount = checkCount(ByteBufCodecs.VAR_INT.decode(buf), MAX_INVENTORIES);
             for (int i = 0; i < inventoryCount; i++) {
                 inventories.add(new InventoryData(
                         ByteBufCodecs.STRING_UTF8.decode(buf),
@@ -64,7 +70,7 @@ public record ProductionStatsSyncPacket(
                 ));
             }
             List<MemberData> members = new ArrayList<>();
-            int memberCount = ByteBufCodecs.VAR_INT.decode(buf);
+            int memberCount = checkCount(ByteBufCodecs.VAR_INT.decode(buf), MAX_MEMBERS);
             for (int i = 0; i < memberCount; i++) {
                 members.add(new MemberData(ByteBufCodecs.STRING_UTF8.decode(buf), ByteBufCodecs.STRING_UTF8.decode(buf)));
             }
@@ -136,9 +142,14 @@ public record ProductionStatsSyncPacket(
         });
     }
 
+    private static int checkCount(int count, int max) {
+        if (count < 0 || count > max) throw new io.netty.handler.codec.DecoderException("List count out of range: " + count + " > " + max);
+        return count;
+    }
+
     private static List<String> decodeStrings(ByteBuf buf) {
-        List<String> strings = new ArrayList<>();
-        int count = ByteBufCodecs.VAR_INT.decode(buf);
+        int count = checkCount(ByteBufCodecs.VAR_INT.decode(buf), MAX_STRINGS);
+        List<String> strings = new ArrayList<>(count);
         for (int i = 0; i < count; i++) strings.add(ByteBufCodecs.STRING_UTF8.decode(buf));
         return strings;
     }
