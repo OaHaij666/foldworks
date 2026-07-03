@@ -15,18 +15,21 @@ import com.pockethomestead.transfer.TransferGraphStorage;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.Connection;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -41,6 +44,7 @@ import java.util.*;
  * 容量由基础配置与箱子内升级槽共同决定，物品种类不限。
  */
 public abstract class BaseChestBlockEntity extends BlockEntity implements MenuProvider, HomesteadChestAccess {
+    private static final String ITEM_DATA_ROOT = "PocketHomesteadChest";
     public static final int UPGRADE_SLOT_COUNT = 6;
     public static final int STORAGE_UPGRADE_SLOT = 0;
     public static final int FLUID_UPGRADE_SLOT = 1;
@@ -110,6 +114,9 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     // 箱子ID（玩家自定义，用于传输图节点识别）
     protected String chestId = "";
 
+    // 稳定箱子 UUID：玩家改名后仍可被玉盘等绑定引用追踪。
+    protected UUID chestUUID = UUID.randomUUID();
+
     // 所有者UUID
     protected UUID ownerUUID = null;
 
@@ -152,6 +159,13 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     private boolean registered = false;
     private boolean destroyedForOfflineSnapshot = false;
 
+    // 用于检测方块被搬运（Mekanism Cardboard Box / Create 机械臂等）：
+    // saveAdditional 写入当前坐标，loadAdditional 后 onLoad 比较保存值与当前 level/worldPosition，
+    // 不一致则触发 ChestRegistryManager / TransferGraph / 离线快照 / 生产统计 的坐标迁移。
+    private String lastKnownDimensionKey = "";
+    private long lastKnownPosLong = Long.MIN_VALUE;
+    private boolean relocationHandled = false;
+
     public BaseChestBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
         resetDefaultSideConfig();
@@ -166,9 +180,59 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     public void onLoad() {
         super.onLoad();
         if (level instanceof ServerLevel serverLevel) {
+            handleRelocationIfMoved(serverLevel);
             OfflineChestSnapshotStorage.get(serverLevel.getServer()).applySnapshotToLoadedChest(this, serverLevel.getGameTime());
         }
         registerIfReady();
+    }
+
+    /**
+     * 检测方块是否被搬运（Mekanism Cardboard Box / Create 机械臂等）。
+     * 比较 NBT 中保存的 lastKnownDimensionKey/lastKnownPosLong 与当前 level/worldPosition，
+     * 不一致则触发各外部存储的坐标迁移，并强制失效 cachedContainingSpace（跨维度时尤为重要）。
+     *
+     * 必须在 applySnapshotToLoadedChest 与 registerIfReady 之前执行：前者按新坐标查找已迁移的快照，
+     * 后者按新坐标注册。迁移是幂等的——若旧 BE 的 setRemoved 已先清理过旧位置，迁移退化为仅注册新位置。
+     */
+    private void handleRelocationIfMoved(ServerLevel serverLevel) {
+        if (relocationHandled) return;
+        relocationHandled = true;
+        if (lastKnownPosLong == Long.MIN_VALUE || lastKnownDimensionKey.isEmpty()) return;
+        if (level == null) return;
+        String currentDimKey = level.dimension().location().toString();
+        long currentPosLong = worldPosition.asLong();
+        if (currentDimKey.equals(lastKnownDimensionKey) && currentPosLong == lastKnownPosLong) return;
+
+        // 检测到搬运
+        String oldDimKey = lastKnownDimensionKey;
+        BlockPos oldPos = BlockPos.of(lastKnownPosLong);
+        String newDimKey = currentDimKey;
+        BlockPos newPos = worldPosition.immutable();
+
+        boolean crossDimension = !oldDimKey.equals(newDimKey);
+        if (crossDimension) {
+            // 跨维度搬运：旧 cachedContainingSpace 指向旧维度空间，必须失效
+            cachedContainingSpace = null;
+        }
+
+        MinecraftServer server = serverLevel.getServer();
+        if (ownerUUID != null && !chestId.isEmpty()) {
+            // 1. ChestRegistryManager 迁移（幂等，旧位置可能已被旧 BE 的 setRemoved 注销）
+            ChestRegistryManager.getInstance().relocateChest(ownerUUID, chestId, oldDimKey, oldPos, newDimKey, newPos);
+            // 2. TransferGraph 节点坐标迁移
+            TransferGraphStorage.get(server).relocateChest(chestId, oldDimKey, oldPos, newDimKey, newPos);
+            // 3. 离线快照迁移（含历史速率桶）
+            OfflineChestSnapshotStorage.get(server).relocateSnapshot(ownerUUID, chestId, oldDimKey, oldPos, newDimKey, newPos);
+            // 4. 生产统计 chestKey 迁移
+            String oldChestKey = ProductionStatsStorage.chestKey(oldDimKey, oldPos);
+            String newChestKey = ProductionStatsStorage.chestKey(newDimKey, newPos);
+            ProductionStatsStorage.get(server).relocateChest(ownerUUID, oldChestKey, newChestKey);
+        }
+
+        // 更新保存值为当前坐标，避免下次 onLoad 重复触发迁移
+        lastKnownDimensionKey = newDimKey;
+        lastKnownPosLong = currentPosLong;
+        setChanged();
     }
 
     /**
@@ -1104,6 +1168,11 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
 
     public String getChestId() { return chestId; }
     public void setChestId(String id) { this.chestId = id; setChanged(); }
+
+    public UUID getChestUUID() {
+        if (chestUUID == null) chestUUID = UUID.randomUUID();
+        return chestUUID;
+    }
 
     public UUID getOwnerUUID() { return ownerUUID; }
     public void setOwnerUUID(UUID uuid) { this.ownerUUID = uuid; setChanged(); }
@@ -2231,6 +2300,33 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
 
     // ===== NBT 序列化 =====
 
+    public void saveToItem(ItemStack stack, HolderLookup.Provider reg) {
+        if (stack == null || stack.isEmpty()) return;
+        CompoundTag chestTag = new CompoundTag();
+        saveAdditional(chestTag, reg);
+
+        CustomData data = stack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY);
+        CompoundTag root = data.copyTag();
+        root.put(ITEM_DATA_ROOT, chestTag);
+        stack.set(DataComponents.CUSTOM_DATA, CustomData.of(root));
+    }
+
+    public boolean loadFromItem(ItemStack stack, HolderLookup.Provider reg) {
+        if (stack == null || stack.isEmpty()) return false;
+        CustomData data = stack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY);
+        CompoundTag root = data.copyTag();
+        if (!root.contains(ITEM_DATA_ROOT, Tag.TAG_COMPOUND)) return false;
+
+        loadAdditional(root.getCompound(ITEM_DATA_ROOT), reg);
+        if (level instanceof ServerLevel serverLevel) {
+            relocationHandled = false;
+            handleRelocationIfMoved(serverLevel);
+        }
+        storageDirty = true;
+        setChanged();
+        return true;
+    }
+
     @Override
     protected void saveAdditional(CompoundTag tag, HolderLookup.Provider reg) {
         super.saveAdditional(tag, reg);
@@ -2285,6 +2381,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
 
         // 保存基础信息
         tag.putString("ChestId", chestId);
+        tag.putUUID("ChestUuid", getChestUUID());
         if (ownerUUID != null) tag.putUUID("Owner", ownerUUID);
         tag.putString("GraphKind", graphKind.name());
         if (graphKind == GraphKey.Kind.PROTECTED && graphTeamId != null) tag.putUUID("GraphTeamId", graphTeamId);
@@ -2303,6 +2400,12 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
             filterList.add(filterTag);
         }
         tag.put("AllowedItems", filterList);
+
+        // 保存当前坐标，用于后续检测方块是否被搬运（Mekanism Cardboard Box 等）
+        if (level != null) {
+            tag.putString("LastKnownDimension", level.dimension().location().toString());
+            tag.putLong("LastKnownPos", worldPosition.asLong());
+        }
     }
 
     @Override
@@ -2376,6 +2479,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
 
         // 加载基础信息
         chestId = tag.getString("ChestId");
+        chestUUID = tag.hasUUID("ChestUuid") ? tag.getUUID("ChestUuid") : UUID.randomUUID();
         if (tag.hasUUID("Owner")) ownerUUID = tag.getUUID("Owner");
         try {
             graphKind = tag.contains("GraphKind") ? GraphKey.Kind.valueOf(tag.getString("GraphKind")) : GraphKey.Kind.PRIVATE;
@@ -2404,6 +2508,11 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
                 }
             }
         }
+
+        // 加载历史坐标（用于 onLoad 阶段检测搬运）
+        lastKnownDimensionKey = tag.contains("LastKnownDimension") ? tag.getString("LastKnownDimension") : "";
+        lastKnownPosLong = tag.contains("LastKnownPos") ? tag.getLong("LastKnownPos") : Long.MIN_VALUE;
+
         if (level != null && level.isClientSide) requestModelDataUpdate();
     }
 

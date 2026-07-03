@@ -84,6 +84,39 @@ public class ChestRegistryManager {
         registerChest(ownerUUID, newId, level, pos);
     }
 
+    /**
+     * 迁移箱子注册坐标：把 (oldDimKey, oldPos) 从 owner+chestId 的位置列表中移除，
+     * 添加 (newDimKey, newPos)。用于兼容 Mekanism Cardboard Box 等"方块位置移动"场景。
+     * 与 register/unregister 不同，这里直接用 dimKey 字符串，因为旧维度可能此时已经无法拿到 Level 对象。
+     */
+    public void relocateChest(UUID ownerUUID, String chestId, String oldDimKey, BlockPos oldPos, String newDimKey, BlockPos newPos) {
+        if (ownerUUID == null || chestId == null || chestId.isEmpty() || oldPos == null || newPos == null) return;
+        Map<String, List<ChestLocation>> chests = playerChests.get(ownerUUID);
+        if (chests == null) {
+            registerChest(ownerUUID, chestId, newDimKey, newPos);
+            return;
+        }
+        List<ChestLocation> locations = chests.get(chestId);
+        if (locations == null) {
+            registerChest(ownerUUID, chestId, newDimKey, newPos);
+            return;
+        }
+        ChestLocation newLocation = new ChestLocation(newDimKey, newPos);
+        synchronized (locations) {
+            locations.removeIf(loc -> loc.dimensionKey.equals(oldDimKey) && loc.pos.equals(oldPos));
+            if (!locations.contains(newLocation)) locations.add(newLocation);
+        }
+    }
+
+    private void registerChest(UUID ownerUUID, String chestId, String dimKey, BlockPos pos) {
+        ChestLocation location = new ChestLocation(dimKey, pos);
+        List<ChestLocation> locations = playerChests.computeIfAbsent(ownerUUID, k -> new ConcurrentHashMap<>())
+                .computeIfAbsent(chestId, k -> Collections.synchronizedList(new ArrayList<>()));
+        synchronized (locations) {
+            if (!locations.contains(location)) locations.add(location);
+        }
+    }
+
     public Set<String> getPlayerChestIds(UUID ownerUUID) {
         Map<String, List<ChestLocation>> chests = playerChests.get(ownerUUID);
         if (chests == null) return Collections.emptySet();
@@ -120,8 +153,31 @@ public class ChestRegistryManager {
                     net.minecraft.core.registries.Registries.DIMENSION,
                     dimLoc
             ));
-            BaseChestBlockEntity be = targetLevel == null ? null : HomesteadChestAccess.resolve(targetLevel.getBlockEntity(loc.pos));
+            if (targetLevel == null || !targetLevel.isLoaded(loc.pos)) continue;
+            BaseChestBlockEntity be = HomesteadChestAccess.resolve(targetLevel.getBlockEntity(loc.pos));
             if (be != null && be.getChestId().equals(chestId)) {
+                return be;
+            }
+        }
+        return null;
+    }
+
+    public BaseChestBlockEntity findChestByUuid(UUID ownerUUID, UUID chestUUID, ServerLevel currentLevel) {
+        if (ownerUUID == null || chestUUID == null || currentLevel == null) return null;
+        MinecraftServer server = currentLevel.getServer();
+        if (server == null) return null;
+        for (RegisteredChest registered : getAllRegisteredChests()) {
+            if (!ownerUUID.equals(registered.ownerUUID())) continue;
+            ChestLocation loc = registered.location();
+            net.minecraft.resources.ResourceLocation dimLoc = net.minecraft.resources.ResourceLocation.tryParse(loc.dimensionKey);
+            if (dimLoc == null) continue;
+            ServerLevel targetLevel = server.getLevel(net.minecraft.resources.ResourceKey.create(
+                    net.minecraft.core.registries.Registries.DIMENSION,
+                    dimLoc
+            ));
+            if (targetLevel == null || !targetLevel.isLoaded(loc.pos)) continue;
+            BaseChestBlockEntity be = HomesteadChestAccess.resolve(targetLevel.getBlockEntity(loc.pos));
+            if (be != null && ownerUUID.equals(be.getOwnerUUID()) && chestUUID.equals(be.getChestUUID())) {
                 return be;
             }
         }

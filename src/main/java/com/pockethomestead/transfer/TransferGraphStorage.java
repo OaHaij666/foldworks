@@ -60,6 +60,16 @@ public class TransferGraphStorage extends SavedData {
         return changed;
     }
 
+    public boolean relocateChest(String chestId, String oldDimensionKey, net.minecraft.core.BlockPos oldPos,
+                                 String newDimensionKey, net.minecraft.core.BlockPos newPos) {
+        boolean changed = false;
+        for (TransferGraph graph : graphs.values()) {
+            changed |= graph.relocateChest(chestId, oldDimensionKey, oldPos, newDimensionKey, newPos);
+        }
+        if (changed) setDirty();
+        return changed;
+    }
+
     public static TransferGraphStorage load(CompoundTag tag, HolderLookup.Provider reg) {
         TransferGraphStorage storage = new TransferGraphStorage();
         ListTag list = tag.getList("Graphs", Tag.TAG_COMPOUND);

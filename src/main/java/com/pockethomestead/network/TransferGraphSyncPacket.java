@@ -31,7 +31,7 @@ public record TransferGraphSyncPacket(
             ResourceLocation.fromNamespaceAndPath("pockethomestead", "transfer_graph_sync"));
 
     public record GraphOptionData(String kind, String id, String label, boolean writable) {}
-    public record TeamMemberData(String id, String level) {}
+    public record TeamMemberData(String id, String name, String level) {}
     public record TeamData(String id, String name, String ownerId, String selfLevel, List<TeamMemberData> members) {}
     public record PageData(String id, String name, boolean enabled, int order) {}
     public record NodeFlowData(String itemId, int inputRatePerMinute, int outputRatePerMinute, long inputTotal, long outputTotal) {}
@@ -250,6 +250,7 @@ public record TransferGraphSyncPacket(
         for (int i = 0; i < count; i++) {
             rows.add(new TeamMemberData(
                     ByteBufCodecs.STRING_UTF8.decode(buf),
+                    ByteBufCodecs.STRING_UTF8.decode(buf),
                     ByteBufCodecs.STRING_UTF8.decode(buf)
             ));
         }
@@ -261,6 +262,7 @@ public record TransferGraphSyncPacket(
         ByteBufCodecs.VAR_INT.encode(buf, rows.size());
         for (TeamMemberData row : rows) {
             ByteBufCodecs.STRING_UTF8.encode(buf, row.id);
+            ByteBufCodecs.STRING_UTF8.encode(buf, row.name);
             ByteBufCodecs.STRING_UTF8.encode(buf, row.level);
         }
     }

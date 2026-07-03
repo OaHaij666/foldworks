@@ -102,9 +102,15 @@ public record RequestTransferGraphPacket(String graphKind, String graphId) imple
             SpacePermission.AccessLevel level = team.levelFor(player.getUUID());
             List<TransferGraphSyncPacket.TeamMemberData> members = new ArrayList<>();
             for (var entry : team.members().entrySet()) {
-                members.add(new TransferGraphSyncPacket.TeamMemberData(entry.getKey().toString(), entry.getValue().name()));
+                members.add(new TransferGraphSyncPacket.TeamMemberData(
+                        entry.getKey().toString(),
+                        resolveName(player.server, entry.getKey()),
+                        entry.getValue().name()));
             }
-            members.sort((a, b) -> a.id().compareToIgnoreCase(b.id()));
+            members.sort((a, b) -> {
+                int c = a.name().compareToIgnoreCase(b.name());
+                return c != 0 ? c : a.id().compareToIgnoreCase(b.id());
+            });
             result.add(new TransferGraphSyncPacket.TeamData(team.id().toString(), team.name(),
                     team.owner() == null ? "" : team.owner().toString(), level.name(), members));
         }
@@ -174,6 +180,16 @@ public record RequestTransferGraphPacket(String graphKind, String graphId) imple
 
     private static String chestDataKey(TransferGraphSyncPacket.ChestData chest) {
         return chest.dimensionKey() + "|" + chest.pos() + "|" + chest.chestId();
+    }
+
+    private static String resolveName(net.minecraft.server.MinecraftServer server, UUID id) {
+        try {
+            return server.getProfileCache() != null
+                    ? server.getProfileCache().get(id).map(p -> p.getName()).orElse(id.toString().substring(0, 8))
+                    : id.toString().substring(0, 8);
+        } catch (Exception e) {
+            return id.toString().substring(0, 8);
+        }
     }
 
     private static BaseChestBlockEntity loadedChest(ServerPlayer player, String dimensionKey, net.minecraft.core.BlockPos pos) {

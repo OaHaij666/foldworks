@@ -31,6 +31,12 @@ public class ModMessages {
         );
 
         registrar.playToServer(
+                RenameSpacePayload.TYPE,
+                RenameSpacePayload.STREAM_CODEC,
+                RenameSpacePayload::handleOnServer
+        );
+
+        registrar.playToServer(
                 RequestSpaceListPayload.TYPE,
                 RequestSpaceListPayload.STREAM_CODEC,
                 RequestSpaceListPayload::handleOnServer
@@ -101,6 +107,16 @@ public class ModMessages {
                 ChestSyncPacket.TYPE,
                 ChestSyncPacket.STREAM_CODEC,
                 ChestSyncPacket::handle
+        );
+        registrar.playToServer(
+                TabletChestActionPacket.TYPE,
+                TabletChestActionPacket.STREAM_CODEC,
+                TabletChestActionPacket::handleOnServer
+        );
+        registrar.playToClient(
+                TabletChestSyncPacket.TYPE,
+                TabletChestSyncPacket.STREAM_CODEC,
+                TabletChestSyncPacket::handleOnClient
         );
         registrar.playToServer(
                 RequestTransferGraphPacket.TYPE,

@@ -3,7 +3,6 @@ package com.pockethomestead.network;
 import com.pockethomestead.PocketHomestead;
 import com.pockethomestead.space.SpaceData;
 import com.pockethomestead.space.SpaceManager;
-import com.pockethomestead.space.SpaceStorage;
 import com.pockethomestead.space.SpacePermission;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.ChatFormatting;
@@ -75,9 +74,10 @@ public record PermissionMemberPayload(UUID spaceId, boolean add, String name, UU
             SpaceData space = SpaceManager.getInstance().getSpace(payload.spaceId());
             if (space == null || !space.can(player.getUUID(), SpacePermission.AccessLevel.MANAGE)) return;
 
+            UUID targetId = payload.targetId();
             if (payload.add()) {
                 if (!EMPTY_UUID.equals(payload.targetId())) {
-                    space.getPermission().setMember(payload.targetId(), payload.role(), payload.overrideLevel());
+                    targetId = payload.targetId();
                 } else {
                     String name = payload.name().trim();
                     if (name.isEmpty()) return;
@@ -89,12 +89,16 @@ public record PermissionMemberPayload(UUID spaceId, boolean add, String name, UU
                                 .withStyle(ChatFormatting.RED));
                         return;
                     }
-                    space.getPermission().setMember(profileOpt.get().getId(), payload.role(), payload.overrideLevel());
+                    targetId = profileOpt.get().getId();
                 }
+                UUID memberId = targetId;
+                SpaceManager.getInstance().updateOwnerPermission(space.getOwnerId(),
+                        permission -> permission.setMember(memberId, payload.role(), payload.overrideLevel()));
             } else {
-                space.getPermission().removeMember(payload.targetId());
+                UUID memberId = targetId;
+                SpaceManager.getInstance().updateOwnerPermission(space.getOwnerId(),
+                        permission -> permission.removeMember(memberId));
             }
-            SpaceStorage.markDirty();
             SpaceListPayload.sendToAll(player.server);
         });
     }

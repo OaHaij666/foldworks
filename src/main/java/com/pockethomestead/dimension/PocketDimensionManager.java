@@ -5,9 +5,14 @@ import com.pockethomestead.space.SpaceData;
 import com.pockethomestead.space.SpaceManager;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundInitializeBorderPacket;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -113,6 +118,7 @@ public class PocketDimensionManager {
         if (!isPocketDimension(player.level().dimension())) {
             playerAnchors.put(player.getUUID(), new ReturnAnchor(
                     player.level().dimension(), player.position(), player.getYRot(), player.getXRot()));
+            com.pockethomestead.space.SpaceStorage.markDirty();
         }
 
         BlockPos center = SpaceDimensionService.getInstance().prepareSafeSpawn(target, space);
@@ -131,6 +137,7 @@ public class PocketDimensionManager {
 
     public void exitToReturnPosition(ServerPlayer player) {
         ReturnAnchor anchor = playerAnchors.remove(player.getUUID());
+        com.pockethomestead.space.SpaceStorage.markDirty();
         MinecraftServer server = player.server;
         if (anchor != null) {
             ServerLevel target = server.getLevel(anchor.dimension);
@@ -156,6 +163,36 @@ public class PocketDimensionManager {
     public void reset() {
         playerAnchors.clear();
         pendingTeleports.clear();
+    }
+
+    public ListTag saveReturnAnchors() {
+        ListTag anchors = new ListTag();
+        for (Map.Entry<UUID, ReturnAnchor> entry : playerAnchors.entrySet()) {
+            ReturnAnchor anchor = entry.getValue();
+            CompoundTag tag = new CompoundTag();
+            tag.putUUID("Player", entry.getKey());
+            tag.putString("Dimension", anchor.dimension.location().toString());
+            tag.putDouble("X", anchor.position.x);
+            tag.putDouble("Y", anchor.position.y);
+            tag.putDouble("Z", anchor.position.z);
+            tag.putFloat("YRot", anchor.yRot);
+            tag.putFloat("XRot", anchor.xRot);
+            anchors.add(tag);
+        }
+        return anchors;
+    }
+
+    public void loadReturnAnchors(ListTag anchors) {
+        playerAnchors.clear();
+        for (Tag raw : anchors) {
+            if (!(raw instanceof CompoundTag tag) || !tag.hasUUID("Player")) continue;
+            ResourceLocation dim = ResourceLocation.tryParse(tag.getString("Dimension"));
+            if (dim == null) continue;
+            UUID playerId = tag.getUUID("Player");
+            ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION, dim);
+            Vec3 position = new Vec3(tag.getDouble("X"), tag.getDouble("Y"), tag.getDouble("Z"));
+            playerAnchors.put(playerId, new ReturnAnchor(dimension, position, tag.getFloat("YRot"), tag.getFloat("XRot")));
+        }
     }
 
     public List<SpaceData> getAccessibleSpaces(UUID playerId) {

@@ -134,6 +134,20 @@ public class ProductionStatsStorage extends SavedData {
         return false;
     }
 
+    /**
+     * 迁移箱子统计 key：把 owner 名下 (oldDimKey, oldPos) 对应的 chestKey 的归属组与库存快照
+     * 迁移到 (newDimKey, newPos) 对应的 chestKey。buckets 按 groupId 聚合，不随箱子坐标变化，无需迁移。
+     * 用于兼容 Mekanism Cardboard Box 等方块位置移动场景。
+     */
+    public boolean relocateChest(UUID owner, String oldChestKey, String newChestKey) {
+        if (owner == null || oldChestKey == null || newChestKey == null || oldChestKey.equals(newChestKey)) return false;
+        PlayerStats stats = players.get(owner);
+        if (stats == null) return false;
+        boolean changed = stats.relocateChestKey(oldChestKey, newChestKey);
+        if (changed) setDirty();
+        return changed;
+    }
+
     public static ProductionStatsStorage load(CompoundTag tag, HolderLookup.Provider reg) {
         ProductionStatsStorage storage = new ProductionStatsStorage();
         ListTag list = tag.getList("Players", Tag.TAG_COMPOUND);
@@ -261,6 +275,21 @@ public class ProductionStatsStorage extends SavedData {
             chestInventories.put(chestKey, current);
             adjustGroupInventory(groupId, current, 1);
             return true;
+        }
+
+        private boolean relocateChestKey(String oldChestKey, String newChestKey) {
+            boolean changed = false;
+            if (chestGroups.containsKey(oldChestKey)) {
+                String group = chestGroups.remove(oldChestKey);
+                chestGroups.put(newChestKey, group);
+                changed = true;
+            }
+            if (chestInventories.containsKey(oldChestKey)) {
+                Map<String, Integer> inv = chestInventories.remove(oldChestKey);
+                chestInventories.put(newChestKey, inv);
+                changed = true;
+            }
+            return changed;
         }
 
         private boolean record(String chestKey, String itemId, int amount, boolean input, long gameTime) {

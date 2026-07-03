@@ -2,6 +2,7 @@ package com.pockethomestead.client.screen;
 
 import com.pockethomestead.client.ClientProductionStatsCache;
 import com.pockethomestead.client.ClientTransferGraphCache;
+import com.pockethomestead.client.ui.ChestGuiTextures;
 import com.pockethomestead.client.ui.Theme;
 import com.pockethomestead.client.ui.widget.UiButton;
 import com.pockethomestead.blockentity.BaseChestBlockEntity;
@@ -43,17 +44,18 @@ import java.util.Map;
  * 箱子Screen — 蓝白主题，多页布局。
  *
  * 第0页（物品）：箱子区（1物品=1格，纯渲染）+ 玩家背包。
- * 第1页（流体）：流体容量与当前流体列表（仅流体兼容可用时显示）。
+ * 第1页（资源）：流体、电力、应力状态。
  * 最后一页（设置）：可视化节点编辑入口、统计设置、升级槽。
  *
  * 箱子区无真实槽位，存取全部通过网络包；服务端 itemStorage 为唯一权威，
  * 客户端通过 ChestSyncPacket 接收物品快照 cacheItems。
  */
 public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractContainerScreen<T> implements ChestScreenHost {
-    /** 当前页：0=物品，1=流体(可选)，倒数第二=面配置，最后=设置 */
+    /** 当前页：0=物品，1=资源，倒数第二=面配置，最后=设置 */
     private int currentPage = 0;
 
     private int localScrollRow = 0;
+    private int resourceScroll = 0;
     private int settingsScroll = 0;
     private String lastSyncedChestEditId = "";
 
@@ -105,6 +107,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
     private int slotStartX;
     private int chestAreaX, chestAreaY, chestAreaW, chestAreaH;
     private int upgradeAreaX, upgradeAreaY, upgradeAreaW;
+    private int playerAreaX, playerAreaY, playerAreaW, playerAreaH;
     private int scrollbarX;
     private int playerLabelY, playerInvY, hotbarY;
     private int pageButtonX, pageButtonW;
@@ -131,11 +134,16 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         upgradeAreaY = BaseChestMenu.calculateChestSlotStartY() + BaseChestMenu.CHEST_VISIBLE_ROWS * BaseChestMenu.SLOT_SIZE + BaseChestMenu.SECTION_GAP;
         upgradeAreaW = panelW - 2 * BaseChestMenu.PANEL_PADDING;
 
-        scrollbarX = chestAreaX + chestAreaW - BaseChestMenu.BOX_PAD - BaseChestMenu.SCROLLBAR_WIDTH;
-
         playerLabelY = BaseChestMenu.calculatePlayerLabelY();
         playerInvY = BaseChestMenu.calculatePlayerInvStartY();
         hotbarY = BaseChestMenu.calculateHotbarStartY();
+
+        playerAreaX = BaseChestMenu.PANEL_PADDING;
+        playerAreaY = playerLabelY - BaseChestMenu.BOX_PAD;
+        playerAreaW = panelW - 2 * BaseChestMenu.PANEL_PADDING;
+        playerAreaH = hotbarY + BaseChestMenu.SLOT_SIZE + BaseChestMenu.BOX_PAD - playerAreaY;
+
+        scrollbarX = chestAreaX + chestAreaW + 1;
 
         pageButtonW = 42;
         pageButtonX = panelW - BaseChestMenu.PANEL_PADDING - pageButtonW;
@@ -205,6 +213,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
 
         int maxRow = Math.max(0, totalRows() - BaseChestMenu.CHEST_VISIBLE_ROWS);
         if (localScrollRow > maxRow) localScrollRow = maxRow;
+        resourceScroll = Math.max(0, Math.min(maxResourceScroll(), resourceScroll));
 
     }
 
@@ -219,7 +228,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
     }
 
     @Override public boolean hasFluidPage() {
-        return BaseChestMenu.isCreateLoaded();
+        return true;
     }
 
     private int facePageIndex() {
@@ -248,10 +257,10 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
 
     private void updatePageButtonLabel() {
         if (pageButton == null) return;
-        if (isSettingsPage()) pageButton.label("◀ 物品");
-        else if (hasFluidPage() && currentPage == 0) pageButton.label("流体 ▶");
-        else if (isFluidPage() || (!hasFluidPage() && currentPage == 0)) pageButton.label("面 ▶");
-        else pageButton.label("设置 ▶");
+        if (isSettingsPage()) pageButton.label("物品");
+        else if (hasFluidPage() && currentPage == 0) pageButton.label("资源");
+        else if (isFluidPage() || (!hasFluidPage() && currentPage == 0)) pageButton.label("面");
+        else pageButton.label("设置");
     }
 
     // ── init ──
@@ -265,14 +274,19 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
 
         // 翻页按钮（头部右侧，两页都显示）
         pageButton = new UiButton("配置 ▶", UiButton.Variant.SECONDARY)
+                .skin(UiButton.Skin.CHEST)
                 .bounds(gl + pageButtonX, gt + 2, pageButtonW, 14)
                 .onClick(this::switchPage);
 
         chestIdEdit = new EditBox(font, 0, 0, 88, 16, Component.literal("箱子标识"));
         chestIdEdit.setMaxLength(32);
         chestIdEdit.setEditable(true);
+        chestIdEdit.setBordered(false);
+        chestIdEdit.setTextColor(Theme.TEXT);
+        chestIdEdit.setTextColorUneditable(Theme.TEXT_FAINT);
+        chestIdEdit.setTextShadow(false);
         chestIdEdit.visible = false;
-        addRenderableWidget(chestIdEdit);
+        addWidget(chestIdEdit);
         syncChestIdEdit(true);
 
         PacketDistributor.sendToServer(new RequestProductionStatsPacket());
@@ -282,7 +296,8 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
     /** 切换页面 */
     private void switchPage() {
         currentPage = (currentPage + 1) % (settingsPageIndex() + 1);
-        if (!isSettingsPage()) settingsScroll = 0;
+        settingsScroll = 0;
+        resourceScroll = 0;
         rebuildPageWidgets();
     }
 
@@ -296,6 +311,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             chestIdEdit.setFocused(false);
             syncChestIdEdit(true);
         }
+        if (!isFluidPage()) resourceScroll = 0;
 
         updatePageButtonLabel();
 
@@ -305,7 +321,8 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             int cardY = topPos + BaseChestMenu.HEADER_HEIGHT + 8;
             int cardW = panelW - BaseChestMenu.PANEL_PADDING * 2;
             graphButton = new UiButton("打开", UiButton.Variant.PRIMARY)
-                    .bounds(cardX + cardW - 58, cardY + 9, 48, 18)
+                    .skin(UiButton.Skin.CHEST)
+                    .bounds(cardX + cardW - 52, cardY + 8, 42, 18)
                     .onClick(() -> Minecraft.getInstance().setScreen(new TransferGraphScreen(cacheGraphKind, cacheGraphTeamId)));
         }
     }
@@ -348,15 +365,15 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         calculateLayout();
         int x = leftPos, y = topPos;
 
-        g.fill(0, 0, width, height, Theme.SCRIM);
-        Theme.shadow(g, x, y, panelW, panelH, Theme.RADIUS + 2);
-        Theme.panel(g, x, y, panelW, panelH, Theme.RADIUS + 2, Theme.SURFACE, Theme.BORDER);
-        Theme.hLine(g, x + 1, y + BaseChestMenu.HEADER_HEIGHT, panelW - 2, Theme.DIVIDER);
+        ChestGuiTextures.scrim(g, width, height, Theme.SCRIM);
+        ChestGuiTextures.shadow(g, x, y, panelW, panelH);
+        ChestGuiTextures.panelLight(g, x, y, panelW, panelH);
+        ChestGuiTextures.flat(g, x + 4, y + 4, panelW - 8, BaseChestMenu.HEADER_HEIGHT - 4, Theme.HEADER);
+        ChestGuiTextures.hDivider(g, x + 4, y + BaseChestMenu.HEADER_HEIGHT, panelW - 8);
 
         if (isItemPage()) {
-            // 存货区背景
-            Theme.fillRound(g, x + chestAreaX, y + chestAreaY, chestAreaW, chestAreaH, Theme.RADIUS, Theme.SURFACE_SUNK);
-            Theme.hLine(g, x + 1, y + playerLabelY - 2, panelW - 2, Theme.DIVIDER);
+            ChestGuiTextures.panel(g, x + chestAreaX, y + chestAreaY, chestAreaW, chestAreaH);
+            ChestGuiTextures.panel(g, x + playerAreaX, y + playerAreaY, playerAreaW, playerAreaH);
         }
     }
 
@@ -398,11 +415,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             boolean hovered = isInside(sx, sy, 16, 16, mx, my);
             if (hovered && slot.hasItem()) hoveredPlayerSlot = slot;
 
-            g.fill(sx - 1, sy - 1, sx + 17, sy, 0x80000000);
-            g.fill(sx - 1, sy + 16, sx + 17, sy + 17, 0x80000000);
-            g.fill(sx - 1, sy, sx, sy + 16, 0x80000000);
-            g.fill(sx + 16, sy, sx + 17, sy + 16, 0x80000000);
-            g.fill(sx, sy, sx + 16, sy + 16, hovered ? 0x60FFFFFF : 0x40FFFFFF);
+            ChestGuiTextures.slot(g, sx - 1, sy - 1, hovered);
 
             ItemStack stack = slot.getItem();
             if (!stack.isEmpty()) {
@@ -437,11 +450,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
 
                 boolean hovered = isInside(slotX - leftPos, slotY - topPos, 16, 16, mx, my);
 
-                g.fill(slotX - 1, slotY - 1, slotX + 17, slotY, 0xA0000000);
-                g.fill(slotX - 1, slotY + 16, slotX + 17, slotY + 17, 0xA0000000);
-                g.fill(slotX - 1, slotY, slotX, slotY + 16, 0xA0000000);
-                g.fill(slotX + 16, slotY, slotX + 17, slotY + 16, 0xA0000000);
-                g.fill(slotX, slotY, slotX + 16, slotY + 16, hovered ? 0x50FFFFFF : 0x30FFFFFF);
+                ChestGuiTextures.slot(g, slotX - 1, slotY - 1, hovered);
 
                 if (dataIdx >= 0 && dataIdx < cacheItems.size()) {
                     ChestSyncPacket.ItemEntry entry = cacheItems.get(dataIdx);
@@ -468,12 +477,11 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
 
         g.pose().pushPose();
         g.pose().translate(0, 0, 200);
-        g.fill(tx - 1, ty - 1, slotX + 17, slotY + 17, 0xB0000000);
         g.drawString(font, text, tx, ty, 0xFFFFFFFF, true);
         g.pose().popPose();
     }
 
-    /** 流体页：显示当前储存的流体与 mB 数量 */
+    /** 资源页：Create 未加载时只显示电力状态。 */
     private void renderFluidPage(GuiGraphics g, int mx, int my) {
         hoveredFluid = null;
         hoveredFluidAmount = 0;
@@ -481,43 +489,124 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         int x = leftPos + BaseChestMenu.PANEL_PADDING;
         int y = topPos + BaseChestMenu.HEADER_HEIGHT + 12;
         int w = panelW - BaseChestMenu.PANEL_PADDING * 2;
-        int used = cacheFluids.stream().mapToInt(Map.Entry::getValue).sum();
-        Theme.panel(g, x, y, w, panelH - BaseChestMenu.HEADER_HEIGHT - 20, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
-        Theme.text(g, font, "流体存储", x + 10, y + 10, Theme.TEXT);
-        Theme.textRight(g, font, cacheFluids.size() + " / " + cacheMaxFluidTypes + " 种", x + w - 10, y + 10, Theme.TEXT_MUTED);
-        Theme.text(g, font, BaseChestMenu.formatCount(used) + " / " + BaseChestMenu.formatCount(cacheMaxFluidCapacityMb) + " mB", x + 10, y + 25, Theme.TEXT_MUTED);
+        int h = panelH - BaseChestMenu.HEADER_HEIGHT - 20;
+        int viewportTop = y + 4;
+        int viewportBottom = y + h - 4;
+        int contentX = x + 10;
+        int contentW = w - 28;
+        int contentY = viewportTop - resourceScroll;
 
-        int rowX = x + 10;
-        int rowY = y + 46;
-        if (cacheFluids.isEmpty()) {
-            Theme.text(g, font, "空", rowX, rowY, Theme.TEXT_FAINT);
-            return;
-        }
+        resourceScroll = Math.max(0, Math.min(maxResourceScroll(), resourceScroll));
+        ChestGuiTextures.panelLighter(g, x, y, w, h);
 
-        int maxRows = Math.min(cacheFluids.size(), Math.max(1, (panelH - BaseChestMenu.HEADER_HEIGHT - 76) / 24));
-        for (int i = 0; i < maxRows; i++) {
-            Map.Entry<Fluid, Integer> entry = cacheFluids.get(i);
-            Fluid fluid = entry.getKey();
-            int amount = entry.getValue();
-            boolean hovered = mx >= rowX && mx < rowX + w - 20 && my >= rowY - 4 && my < rowY + 18;
-            int color = 0xFF000000 | (BuiltInRegistries.FLUID.getKey(fluid).toString().hashCode() & 0x00FFFFFF);
-            if (hovered) Theme.fillRound(g, rowX - 4, rowY - 5, w - 12, 20, 4, Theme.SURFACE);
-            g.fill(rowX, rowY - 1, rowX + 10, rowY + 10, color);
-            g.fill(rowX, rowY - 1, rowX + 10, rowY, 0xCCFFFFFF);
-            String name = new FluidStack(fluid, 1).getHoverName().getString();
-            Theme.text(g, font, Theme.ellipsize(font, name, 74), rowX + 16, rowY, hovered ? Theme.TEXT : Theme.TEXT_MUTED);
-            Theme.textRight(g, font, BaseChestMenu.formatCount(amount) + " / " + BaseChestMenu.formatCount(cacheMaxFluidCapacityPerTypeMb) + " mB",
-                    x + w - 10, rowY, hovered ? Theme.TEXT : Theme.TEXT_MUTED);
-            if (hovered) {
-                hoveredFluid = fluid;
-                hoveredFluidAmount = amount;
+        g.enableScissor(x + 1, viewportTop, x + w - 1, viewportBottom);
+        int cardY = contentY;
+
+        if (cacheCreateLoaded) {
+            int used = cacheFluids.stream().mapToInt(Map.Entry::getValue).sum();
+            int fluidH = Math.max(56, 50 + Math.max(1, cacheFluids.size()) * 22);
+            Theme.text(g, font, "流体", contentX, cardY + 8, Theme.TEXT);
+            Theme.textRight(g, font, cacheFluids.size() + " / " + cacheMaxFluidTypes + " 种", contentX + contentW, cardY + 8, Theme.TEXT_MUTED);
+            Theme.text(g, font, BaseChestMenu.formatCount(used) + " / " + BaseChestMenu.formatCount(cacheMaxFluidCapacityMb) + " mB",
+                    contentX, cardY + 22, Theme.TEXT_MUTED);
+            ChestGuiTextures.progress(g, contentX, cardY + 36, contentW, 10,
+                    cacheMaxFluidCapacityMb <= 0 ? 0.0f : used / (float) cacheMaxFluidCapacityMb, 0xFF47ACBE);
+
+            int rowX = contentX;
+            int rowY = cardY + 52;
+            if (cacheFluids.isEmpty()) {
+                Theme.text(g, font, "空", rowX, rowY, Theme.TEXT_FAINT);
+            } else {
+                for (Map.Entry<Fluid, Integer> entry : cacheFluids) {
+                    Fluid fluid = entry.getKey();
+                    int amount = entry.getValue();
+                    boolean hovered = mx >= rowX && mx < rowX + contentW && my >= rowY - 4 && my < rowY + 18;
+                    int color = 0xFF000000 | (BuiltInRegistries.FLUID.getKey(fluid).toString().hashCode() & 0x00FFFFFF);
+                    if (hovered) ChestGuiTextures.panelLightCompact(g, rowX - 4, rowY - 5, contentW + 8, 20);
+                    ChestGuiTextures.fluidSwatch(g, rowX, rowY - 1, color);
+                    String name = new FluidStack(fluid, 1).getHoverName().getString();
+                    String amountText = BaseChestMenu.formatCount(amount) + "/" + BaseChestMenu.formatCount(cacheMaxFluidCapacityPerTypeMb) + " mB";
+                    int amountW = Theme.styledWidth(font, amountText);
+                    int nameW = Math.max(24, contentW - 20 - amountW - 6);
+                    Theme.text(g, font, Theme.ellipsize(font, name, nameW), rowX + 16, rowY, hovered ? Theme.TEXT : Theme.TEXT_MUTED);
+                    Theme.textRight(g, font, amountText, contentX + contentW, rowY, hovered ? Theme.TEXT : Theme.TEXT_MUTED);
+                    if (hovered) {
+                        hoveredFluid = fluid;
+                        hoveredFluidAmount = amount;
+                    }
+                    rowY += 22;
+                }
             }
-            rowY += 24;
+
+            cardY += fluidH + 4;
+            ChestGuiTextures.hDivider(g, contentX, cardY, contentW);
+            cardY += 4;
         }
 
-        if (cacheFluids.size() > maxRows) {
-            Theme.text(g, font, "+" + (cacheFluids.size() - maxRows), rowX, rowY, Theme.TEXT_FAINT);
+        renderEnergyCard(g, contentX, cardY, contentW);
+        cardY += 34 + 4;
+        if (cacheCreateLoaded) {
+            ChestGuiTextures.hDivider(g, contentX, cardY, contentW);
+            cardY += 4;
+            renderStressCard(g, contentX, cardY, contentW);
         }
+        g.disableScissor();
+
+        renderResourceScrollbar(g, x + w - 9, viewportTop, viewportBottom - viewportTop);
+    }
+
+    private void renderEnergyCard(GuiGraphics g, int x, int y, int w) {
+        boolean enabled = cacheMaxEnergyStored > 0;
+        Theme.text(g, font, "电力", x, y + 4, Theme.TEXT);
+        String value = enabled
+                ? BaseChestMenu.formatCount(cacheEnergyStored) + " / " + BaseChestMenu.formatCount(cacheMaxEnergyStored) + " FE"
+                : "未安装升级";
+        Theme.textRight(g, font, Theme.ellipsize(font, value, w - 30), x + w, y + 4, enabled ? Theme.TEXT_MUTED : Theme.TEXT_FAINT);
+        ChestGuiTextures.progress(g, x, y + 20, w, 10,
+                cacheMaxEnergyStored <= 0 ? 0.0f : cacheEnergyStored / (float) cacheMaxEnergyStored, 0xFFE6C84D);
+    }
+
+    private void renderStressCard(GuiGraphics g, int x, int y, int w) {
+        boolean enabled = cacheCreateLoaded && cacheStressUpgradeInstalled;
+        Theme.text(g, font, "应力", x, y + 4, Theme.TEXT);
+        Theme.textRight(g, font, Theme.ellipsize(font, enabled ? BaseChestMenu.formatCount(cacheStressBandwidthUsed) + " SU" : stressDisabledText(), w - 30),
+                x + w, y + 4, enabled ? Theme.TEXT_MUTED : Theme.TEXT_FAINT);
+        ChestGuiTextures.progress(g, x, y + 20, w, 10,
+                cacheNetworkBandwidth <= 0 ? 0.0f : cacheStressBandwidthUsed / (float) cacheNetworkBandwidth, 0xFF9BA7A9);
+        if (enabled) {
+            String direction = cacheStressOutputReversed ? "反向" : "正向";
+            Theme.textRight(g, font, cacheStressOutputSpeedRpm + " RPM · " + direction,
+                    x + w, y + 31, Theme.TEXT_FAINT);
+        }
+    }
+
+    private String stressDisabledText() {
+        return cacheCreateLoaded ? "未安装升级" : "Create 未加载";
+    }
+
+    private int resourceContentHeight() {
+        int height = 34 + 4;
+        if (cacheCreateLoaded) {
+            int fluidH = Math.max(56, 50 + Math.max(1, cacheFluids.size()) * 22);
+            height += fluidH + 4 + 1 + 4 + 1 + 4 + 38 + 4;
+        }
+        return height;
+    }
+
+    private int resourceViewportHeight() {
+        return panelH - BaseChestMenu.HEADER_HEIGHT - 28;
+    }
+
+    private int maxResourceScroll() {
+        return Math.max(0, resourceContentHeight() - Math.max(1, resourceViewportHeight()));
+    }
+
+    private void renderResourceScrollbar(GuiGraphics g, int x, int y, int h) {
+        int max = maxResourceScroll();
+        if (max <= 0) return;
+        int thumbH = Math.max(14, h * resourceViewportHeight() / resourceContentHeight());
+        int thumbY = y + (h - thumbH) * resourceScroll / max;
+        ChestGuiTextures.scrollbar(g, x, y, 7, h, thumbY, thumbH);
     }
 
     /** 滚动条：仅当行数超过可视行时显示 */
@@ -530,77 +619,78 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         int trackW = BaseChestMenu.SCROLLBAR_WIDTH;
         int trackH = chestAreaH - 2 * BaseChestMenu.BOX_PAD;
 
-        Theme.fillRound(g, trackX, trackY, trackW, trackH, 2, Theme.SURFACE_SUNK);
-
         float visible = BaseChestMenu.CHEST_VISIBLE_ROWS;
         int thumbH = Math.max(12, (int) (trackH * (visible / total)));
         int maxRow = total - BaseChestMenu.CHEST_VISIBLE_ROWS;
         int thumbY = trackY + (maxRow <= 0 ? 0 : (int) ((trackH - thumbH) * ((float) localScrollRow / maxRow)));
 
-        Theme.fillRound(g, trackX, thumbY, trackW, thumbH, 2, Theme.PRIMARY);
+        ChestGuiTextures.scrollbar(g, trackX, trackY, trackW, trackH, thumbY, thumbH);
     }
 
     /** 配置页渲染 */
     private void renderConfigPage(GuiGraphics g, int mx, int my, float partialTick) {
         int cardX = leftPos + BaseChestMenu.PANEL_PADDING;
-        int cardW = panelW - BaseChestMenu.PANEL_PADDING * 2;
-        int gap = 6;
-        int graphH = 36;
+        int cardW = settingsCardW();
+        int gap = 7;
+        int graphH = 34;
         int viewportTop = settingsViewportTop();
         int viewportBottom = settingsViewportBottom();
         settingsScroll = Math.max(0, Math.min(maxSettingsScroll(), settingsScroll));
         int graphY = viewportTop + 4 - settingsScroll;
 
         g.enableScissor(leftPos + 1, viewportTop, leftPos + panelW - 1, viewportBottom);
-        Theme.panel(g, cardX, graphY, cardW, graphH, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
+        ChestGuiTextures.panelLighterCompact(g, cardX, graphY, cardW, graphH);
         Theme.text(g, font, "可视化节点", cardX + 10, graphY + 7, Theme.TEXT);
-        Theme.text(g, font, "编辑连线", cardX + 10, graphY + 20, Theme.TEXT_MUTED);
-        if (graphButton != null) graphButton.bounds(cardX + cardW - 58, graphY + 9, 48, 18).render(g, mx, my, partialTick);
+        Theme.text(g, font, "编辑连线与过滤", cardX + 10, graphY + 20, Theme.TEXT_MUTED);
+        if (graphButton != null) graphButton.bounds(cardX + cardW - 52, graphY + 8, 42, 18).render(g, mx, my, partialTick);
 
         int renameY = graphY + graphH + gap;
-        int renameH = 48;
-        Theme.panel(g, cardX, renameY, cardW, renameH, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
+        int renameH = 43;
+        ChestGuiTextures.panelLighterCompact(g, cardX, renameY, cardW, renameH);
         Theme.text(g, font, "箱子标识", cardX + 10, renameY + 7, Theme.TEXT);
         layoutChestIdEdit(cardX, renameY, cardW);
+        int editW = renameEditW(cardW);
+        ChestGuiTextures.inset(g, cardX + 10, renameY + 24, editW, 16);
         if (chestIdEdit != null) chestIdEdit.render(g, mx, my, partialTick);
         int saveX = renameSaveX(cardX, cardW);
         boolean changed = chestIdEdit != null && !chestIdEdit.getValue().trim().equals(cacheChestId);
-        boolean saveHover = Theme.inside(mx, my, saveX, renameY + 25, 42, 18);
-        Theme.panel(g, saveX, renameY + 25, 42, 18, 5, changed ? Theme.PRIMARY_SOFT : Theme.SURFACE_SUNK, saveHover && changed ? Theme.PRIMARY : Theme.BORDER);
-        Theme.textCentered(g, font, "保存", saveX + 21, renameY + 31, changed ? Theme.PRIMARY_PRESS : Theme.TEXT_FAINT);
+        boolean saveHover = Theme.inside(mx, my, saveX, renameY + 23, 36, 18);
+        ChestGuiTextures.button(g, saveX, renameY + 23, 36, 18,
+                !changed ? ChestGuiTextures.ButtonState.DISABLED : saveHover ? ChestGuiTextures.ButtonState.HOVER : ChestGuiTextures.ButtonState.NORMAL);
+        Theme.textCentered(g, font, "保存", saveX + 18, renameY + 29, changed ? Theme.PRIMARY_PRESS : Theme.TEXT_FAINT);
 
         int accessY = renameY + renameH + gap;
-        int accessH = 38;
+        int accessH = 42;
 
-        Theme.panel(g, cardX, accessY, cardW, accessH, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
+        ChestGuiTextures.panelLighterCompact(g, cardX, accessY, cardW, accessH);
         Theme.text(g, font, "箱子权限", cardX + 10, accessY + 7, Theme.TEXT);
-        renderGraphTierButton(g, mx, my, graphTierButtonX(cardX, cardW, 0), accessY + 22, graphTierButtonW(cardW, 0), "私有", "PRIVATE");
-        renderGraphTierButton(g, mx, my, graphTierButtonX(cardX, cardW, 1), accessY + 22, graphTierButtonW(cardW, 1), "团队", "PROTECTED");
-        renderGraphTierButton(g, mx, my, graphTierButtonX(cardX, cardW, 2), accessY + 22, graphTierButtonW(cardW, 2), "公开", "PUBLIC");
-        renderGraphTierButton(g, mx, my, graphTierButtonX(cardX, cardW, 3), accessY + 22, graphTierButtonW(cardW, 3), "空间", "SPACE");
+        renderGraphTierButton(g, mx, my, graphTierButtonX(cardX, cardW, 0), accessY + 23, graphTierButtonW(cardW, 0), "私有", "PRIVATE");
+        renderGraphTierButton(g, mx, my, graphTierButtonX(cardX, cardW, 1), accessY + 23, graphTierButtonW(cardW, 1), "团队", "PROTECTED");
+        renderGraphTierButton(g, mx, my, graphTierButtonX(cardX, cardW, 2), accessY + 23, graphTierButtonW(cardW, 2), "公开", "PUBLIC");
+        renderGraphTierButton(g, mx, my, graphTierButtonX(cardX, cardW, 3), accessY + 23, graphTierButtonW(cardW, 3), "空间", "SPACE");
 
         int offlineY = accessY + accessH + gap;
-        int offlineH = 50;
-        Theme.panel(g, cardX, offlineY, cardW, offlineH, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
-        Theme.text(g, font, "离线模拟（实验）", cardX + 10, offlineY + 7, Theme.TEXT);
-        Theme.text(g, font, "箱子卸载后由快照顶替运行", cardX + 10, offlineY + 22,
+        int offlineH = 38;
+        ChestGuiTextures.panelLighterCompact(g, cardX, offlineY, cardW, offlineH);
+        Theme.text(g, font, "离线模拟", cardX + 10, offlineY + 7, Theme.TEXT);
+        int toggleX = statsToggleX(cardX, cardW);
+        Theme.text(g, font, Theme.ellipsize(font, "卸载后快照运行", Math.max(34, toggleX - cardX - 16)),
+                cardX + 10, offlineY + 22,
                 cacheOfflineSnapshotEnabled || cacheSpaceOfflineSimulationEnabled ? Theme.TEXT_MUTED : Theme.TEXT_FAINT);
         if (cacheSpaceOfflineSimulationEnabled && !cacheOfflineSnapshotEnabled) {
-            Theme.textRight(g, font, "空间已启用", cardX + cardW - 52, offlineY + 9, Theme.PRIMARY_PRESS);
+            Theme.textRight(g, font, "空间", cardX + cardW - 48, offlineY + 9, Theme.PRIMARY_PRESS);
         }
-        drawStatsSwitch(g, statsToggleX(cardX, cardW), offlineY + 18, cacheOfflineSnapshotEnabled);
+        drawStatsSwitch(g, toggleX, offlineY + 14, cacheOfflineSnapshotEnabled);
 
         int cardY = offlineY + offlineH + gap;
-        int cardH = Math.max(58, topPos + panelH - cardY - BaseChestMenu.PANEL_PADDING);
+        int cardH = 40;
 
-        Theme.panel(g, cardX, cardY, cardW, cardH, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
+        ChestGuiTextures.panelLighterCompact(g, cardX, cardY, cardW, cardH);
         Theme.text(g, font, "产率统计", cardX + 10, cardY + 7, Theme.TEXT);
-        Theme.text(g, font, "加入统计", cardX + 10, cardY + 22, cacheProductionStatsEnabled ? Theme.TEXT : Theme.TEXT_MUTED);
-        drawStatsSwitch(g, statsToggleX(cardX, cardW), cardY + 18, cacheProductionStatsEnabled);
-
-        Theme.text(g, font, "分组", cardX + 10, cardY + 43, Theme.TEXT_MUTED);
-        drawGroupSelector(g, mx, my, groupSelectorX(cardX), cardY + 37, groupSelectorW(cardW), 18);
-        if (statsGroupDropdownOpen) renderGroupDropdown(g, mx, my, groupSelectorX(cardX), cardY + 56, groupSelectorW(cardW));
+        Theme.text(g, font, "分组", cardX + 10, cardY + 22, Theme.TEXT_MUTED);
+        drawGroupSelector(g, mx, my, groupSelectorX(cardX), cardY + 17, groupSelectorW(cardW), 18);
+        drawStatsSwitch(g, statsToggleX(cardX, cardW), cardY + 13, cacheProductionStatsEnabled);
+        if (statsGroupDropdownOpen) renderGroupDropdown(g, mx, my, groupSelectorX(cardX), cardY + 36, groupSelectorW(cardW));
         g.disableScissor();
         renderSettingsScrollbar(g);
     }
@@ -614,7 +704,12 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
     }
 
     private int settingsContentHeight() {
-        return 4 + 36 + 6 + 48 + 6 + 38 + 6 + 50 + 6 + 72 + 8;
+        return 4 + 34 + 7 + 43 + 7 + 42 + 7 + 38 + 7 + 40 + 8;
+    }
+
+    private int settingsCardW() {
+        int scrollbarReserve = maxSettingsScroll() > 0 ? 9 : 0;
+        return panelW - BaseChestMenu.PANEL_PADDING * 2 - scrollbarReserve;
     }
 
     private int maxSettingsScroll() {
@@ -627,18 +722,20 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         int trackX = leftPos + panelW - BaseChestMenu.PANEL_PADDING - 4;
         int trackY = settingsViewportTop() + 4;
         int trackH = settingsViewportBottom() - settingsViewportTop() - 8;
-        Theme.fillRound(g, trackX, trackY, 3, trackH, 2, Theme.SURFACE_SUNK);
         int thumbH = Math.max(14, trackH * (settingsViewportBottom() - settingsViewportTop()) / settingsContentHeight());
         int thumbY = trackY + (trackH - thumbH) * settingsScroll / max;
-        Theme.fillRound(g, trackX, thumbY, 3, thumbH, 2, Theme.PRIMARY);
+        ChestGuiTextures.scrollbar(g, trackX - 2, trackY, 7, trackH, thumbY, thumbH);
     }
 
     private void renderGraphTierButton(GuiGraphics g, int mx, int my, int x, int y, int w, String label, String kind) {
         boolean selected = kind.equals(cacheGraphKind);
         boolean enabled = !"PROTECTED".equals(kind) || firstVisibleTeamId() != null || !cacheGraphTeamId.isBlank();
-        int fill = selected ? Theme.PRIMARY_SOFT : enabled ? Theme.SURFACE : Theme.SURFACE_SUNK;
-        int border = Theme.inside(mx, my, x, y, w, 16) && enabled ? Theme.PRIMARY : selected ? Theme.PRIMARY : Theme.BORDER;
-        Theme.panel(g, x, y, w, 16, 5, fill, border);
+        boolean hovered = Theme.inside(mx, my, x, y, w, 16) && enabled;
+        ChestGuiTextures.button(g, x, y, w, 16,
+                !enabled ? ChestGuiTextures.ButtonState.DISABLED
+                        : selected ? ChestGuiTextures.ButtonState.SELECTED
+                        : hovered ? ChestGuiTextures.ButtonState.HOVER
+                        : ChestGuiTextures.ButtonState.NORMAL);
         Theme.textCentered(g, font, label, x + w / 2, y + 5, enabled ? selected ? Theme.PRIMARY_PRESS : Theme.TEXT : Theme.TEXT_FAINT);
     }
 
@@ -666,47 +763,69 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
     private void layoutChestIdEdit(int cardX, int cardY, int cardW) {
         if (chestIdEdit == null) return;
         int editX = cardX + 10;
-        int editW = Math.max(68, cardW - 62);
+        int editW = renameEditW(cardW);
         chestIdEdit.setX(editX);
-        chestIdEdit.setY(cardY + 25);
+        chestIdEdit.setY(cardY + 28);
         chestIdEdit.setWidth(editW);
         chestIdEdit.visible = isSettingsPage();
     }
 
     private int renameSaveX(int cardX, int cardW) {
-        return cardX + cardW - 48;
+        return cardX + cardW - 42;
+    }
+
+    private int renameEditW(int cardW) {
+        return Math.max(56, cardW - 62);
     }
 
     private void renderUpgradeSlots(GuiGraphics g, int mx, int my, int x, int y, int w, boolean compact) {
         int h = compact ? BaseChestMenu.UPGRADE_SECTION_HEIGHT : 48;
-        Theme.panel(g, x, y, w, h, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
+        ChestGuiTextures.panelLighterCompact(g, x, y, w, h);
         Theme.text(g, font, compact ? "升级" : "升级模块", x + 8, y + (compact ? 8 : 8), Theme.TEXT_MUTED);
-        int startX = compact ? x + 42 : x + w - 6 * 20 - 10;
+        List<Integer> visibleSlots = visibleUpgradeSlots();
+        int startX = compact ? x + 42 : x + w - visibleSlots.size() * 20 - 10;
         int slotY = compact ? y + 3 : y + 22;
         hoveredUpgradeSlot = -1;
-        for (int i = 0; i < BaseChestBlockEntity.UPGRADE_SLOT_COUNT; i++) {
-            int sx = startX + i * 20;
+        for (int visibleIndex = 0; visibleIndex < visibleSlots.size(); visibleIndex++) {
+            int i = visibleSlots.get(visibleIndex);
+            int sx = startX + visibleIndex * 20;
             ItemStack stack = upgradeStack(i);
-            boolean enabled = !stack.isEmpty();
             boolean hovered = Theme.inside(mx, my, sx, slotY, 18, 18);
             if (hovered) hoveredUpgradeSlot = i;
-            int fill = enabled
-                    ? (hovered ? Theme.PRIMARY_SOFT_H : Theme.SURFACE_SUNK)
-                    : (hovered ? Theme.SURFACE_ALT : Theme.SURFACE);
-            int border = hovered ? Theme.PRIMARY : Theme.BORDER;
-            Theme.panel(g, sx, slotY, 18, 18, 4, fill, border);
+            ChestGuiTextures.slot(g, sx, slotY, hovered);
             int count = i < cacheUpgradeCounts.length ? cacheUpgradeCounts[i] : 0;
             if (!stack.isEmpty()) {
                 if (count > 0) {
                     g.renderItem(stack, sx + 1, slotY + 1);
                     renderCountText(g, BaseChestMenu.formatCount(count), sx + 1, slotY + 1);
                 } else {
-                    Theme.textCentered(g, font, upgradeSlotMark(i), sx + 9, slotY + 5, enabled ? Theme.TEXT_FAINT : Theme.TEXT_FAINT);
+                    ChestGuiTextures.upgradeGlyph(g, upgradeGlyph(i), sx + 2, slotY + 2);
                 }
-            } else {
-                Theme.textCentered(g, font, "·", sx + 9, slotY + 5, Theme.TEXT_FAINT);
             }
         }
+    }
+
+    private ChestGuiTextures.UpgradeGlyph upgradeGlyph(int slot) {
+        return switch (slot) {
+            case BaseChestBlockEntity.FLUID_UPGRADE_SLOT -> ChestGuiTextures.UpgradeGlyph.FLUID;
+            case BaseChestBlockEntity.NETWORK_UPGRADE_SLOT -> ChestGuiTextures.UpgradeGlyph.NETWORK;
+            case BaseChestBlockEntity.ENERGY_UPGRADE_SLOT -> ChestGuiTextures.UpgradeGlyph.ENERGY;
+            case BaseChestBlockEntity.STRESS_UPGRADE_SLOT -> ChestGuiTextures.UpgradeGlyph.STRESS;
+            default -> ChestGuiTextures.UpgradeGlyph.STORAGE;
+        };
+    }
+
+    private List<Integer> visibleUpgradeSlots() {
+        List<Integer> result = new ArrayList<>();
+        for (int i = 0; i < BaseChestBlockEntity.UPGRADE_SLOT_COUNT; i++) {
+            if (isUpgradeSlotVisible(i)) result.add(i);
+        }
+        return result;
+    }
+
+    private boolean isUpgradeSlotVisible(int slot) {
+        if ((slot == BaseChestBlockEntity.FLUID_UPGRADE_SLOT || slot == BaseChestBlockEntity.STRESS_UPGRADE_SLOT) && !cacheCreateLoaded) return false;
+        return !upgradeStack(slot).isEmpty();
     }
 
     private ItemStack upgradeStack(int slot) {
@@ -731,33 +850,23 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         };
     }
 
-    private String upgradeSlotMark(int slot) {
-        return switch (slot) {
-            case BaseChestBlockEntity.STORAGE_UPGRADE_SLOT -> "物";
-            case BaseChestBlockEntity.FLUID_UPGRADE_SLOT -> "液";
-            case BaseChestBlockEntity.NETWORK_UPGRADE_SLOT -> "网";
-            case BaseChestBlockEntity.ENERGY_UPGRADE_SLOT -> "电";
-            case BaseChestBlockEntity.STRESS_UPGRADE_SLOT -> "力";
-            default -> "·";
-        };
-    }
-
     private void drawStatsSwitch(GuiGraphics g, int x, int y, boolean enabled) {
-        int fill = enabled ? Theme.PRIMARY_SOFT : Theme.SURFACE_SUNK;
-        int border = enabled ? Theme.PRIMARY : Theme.BORDER_STRONG;
-        Theme.panel(g, x, y, 34, 14, 7, fill, border);
-        Theme.fillRound(g, x + (enabled ? 19 : 3), y + 3, 9, 8, 4, enabled ? Theme.PRIMARY_PRESS : Theme.TEXT_FAINT);
+        ChestGuiTextures.switchTrack(g, x, y);
+        ChestGuiTextures.switchKnob(g, x + (enabled ? 19 : 3), y + 3, enabled);
     }
 
     private void drawGroupSelector(GuiGraphics g, int mx, int my, int x, int y, int w, int h) {
         boolean hover = Theme.inside(mx, my, x, y, w, h);
         var group = ClientProductionStatsCache.group(selectedProductionGroupId());
         String label = group == null ? "默认" : group.name();
-        int fill = cacheProductionStatsEnabled ? (hover ? 0xFFFFFFFF : Theme.SURFACE) : Theme.SURFACE_SUNK;
-        Theme.panel(g, x, y, w, h, 5, fill, hover ? Theme.PRIMARY : Theme.BORDER);
+        if (cacheProductionStatsEnabled) {
+            ChestGuiTextures.button(g, x, y, w, h, hover ? ChestGuiTextures.ButtonState.HOVER : ChestGuiTextures.ButtonState.NORMAL);
+        } else {
+            ChestGuiTextures.inset(g, x, y, w, h);
+        }
         Theme.text(g, font, Theme.ellipsize(font, label, w - 22), x + 7, y + 5, cacheProductionStatsEnabled ? Theme.TEXT : Theme.TEXT_MUTED);
-        if (statsGroupDropdownOpen) Theme.chevronUp(g, x + w - 11, y + h / 2, 7, Theme.TEXT_MUTED);
-        else Theme.chevronDown(g, x + w - 11, y + h / 2, 7, Theme.TEXT_MUTED);
+        if (statsGroupDropdownOpen) ChestGuiTextures.chevronUp(g, x + w - 11, y + h / 2);
+        else ChestGuiTextures.chevronDown(g, x + w - 11, y + h / 2);
     }
 
     private void renderGroupDropdown(GuiGraphics g, int mx, int my, int x, int y, int w) {
@@ -765,8 +874,8 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         int rowH = 17;
         int visible = Math.min(6, Math.max(1, groups.size()));
         int h = visible * rowH + 6;
-        Theme.shadow(g, x, y, w, h, Theme.RADIUS + 1);
-        Theme.panel(g, x, y, w, h, Theme.RADIUS + 1, Theme.SURFACE, Theme.BORDER_STRONG);
+        ChestGuiTextures.shadow(g, x, y, w, h);
+        ChestGuiTextures.panelLighterCompact(g, x, y, w, h);
         if (groups.isEmpty()) {
             Theme.text(g, font, "暂无分组", x + 7, y + 7, Theme.TEXT_FAINT);
             return;
@@ -777,7 +886,10 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             var group = groups.get(i);
             boolean selected = group.id().equals(current);
             boolean hover = Theme.inside(mx, my, x + 3, rowY, w - 6, rowH);
-            if (selected || hover) Theme.fillRound(g, x + 3, rowY, w - 6, rowH, 4, selected ? Theme.PRIMARY_SOFT : Theme.SURFACE_ALT);
+            if (selected || hover) {
+                ChestGuiTextures.button(g, x + 3, rowY, w - 6, rowH,
+                        selected ? ChestGuiTextures.ButtonState.SELECTED : ChestGuiTextures.ButtonState.HOVER);
+            }
             Theme.text(g, font, Theme.ellipsize(font, group.name(), w - 18), x + 8, rowY + 5, selected ? Theme.PRIMARY_PRESS : Theme.TEXT);
             rowY += rowH;
         }
@@ -785,21 +897,21 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
 
     private int statsToggleX(int cardX, int cardW) { return cardX + cardW - 44; }
     private int groupSelectorX(int cardX) { return cardX + 46; }
-    private int groupSelectorW(int cardW) { return Math.max(74, cardW - 56); }
+    private int groupSelectorW(int cardW) { return Math.max(60, cardW - 98); }
 
     /** 标题与分区标签 */
     private void renderLabels(GuiGraphics g) {
         int x = leftPos, y = topPos;
-        Theme.text(g, font, title.getString(), x + titleLabelX, y + titleLabelY, Theme.TEXT);
+        Theme.text(g, font, title.getString(), x + titleLabelX, y + titleLabelY + 2, Theme.TEXT);
 
         if (isItemPage()) {
             // 容量信息（头部右侧，翻页按钮左侧）— 用服务端同步的 maxCapacity
             int used = cacheItems.stream().mapToInt(ChestSyncPacket.ItemEntry::count).sum();
             int max = cacheMaxCapacity;
             String cap = BaseChestMenu.formatCount(used) + " / " + BaseChestMenu.formatCount(max);
-            Theme.textRight(g, font, cap, x + pageButtonX - 6, y + titleLabelY, Theme.TEXT_MUTED);
+            Theme.textRight(g, font, cap, x + pageButtonX - 6, y + titleLabelY + 2, Theme.TEXT_MUTED);
 
-            Theme.text(g, font, playerInventoryTitle.getString(), x + BaseChestMenu.PANEL_PADDING, y + playerLabelY - 2, Theme.TEXT_MUTED);
+            Theme.text(g, font, playerInventoryTitle.getString(), x + BaseChestMenu.PANEL_PADDING, y + playerLabelY + 1, Theme.TEXT_MUTED);
         }
     }
 
@@ -868,6 +980,12 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
                 localScrollRow = Math.max(0, Math.min(maxRow, localScrollRow - (int) Math.signum(sy)));
                 return true;
             }
+        }
+        if (isFluidPage() && mx >= leftPos && mx < leftPos + panelW
+                && my >= topPos + BaseChestMenu.HEADER_HEIGHT + 12 && my < topPos + panelH - 8) {
+            int max = maxResourceScroll();
+            if (max > 0) resourceScroll = Math.max(0, Math.min(max, resourceScroll - (int) Math.signum(sy) * 18));
+            return true;
         }
         if (isSettingsPage() && mx >= leftPos && mx < leftPos + panelW
                 && my >= settingsViewportTop() && my < settingsViewportBottom()) {
@@ -979,13 +1097,13 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         if (my < settingsViewportTop() || my >= settingsViewportBottom()) return true;
         settingsScroll = Math.max(0, Math.min(maxSettingsScroll(), settingsScroll));
         int graphY = settingsViewportTop() + 4 - settingsScroll;
-        int renameY = graphY + 36 + 6;
-        int accessY = renameY + 48 + 6;
-        int offlineY = accessY + 38 + 6;
-        int cardY = offlineY + 50 + 6;
-        int cardW = panelW - BaseChestMenu.PANEL_PADDING * 2;
+        int renameY = graphY + 34 + 7;
+        int accessY = renameY + 43 + 7;
+        int offlineY = accessY + 42 + 7;
+        int cardY = offlineY + 38 + 7;
+        int cardW = settingsCardW();
         int selectorX = groupSelectorX(cardX);
-        int selectorY = cardY + 37;
+        int selectorY = cardY + 17;
         int selectorW = groupSelectorW(cardW);
         if (button != 0) return true;
 
@@ -999,7 +1117,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             return true;
         }
         int saveX = renameSaveX(cardX, cardW);
-        if (Theme.inside(mx, my, saveX, renameY + 25, 42, 18)) {
+        if (Theme.inside(mx, my, saveX, renameY + 23, 36, 18)) {
             statsGroupDropdownOpen = false;
             submitChestRename();
             return true;
@@ -1009,13 +1127,13 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             setFocused(null);
         }
 
-        if (Theme.inside(mx, my, graphTierButtonX(cardX, cardW, 0), accessY + 22, graphTierButtonW(cardW, 0), 16)) {
+        if (Theme.inside(mx, my, graphTierButtonX(cardX, cardW, 0), accessY + 23, graphTierButtonW(cardW, 0), 16)) {
             send(21, "PRIVATE|");
             cacheGraphKind = "PRIVATE";
             cacheGraphTeamId = "";
             return true;
         }
-        if (Theme.inside(mx, my, graphTierButtonX(cardX, cardW, 1), accessY + 22, graphTierButtonW(cardW, 1), 16)) {
+        if (Theme.inside(mx, my, graphTierButtonX(cardX, cardW, 1), accessY + 23, graphTierButtonW(cardW, 1), 16)) {
             String teamId = firstVisibleTeamId();
             if (teamId != null) {
                 send(21, "PROTECTED|" + teamId);
@@ -1024,19 +1142,19 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             }
             return true;
         }
-        if (Theme.inside(mx, my, graphTierButtonX(cardX, cardW, 2), accessY + 22, graphTierButtonW(cardW, 2), 16)) {
+        if (Theme.inside(mx, my, graphTierButtonX(cardX, cardW, 2), accessY + 23, graphTierButtonW(cardW, 2), 16)) {
             send(21, "PUBLIC|");
             cacheGraphKind = "PUBLIC";
             cacheGraphTeamId = "";
             return true;
         }
-        if (Theme.inside(mx, my, graphTierButtonX(cardX, cardW, 3), accessY + 22, graphTierButtonW(cardW, 3), 16)) {
+        if (Theme.inside(mx, my, graphTierButtonX(cardX, cardW, 3), accessY + 23, graphTierButtonW(cardW, 3), 16)) {
             send(21, "SPACE|");
             cacheGraphKind = "SPACE";
             return true;
         }
 
-        if (Theme.inside(mx, my, statsToggleX(cardX, cardW), offlineY + 18, 34, 14)) {
+        if (Theme.inside(mx, my, statsToggleX(cardX, cardW), offlineY + 14, 34, 14)) {
             statsGroupDropdownOpen = false;
             send(22, "");
             cacheOfflineSnapshotEnabled = !cacheOfflineSnapshotEnabled;
@@ -1046,7 +1164,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         if (statsGroupDropdownOpen) {
             List<com.pockethomestead.network.ProductionStatsSyncPacket.GroupData> groups = ClientProductionStatsCache.atomicGroups();
             int rowH = 17;
-            int listY = cardY + 56;
+            int listY = cardY + 36;
             int visible = Math.min(6, groups.size());
             for (int i = 0; i < visible; i++) {
                 int rowY = listY + 3 + i * rowH;
@@ -1059,7 +1177,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             if (!Theme.inside(mx, my, selectorX, listY, selectorW, visible * rowH + 6)) statsGroupDropdownOpen = false;
         }
 
-        if (Theme.inside(mx, my, statsToggleX(cardX, cardW), cardY + 18, 34, 14)) {
+        if (Theme.inside(mx, my, statsToggleX(cardX, cardW), cardY + 13, 34, 14)) {
             statsGroupDropdownOpen = false;
             toggleProductionStats();
             return true;
@@ -1073,15 +1191,17 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
     }
 
     private boolean chestIdEditHit(double mx, double my, int cardX, int cardY, int cardW) {
-        return Theme.inside(mx, my, cardX + 10, cardY + 25, Math.max(68, cardW - 62), 16);
+        return Theme.inside(mx, my, cardX + 10, cardY + 25, renameEditW(cardW), 16);
     }
 
     private boolean handleUpgradeSlotClick(double mx, double my, int button) {
         if (button != 0 && button != 1) return false;
         int upgradeStartX = leftPos + upgradeAreaX + 42;
         int upgradeY = topPos + upgradeAreaY + 3;
-        for (int i = 0; i < BaseChestBlockEntity.UPGRADE_SLOT_COUNT; i++) {
-            int sx = upgradeStartX + i * 20;
+        List<Integer> visibleSlots = visibleUpgradeSlots();
+        for (int visibleIndex = 0; visibleIndex < visibleSlots.size(); visibleIndex++) {
+            int i = visibleSlots.get(visibleIndex);
+            int sx = upgradeStartX + visibleIndex * 20;
             if (Theme.inside(mx, my, sx, upgradeY, 18, 18)) {
                 if (upgradeStack(i).isEmpty()) return false;
                 boolean carrying = !menu.getCarried().isEmpty();

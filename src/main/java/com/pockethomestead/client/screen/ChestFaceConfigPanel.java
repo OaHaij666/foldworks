@@ -3,6 +3,7 @@ package com.pockethomestead.client.screen;
 import com.pockethomestead.blockentity.RelativeSide;
 import com.pockethomestead.blockentity.ResourceKind;
 import com.pockethomestead.blockentity.SideMode;
+import com.pockethomestead.client.ui.ChestGuiTextures;
 import com.pockethomestead.client.ui.Theme;
 import com.pockethomestead.menu.BaseChestMenu;
 import net.minecraft.client.Minecraft;
@@ -58,14 +59,14 @@ public final class ChestFaceConfigPanel {
         int cardX = host.leftPos() + BaseChestMenu.PANEL_PADDING;
         int cardW = host.panelWidth() - BaseChestMenu.PANEL_PADDING * 2;
         int cubeY = host.topPos() + BaseChestMenu.HEADER_HEIGHT + 10;
-        Theme.panel(g, cardX, cubeY, cardW, FACE_CUBE_HEIGHT, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
+        ChestGuiTextures.panelLighter(g, cardX, cubeY, cardW, FACE_CUBE_HEIGHT);
         Theme.text(g, font, "面配置", cardX + 10, cubeY + 8, Theme.TEXT);
         Theme.textRight(g, font, sideLabel(selectedSide), cardX + cardW - 10, cubeY + 8, Theme.PRIMARY_PRESS);
         renderFaceCube(g, mx, my, font, cardX + cardW / 2, cubeY + FACE_CUBE_CENTER_Y_OFFSET, FACE_CUBE_SCALE);
 
         int controlsY = cubeY + FACE_CUBE_HEIGHT + 8;
         int controlsH = Math.max(72, host.topPos() + host.panelHeight() - controlsY - BaseChestMenu.PANEL_PADDING);
-        Theme.panel(g, cardX, controlsY, cardW, controlsH, Theme.RADIUS + 1, Theme.SURFACE_ALT, Theme.BORDER);
+        ChestGuiTextures.panelLighterCompact(g, cardX, controlsY, cardW, controlsH);
         Theme.text(g, font, sideLabel(selectedSide) + "面", cardX + 10, controlsY + 8, Theme.TEXT);
         renderFaceControls(g, mx, my, font, cardX, controlsY, cardW);
     }
@@ -73,13 +74,13 @@ public final class ChestFaceConfigPanel {
     private void renderFaceControls(GuiGraphics g, int mx, int my, Font font, int x, int y, int w) {
         ResourceKind activeKind = activeSideKind(selectedSide);
         int functionX = x + 9;
-        int functionY = y + 28;
+        int functionY = y + 20;
         int functionW = 50;
         int settingsX = functionX + functionW + 9;
         int settingsW = Math.max(90, x + w - settingsX - 9);
 
-        Theme.vLine(g, functionX + functionW + 4, y + 19, Math.max(54, host.topPos() + host.panelHeight() - y - BaseChestMenu.PANEL_PADDING - 26), Theme.DIVIDER);
-        Theme.text(g, font, "功能", functionX, y + 17, Theme.TEXT_MUTED);
+        ChestGuiTextures.vDivider(g, functionX + functionW + 4, y + 19,
+                Math.max(54, host.topPos() + host.panelHeight() - y - BaseChestMenu.PANEL_PADDING - 26));
         renderFaceFunctionSelector(g, mx, my, font, functionX, functionY, functionW, activeKind);
 
         Theme.text(g, font, kindLabel(activeKind) + "模式", settingsX, y + 17, Theme.TEXT_MUTED);
@@ -97,22 +98,25 @@ public final class ChestFaceConfigPanel {
 
     private void renderFaceFunctionSelector(GuiGraphics g, int mx, int my, Font font, int x, int y, int w, ResourceKind activeKind) {
         boolean hover = Theme.inside(mx, my, x, y, w, 18);
-        Theme.panel(g, x, y, w, 18, 5, hover ? Theme.PRIMARY_SOFT_H : Theme.SURFACE, hover ? Theme.PRIMARY : Theme.BORDER);
+        ChestGuiTextures.button(g, x, y, w, 18, hover ? ChestGuiTextures.ButtonState.HOVER : ChestGuiTextures.ButtonState.NORMAL);
         Theme.text(g, font, Theme.ellipsize(font, kindLabel(activeKind), w - 16), x + 6, y + 6, Theme.PRIMARY_PRESS);
-        if (faceKindDropdownOpen) Theme.chevronUp(g, x + w - 8, y + 9, 5, Theme.TEXT_MUTED);
-        else Theme.chevronDown(g, x + w - 8, y + 9, 5, Theme.TEXT_MUTED);
+        if (faceKindDropdownOpen) ChestGuiTextures.chevronUp(g, x + w - 8, y + 9);
+        else ChestGuiTextures.chevronDown(g, x + w - 8, y + 9);
 
         if (!faceKindDropdownOpen) return;
         List<ResourceKind> kinds = availableSideKinds();
         int rowH = 17;
         int listY = y + 20;
-        Theme.panel(g, x, listY, w, kinds.size() * rowH + 4, 5, Theme.SURFACE, Theme.BORDER);
+        ChestGuiTextures.panelLighterCompact(g, x, listY, w, kinds.size() * rowH + 4);
         for (int i = 0; i < kinds.size(); i++) {
             ResourceKind kind = kinds.get(i);
             int rowY = listY + 2 + i * rowH;
             boolean selected = kind == activeKind;
             boolean rowHover = Theme.inside(mx, my, x + 2, rowY, w - 4, rowH);
-            if (selected || rowHover) Theme.fillRound(g, x + 2, rowY, w - 4, rowH, 4, selected ? Theme.PRIMARY_SOFT : Theme.SURFACE_ALT);
+            if (selected || rowHover) {
+                ChestGuiTextures.button(g, x + 2, rowY, w - 4, rowH,
+                        selected ? ChestGuiTextures.ButtonState.SELECTED : ChestGuiTextures.ButtonState.HOVER);
+            }
             Theme.textCentered(g, font, kindLabel(kind), x + w / 2, rowY + 5, selected ? Theme.PRIMARY_PRESS : Theme.TEXT);
         }
     }
@@ -127,18 +131,20 @@ public final class ChestFaceConfigPanel {
 
     private void renderStressToggle(GuiGraphics g, int mx, int my, Font font, int x, int y, int w, String label, boolean selected) {
         boolean hover = Theme.inside(mx, my, x, y, w, 15);
-        int fill = selected ? Theme.PRIMARY_SOFT : Theme.SURFACE;
-        int border = hover ? Theme.PRIMARY : selected ? Theme.PRIMARY : Theme.BORDER;
-        Theme.panel(g, x, y, w, 15, 4, fill, border);
+        ChestGuiTextures.button(g, x, y, w, 15,
+                selected ? ChestGuiTextures.ButtonState.SELECTED
+                        : hover ? ChestGuiTextures.ButtonState.HOVER
+                        : ChestGuiTextures.ButtonState.NORMAL);
         Theme.textCentered(g, font, label, x + w / 2, y + 4, selected ? Theme.PRIMARY_PRESS : Theme.TEXT);
     }
 
     private void renderFaceModeButton(GuiGraphics g, int mx, int my, Font font, int x, int y, int w, ResourceKind kind, SideMode mode) {
         boolean selected = cachedSideMode(kind, selectedSide) == mode;
         boolean hover = Theme.inside(mx, my, x, y, w, 18);
-        int fill = selected ? sideModeFill(mode) : Theme.SURFACE;
-        int border = hover ? Theme.PRIMARY : selected ? sideModeText(mode) : Theme.BORDER;
-        Theme.panel(g, x, y, w, 18, 5, fill, border);
+        ChestGuiTextures.button(g, x, y, w, 18,
+                selected ? mode == SideMode.BOTH ? ChestGuiTextures.ButtonState.GOLD : ChestGuiTextures.ButtonState.SELECTED
+                        : hover ? ChestGuiTextures.ButtonState.HOVER
+                        : ChestGuiTextures.ButtonState.NORMAL);
         Theme.textCentered(g, font, sideModeLabel(mode), x + w / 2, y + 6, sideModeText(mode));
     }
 
@@ -193,9 +199,10 @@ public final class ChestFaceConfigPanel {
     private void drawAnimatedTexture(GuiGraphics g, double[] xs, double[] ys, ResourceLocation texture, int color, int frames, int frameTime) {
         Minecraft mc = host.minecraft();
         long tick = mc != null && mc.level != null ? mc.level.getGameTime() : System.currentTimeMillis() / 50L;
-        int frame = (int) ((tick / Math.max(1, frameTime)) % Math.max(1, frames));
-        float v0 = (float) frame / frames;
-        float v1 = (float) (frame + 1) / frames;
+        int safeFrames = Math.max(1, frames);
+        int frame = (int) ((tick / Math.max(1, frameTime)) % safeFrames);
+        float v0 = (float) frame / safeFrames;
+        float v1 = (float) (frame + 1) / safeFrames;
         renderer.drawTexturedQuad(g, xs, ys, texture, color, 0.0f, v0, 1.0f, v1);
     }
 
@@ -266,7 +273,7 @@ public final class ChestFaceConfigPanel {
 
     private boolean handleFaceModeClick(double mx, double my, int x, int y, int w) {
         int functionX = x + 9;
-        int functionY = y + 28;
+        int functionY = y + 20;
         int functionW = 50;
         int settingsX = functionX + functionW + 9;
         int settingsW = Math.max(90, x + w - settingsX - 9);
@@ -341,6 +348,7 @@ public final class ChestFaceConfigPanel {
     }
 
     private boolean canEditSideKind(ResourceKind kind) {
+        if (kind == ResourceKind.FLUID) return host.createLoaded();
         if (kind == ResourceKind.STRESS) return host.createLoaded();
         return true;
     }
@@ -348,7 +356,7 @@ public final class ChestFaceConfigPanel {
     private List<ResourceKind> availableSideKinds() {
         List<ResourceKind> kinds = new ArrayList<>();
         kinds.add(ResourceKind.ITEM);
-        if (host.hasFluidPage()) kinds.add(ResourceKind.FLUID);
+        if (host.createLoaded()) kinds.add(ResourceKind.FLUID);
         kinds.add(ResourceKind.ENERGY);
         if (host.createLoaded()) kinds.add(ResourceKind.STRESS);
         return kinds;
@@ -444,15 +452,6 @@ public final class ChestFaceConfigPanel {
 
     private String stressSpeedLabel(int rpm) {
         return rpm <= 0 ? "同速" : rpm + "rpm";
-    }
-
-    private int sideModeFill(SideMode mode) {
-        return switch (mode) {
-            case DISABLED -> Theme.SURFACE;
-            case INPUT -> 0xFFE8F5EE;
-            case OUTPUT -> 0xFFEAF2FF;
-            case BOTH -> 0xFFFFF5DA;
-        };
     }
 
     private int sideModeText(SideMode mode) {

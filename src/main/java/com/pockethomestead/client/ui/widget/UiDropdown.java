@@ -1,5 +1,6 @@
 package com.pockethomestead.client.ui.widget;
 
+import com.pockethomestead.client.ui.HomesteadTabletGuiTextures;
 import com.pockethomestead.client.ui.Theme;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -90,8 +91,8 @@ public class UiDropdown {
     // ===== 闭合态 =====
     public void render(GuiGraphics g, int mouseX, int mouseY) {
         boolean hovered = Theme.inside(mouseX, mouseY, x, y, w, h);
-        int border = (open || hovered) ? Theme.PRIMARY : Theme.BORDER_STRONG;
-        Theme.panel(g, x, y, w, h, Theme.RADIUS, hovered ? Theme.SURFACE_ALT : Theme.SURFACE_SUNK, border);
+        HomesteadTabletGuiTextures.button(g, x, y, w, h,
+                (open || hovered) ? HomesteadTabletGuiTextures.ButtonState.HOVER : HomesteadTabletGuiTextures.ButtonState.NORMAL);
 
         String text = Theme.ellipsize(font, currentLabel(), w - 24);
         g.drawString(font, Theme.styled(text), x + 8, y + (h - font.lineHeight) / 2 + 1, Theme.TEXT, false);
@@ -107,8 +108,8 @@ public class UiDropdown {
         int popH = rows * ROW_H + 2;
         int top = popupTop();
 
-        Theme.shadow(g, x, top, w, popH, Theme.RADIUS);
-        Theme.panel(g, x, top, w, popH, Theme.RADIUS, Theme.SURFACE, Theme.PRIMARY);
+        HomesteadTabletGuiTextures.shadow(g, x, top, w, popH);
+        HomesteadTabletGuiTextures.panel(g, x, top, w, popH);
 
         g.enableScissor(x + 1, top + 1, x + w - 1, top + popH - 1);
         int first = (int) (scroll / ROW_H);

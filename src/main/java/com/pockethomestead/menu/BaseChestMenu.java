@@ -42,8 +42,8 @@ public abstract class BaseChestMenu extends AbstractContainerMenu {
 
     public static int calculateSlotStartX(int panelWidth) {
         int gridWidth = CHEST_COLS * SLOT_SIZE;
-        int remaining = panelWidth - gridWidth - SCROLLBAR_WIDTH - SCROLLBAR_GAP;
-        return PANEL_PADDING + remaining / 2;
+        int contentWidth = panelWidth - PANEL_PADDING * 2;
+        return PANEL_PADDING + Math.max(0, (contentWidth - gridWidth) / 2) + 1;
     }
 
     public static int calculateChestSlotStartY() {

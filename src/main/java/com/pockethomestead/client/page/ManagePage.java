@@ -8,6 +8,7 @@ import com.pockethomestead.client.ui.widget.UiScrollList;
 import com.pockethomestead.dimension.PocketDimensionManager;
 import com.pockethomestead.network.PermissionMemberPayload;
 import com.pockethomestead.network.RequestSpaceListPayload;
+import com.pockethomestead.network.RenameSpacePayload;
 import com.pockethomestead.network.SpaceActionPayload;
 import com.pockethomestead.network.SpaceInfo;
 import com.pockethomestead.network.UpdateOfflineSimulationPayload;
@@ -32,7 +33,7 @@ import java.util.UUID;
 /** 管理页：列表 + 进入/退出/删除（二次确认）+ 权限编辑模态。 */
 public class ManagePage extends Page {
 
-    private enum Modal { NONE, CONFIRM_DELETE, PERMISSION }
+    private enum Modal { NONE, CONFIRM_DELETE, PERMISSION, RENAME }
 
     private final List<SpaceInfo> spaces = new ArrayList<>();
     private final List<SpaceInfo> filteredSpaces = new ArrayList<>();
@@ -44,6 +45,7 @@ public class ManagePage extends Page {
     private Modal modal = Modal.NONE;
     private SpaceInfo target;
     private EditBox permNameInput;
+    private EditBox renameInput;
     private EditBox ownerFilterInput;
     private long lastSeenSpaceVersion = -1;
 
@@ -71,8 +73,9 @@ public class ManagePage extends Page {
 
     // 卡片右侧按钮命中区（由 computeCardRects 写入）
     private boolean hasDelete, hasSettings;
+    private boolean hasRename;
     private boolean hasOfflineToggle;
-    private int delX, setX, offlineX, pillX, btnY, pillY;
+    private int delX, setX, renameX, offlineX, pillX, btnY, pillY;
 
     @Override public String id() { return "manage"; }
     @Override public String navTitle() { return Component.translatable("pockethomestead.ui.nav.manage").getString(); }
@@ -191,12 +194,8 @@ public class ManagePage extends Page {
         onlineW = 38;
         int inputX = selfX + 40;
         int inputW = Math.max(68, fw - (inputX - fx) - onlineW - clearW - 20);
-        Theme.panel(g, inputX, row2, inputW, 17, 5, Theme.SURFACE_SUNK, ownerFilterInput != null && ownerFilterInput.isFocused() ? Theme.PRIMARY : Theme.BORDER);
         if (ownerFilterInput == null) buildWidgets();
-        ownerFilterInput.setX(inputX + 5);
-        ownerFilterInput.setY(row2 + 5);
-        ownerFilterInput.setWidth(inputW - 10);
-        ownerFilterInput.render(g, mouseX, mouseY, partialTick);
+        renderEditText(g, ownerFilterInput, inputX, row2, inputW, 17, "Owner UUID", mouseX, mouseY, partialTick, true);
 
         onlineX = inputX + inputW + 4;
         onlineY = row2;
@@ -222,9 +221,11 @@ public class ManagePage extends Page {
         pillY = ry + rh - PILL_H - 7;
         hasDelete = owner && !current;
         hasSettings = owner;
+        hasRename = owner;
         hasOfflineToggle = owner;
         if (hasDelete) { delX = rightEdge - BTN; rightEdge = delX - 6; }
         if (hasSettings) { setX = rightEdge - BTN; rightEdge = setX - 6; }
+        if (hasRename) { renameX = rightEdge - BTN; rightEdge = renameX - 6; }
         if (hasOfflineToggle) { offlineX = rightEdge - OFFLINE_W; rightEdge = offlineX - 6; }
         pillX = rightEdge - (current ? CUR_W : PILL_W);
     }
@@ -267,6 +268,11 @@ public class ManagePage extends Page {
             Theme.fillRound(g, setX, btnY, BTN, BTN, Theme.RADIUS, sh ? Theme.PRIMARY_SOFT : Theme.SURFACE_SUNK);
             Theme.textInBox(g, font, "⚙", setX, btnY, BTN, BTN, Theme.TEXT_MUTED);
         }
+        if (hasRename) {
+            boolean renameHover = Theme.inside(mouseX, mouseY, renameX, btnY, BTN, BTN);
+            Theme.fillRound(g, renameX, btnY, BTN, BTN, Theme.RADIUS, renameHover ? Theme.PRIMARY_SOFT : Theme.SURFACE_SUNK);
+            Theme.textInBox(g, font, "名", renameX, btnY, BTN, BTN, Theme.TEXT_MUTED);
+        }
         if (hasOfflineToggle) {
             boolean allowed = offlineAllowed(space);
             boolean oh = Theme.inside(mouseX, mouseY, offlineX, btnY, OFFLINE_W, BTN) && allowed;
@@ -292,6 +298,7 @@ public class ManagePage extends Page {
 
         if (hasDelete && Theme.inside(mx, my, delX, btnY, BTN, BTN)) { openDeleteConfirm(space); return true; }
         if (hasSettings && Theme.inside(mx, my, setX, btnY, BTN, BTN)) { openPermission(space); return true; }
+        if (hasRename && Theme.inside(mx, my, renameX, btnY, BTN, BTN)) { openRename(space); return true; }
         if (hasOfflineToggle && Theme.inside(mx, my, offlineX, btnY, OFFLINE_W, BTN)) {
             if (offlineAllowed(space)) {
                 PacketDistributor.sendToServer(new UpdateOfflineSimulationPayload(space.spaceId(), !space.offlineSimulationEnabled()));
@@ -314,6 +321,7 @@ public class ManagePage extends Page {
         }
         g.fill(x, y, x + w, y + h, 0x990C1626); // 内容区遮罩
         if (modal == Modal.CONFIRM_DELETE) renderConfirm(g, mouseX, mouseY);
+        else if (modal == Modal.RENAME) renderRename(g, mouseX, mouseY, partialTick);
         else if (modal == Modal.PERMISSION) renderPermission(g, mouseX, mouseY, partialTick);
     }
 
@@ -360,6 +368,23 @@ public class ManagePage extends Page {
         drawModalButton(g, mx + 8 + bw + Theme.GAP, by, bw, Component.translatable("pockethomestead.space.delete.confirm_ok").getString(), true, mouseX, mouseY);
     }
 
+    private void renderRename(GuiGraphics g, int mouseX, int mouseY, float pt) {
+        if (target == null) { modal = Modal.NONE; return; }
+        int mw = Math.min(w - 24, 268), mh = 112;
+        int mx = x + (w - mw) / 2, my = y + (h - mh) / 2;
+        Theme.shadow(g, mx, my, mw, mh, Theme.RADIUS);
+        Theme.panel(g, mx, my, mw, mh, Theme.RADIUS, Theme.SURFACE, Theme.BORDER);
+        Theme.text(g, font, "重命名家园", mx + 12, my + 12, Theme.TEXT);
+
+        if (renameInput == null) renameInput = makeRenameInput();
+        renderEditText(g, renameInput, mx + 12, my + 38, mw - 24, 22, "家园名称", mouseX, mouseY, pt, true);
+
+        int bw = (mw - 24 - Theme.GAP) / 2;
+        int by = my + mh - 34;
+        drawModalButton(g, mx + 12, by, bw, "取消", false, mouseX, mouseY);
+        drawModalButton(g, mx + 12 + bw + Theme.GAP, by, bw, "保存", false, mouseX, mouseY);
+    }
+
     private void renderPermission(GuiGraphics g, int mouseX, int mouseY, float pt) {
         if (target == null) { modal = Modal.NONE; return; }
         int mw = Math.min(w - 16, 290), mh = Math.min(h - 16, 220);
@@ -394,12 +419,9 @@ public class ManagePage extends Page {
         int inputY = chipsY + 30;
         int addW = 48;
         int inputW = mw - 24 - addW - Theme.GAP;
-        Theme.panel(g, mx + 12, inputY, inputW, 20, Theme.RADIUS, Theme.SURFACE_SUNK, Theme.BORDER_STRONG);
         if (permNameInput == null) permNameInput = makeNameInput();
-        permNameInput.setX(mx + 16);
-        permNameInput.setY(inputY + 6);
-        permNameInput.setWidth(inputW - 8);
-        permNameInput.render(g, 0, 0, pt);
+        renderEditText(g, permNameInput, mx + 12, inputY, inputW, 20,
+                Component.translatable("pockethomestead.permission.name_hint").getString(), mouseX, mouseY, pt, true);
         boolean addHov = Theme.inside(mouseX, mouseY, mx + 12 + inputW + Theme.GAP, inputY, addW, 20);
         Theme.fillRound(g, mx + 12 + inputW + Theme.GAP, inputY, addW, 20, Theme.RADIUS, addHov ? Theme.PRIMARY_HOVER : Theme.PRIMARY);
         Theme.textInBox(g, font, Component.translatable("pockethomestead.permission.add").getString(), mx + 12 + inputW + Theme.GAP, inputY, addW, 20, Theme.TEXT_ON_PRIM);
@@ -441,6 +463,47 @@ public class ManagePage extends Page {
         return box;
     }
 
+    private EditBox makeRenameInput() {
+        EditBox box = new EditBox(font, 0, 0, 80, 14, Component.literal("家园名称"));
+        box.setMaxLength(24);
+        box.setBordered(false);
+        box.setTextColor(Theme.TEXT);
+        return box;
+    }
+
+    private void renderEditText(GuiGraphics g, EditBox input, int ix, int iy, int iw, int ih, String placeholder,
+                                int mouseX, int mouseY, float pt, boolean enabled) {
+        Theme.panel(g, ix, iy, iw, ih, Math.min(5, ih / 2), enabled ? Theme.SURFACE_SUNK : Theme.SURFACE_ALT,
+                input != null && input.isFocused() ? Theme.PRIMARY : Theme.BORDER);
+        if (input == null) return;
+        input.setX(ix + 6);
+        input.setY(iy + 6);
+        input.setWidth(iw - 12);
+        input.setEditable(enabled);
+        String value = input.getValue();
+        if (value.isBlank() && !input.isFocused()) {
+            g.drawString(font, placeholder, ix + 6, iy + (ih - 8) / 2, Theme.TEXT_FAINT, false);
+            return;
+        }
+        String visible = visibleTail(value, iw - 16);
+        int tx = ix + 6;
+        int ty = iy + (ih - 8) / 2;
+        g.enableScissor(ix + 4, iy + 2, ix + iw - 4, iy + ih - 2);
+        g.drawString(font, visible, tx, ty, enabled ? Theme.TEXT : Theme.TEXT_FAINT, false);
+        if (input.isFocused() && ((System.currentTimeMillis() / 500L) & 1L) == 0L) {
+            int cx = Math.min(ix + iw - 7, tx + font.width(visible) + 1);
+            g.fill(cx, ty - 1, cx + 1, ty + 10, Theme.TEXT);
+        }
+        g.disableScissor();
+    }
+
+    private String visibleTail(String value, int width) {
+        if (value == null || font.width(value) <= width) return value == null ? "" : value;
+        String text = value;
+        while (text.length() > 1 && font.width(text) > width) text = text.substring(1);
+        return text;
+    }
+
     @Override
     public boolean overlayMouseClicked(double mx, double my, int button) {
         if (modal == Modal.NONE && ownerDropdownOpen) {
@@ -449,6 +512,7 @@ public class ManagePage extends Page {
         if (modal == Modal.NONE) return false;
         if (button != 0) return true;
         if (modal == Modal.CONFIRM_DELETE) { confirmClick(mx, my); return true; }
+        if (modal == Modal.RENAME) { renameClick(mx, my); return true; }
         if (modal == Modal.PERMISSION) { permissionClick(mx, my); return true; }
         return true;
     }
@@ -492,6 +556,25 @@ public class ManagePage extends Page {
         if (Theme.inside(mx, my, mx0 + 8 + bw + Theme.GAP, by, bw, 26)) {
             if (target != null) { spaces.remove(target); PacketDistributor.sendToServer(new SpaceActionPayload(SpaceActionPayload.Action.DELETE, target.spaceId())); }
             modal = Modal.NONE; target = null;
+        }
+    }
+
+    private void renameClick(double mx, double my) {
+        int mw = Math.min(w - 24, 268), mh = 112;
+        int mx0 = x + (w - mw) / 2, my0 = y + (h - mh) / 2;
+        if (renameInput != null) renameInput.setFocused(false);
+        if (Theme.inside(mx, my, mx0 + 12, my0 + 38, mw - 24, 22)) {
+            if (renameInput != null) renameInput.setFocused(true);
+            return;
+        }
+        int bw = (mw - 24 - Theme.GAP) / 2;
+        int by = my0 + mh - 34;
+        if (Theme.inside(mx, my, mx0 + 12, by, bw, 26)) {
+            closeRename();
+            return;
+        }
+        if (Theme.inside(mx, my, mx0 + 12 + bw + Theme.GAP, by, bw, 26)) {
+            submitRename();
         }
     }
 
@@ -561,6 +644,12 @@ public class ManagePage extends Page {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (modal == Modal.RENAME && renameInput != null) {
+            if (keyCode == 257 || keyCode == 335) { submitRename(); return true; }
+            if (keyCode == 256) { closeRename(); return true; }
+            if (renameInput.keyPressed(keyCode, scanCode, modifiers)) return true;
+            return renameInput.isFocused();
+        }
         if (modal == Modal.PERMISSION && permNameInput != null) {
             if (keyCode == 257 || keyCode == 335) { submitAdd(); return true; } // Enter
             if (permNameInput.keyPressed(keyCode, scanCode, modifiers)) return true;
@@ -579,6 +668,10 @@ public class ManagePage extends Page {
 
     @Override
     public boolean charTyped(char codePoint, int modifiers) {
+        if (modal == Modal.RENAME && renameInput != null) {
+            if (renameInput.charTyped(codePoint, modifiers)) return true;
+            return renameInput.isFocused();
+        }
         if (modal == Modal.PERMISSION && permNameInput != null) {
             if (permNameInput.charTyped(codePoint, modifiers)) return true;
             return permNameInput.isFocused();
@@ -671,6 +764,13 @@ public class ManagePage extends Page {
     // 动作
     // ------------------------------------------------------------------
     private void openDeleteConfirm(SpaceInfo space) { target = space; modal = Modal.CONFIRM_DELETE; }
+    private void openRename(SpaceInfo space) {
+        target = space;
+        modal = Modal.RENAME;
+        if (renameInput == null) renameInput = makeRenameInput();
+        renameInput.setValue(space == null ? "" : space.name());
+        renameInput.setFocused(true);
+    }
     private void openPermission(SpaceInfo space) {
         if (router != null) {
             router.setActive("permissions");
@@ -680,7 +780,17 @@ public class ManagePage extends Page {
         modal = Modal.PERMISSION;
         if (permNameInput != null) permNameInput.setValue("");
     }
+    private void closeRename() { modal = Modal.NONE; target = null; if (renameInput != null) renameInput.setFocused(false); }
     private void closePermission() { modal = Modal.NONE; target = null; if (permNameInput != null) permNameInput.setFocused(false); }
+
+    private void submitRename() {
+        if (target == null || renameInput == null) { closeRename(); return; }
+        String name = renameInput.getValue().trim();
+        if (!name.isEmpty() && !name.equals(target.name())) {
+            PacketDistributor.sendToServer(new RenameSpacePayload(target.spaceId(), name));
+        }
+        closeRename();
+    }
 
     private boolean isCurrent(SpaceInfo space) {
         if (mc.player == null) return false;

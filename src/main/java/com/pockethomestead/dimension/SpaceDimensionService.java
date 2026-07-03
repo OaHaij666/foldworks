@@ -139,9 +139,9 @@ public final class SpaceDimensionService {
                 true,
                 false,
                 false,
-                false,
+                true,
                 1.0,
-                false,
+                true,
                 false,
                 -64,
                 384,
@@ -149,7 +149,7 @@ public final class SpaceDimensionService {
                 BlockTags.INFINIBURN_OVERWORLD,
                 BuiltinDimensionTypes.OVERWORLD_EFFECTS,
                 0.0F,
-                new DimensionType.MonsterSettings(false, false, UniformInt.of(0, 0), 15)
+                new DimensionType.MonsterSettings(false, true, UniformInt.of(0, 7), 0)
         );
     }
 

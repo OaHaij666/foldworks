@@ -33,6 +33,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 public class OfflineChestSnapshotStorage extends SavedData {
@@ -120,6 +121,54 @@ public class OfflineChestSnapshotStorage extends SavedData {
         snapshots.entrySet().removeIf(entry -> entry.getValue().locationKey().equals(location));
         externalRates.remove(location);
         setDirty();
+    }
+
+    /**
+     * 迁移快照坐标：把 (oldDimKey, oldPos) 下属于 owner+chestId 的快照迁移到 (newDimKey, newPos)。
+     * 历史速率桶按位置存储（无 chestId 维度），仅当搬迁后旧位置无其他箱子时才迁移，避免误伤同位置其他箱子。
+     * 用于兼容 Mekanism Cardboard Box 等方块位置移动场景。
+     */
+    public void relocateSnapshot(UUID owner, String chestId, String oldDimKey, BlockPos oldPos, String newDimKey, BlockPos newPos) {
+        if (oldDimKey == null || oldPos == null || newDimKey == null || newPos == null) return;
+        if (owner == null || chestId == null || chestId.isEmpty()) return;
+        if (oldDimKey.equals(newDimKey) && oldPos.equals(newPos)) return;
+        String oldLocation = locationKey(oldDimKey, oldPos);
+        String newLocation = locationKey(newDimKey, newPos);
+
+        boolean changed = false;
+        List<Snapshot> moved = new ArrayList<>();
+        for (Snapshot snapshot : snapshots.values()) {
+            if (!snapshot.locationKey().equals(oldLocation)) continue;
+            if (!chestId.equals(snapshot.chestId)) continue;
+            if (!Objects.equals(owner, snapshot.owner)) continue;
+            moved.add(snapshot);
+        }
+        for (Snapshot snapshot : moved) {
+            snapshots.remove(snapshot.key());
+            snapshot.setLocation(newDimKey, newPos);
+            snapshots.put(snapshot.key(), snapshot);
+            changed = true;
+        }
+
+        // 历史速率桶按位置存储：若旧位置仍存在其他箱子快照（非本次搬迁），保留速率桶；
+        // 否则迁移到新位置。
+        boolean otherChestAtOldLocation = false;
+        for (Snapshot snapshot : snapshots.values()) {
+            if (snapshot.locationKey().equals(oldLocation)) { otherChestAtOldLocation = true; break; }
+        }
+        if (!otherChestAtOldLocation) {
+            Map<String, LinkedHashMap<Long, RateBucket>> rates = externalRates.remove(oldLocation);
+            if (rates != null && !rates.isEmpty()) {
+                externalRates.merge(newLocation, rates, (a, b) -> {
+                    for (Map.Entry<String, LinkedHashMap<Long, RateBucket>> entry : b.entrySet()) {
+                        a.merge(entry.getKey(), entry.getValue(), (old, neu) -> { neu.putAll(old); return neu; });
+                    }
+                    return a;
+                });
+                changed = true;
+            }
+        }
+        if (changed) setDirty();
     }
 
     public void recordExternalChange(BaseChestBlockEntity chest, String resourceKey, int amount, boolean input, long gameTime) {
@@ -429,6 +478,10 @@ public class OfflineChestSnapshotStorage extends SavedData {
         public String dimensionKey() { return dimensionKey; }
         public BlockPos pos() { return BlockPos.of(posLong); }
         public long posLong() { return posLong; }
+        public void setLocation(String dimensionKey, BlockPos pos) {
+            this.dimensionKey = dimensionKey == null ? "" : dimensionKey;
+            this.posLong = pos == null ? 0L : pos.asLong();
+        }
         public String chestId() { return chestId; }
         public UUID owner() { return owner; }
         public UUID spaceId() { return spaceId; }

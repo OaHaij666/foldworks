@@ -8,18 +8,13 @@
   "item.pockethomestead.energy_transfer_upgrade": "电力传输升级",
   "item.pockethomestead.stress_upgrade": "应力升级",
   "item.pockethomestead.homestead_chest": "传输箱",
-  "item.pockethomestead.portal_block": "入口方块",
-  "item.pockethomestead.export_block": "出口方块",
 
   "block.pockethomestead.homestead_chest": "传输箱",
-  "block.pockethomestead.portal_block": "入口方块",
-  "block.pockethomestead.export_block": "出口方块",
 
   "container.pockethomestead.homestead_chest": "传输箱",
-  "container.pockethomestead.portal": "入口方块",
-  "container.pockethomestead.export": "出口方块",
 
   "pockethomestead.ui.title": "口袋家园",
+  "pockethomestead.ui.nav.tablet_chest": "玉盘仓库",
   "pockethomestead.ui.nav.create": "创建",
   "pockethomestead.ui.nav.manage": "管理",
   "pockethomestead.ui.zoom_in": "放大 (Ctrl +)",
@@ -76,6 +71,10 @@
   "pockethomestead.permission.no_list_hint": "该模式无需名单",
   "pockethomestead.permission.player_not_found": "找不到玩家：%s",
   "pockethomestead.permission.denied": "没有权限执行此操作",
+
+  "pockethomestead.tablet.bound": "尘歌玉盘已绑定：%s",
+  "pockethomestead.tablet.bound_tooltip": "已绑定传输箱：%s",
+  "pockethomestead.tablet.bound_location": "%s @ %s, %s, %s",
 
   "pockethomestead.space.list.title": "口袋家园列表",
   "pockethomestead.space.list.in_space": "你正在访问一个小世界",

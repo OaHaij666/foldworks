@@ -5,6 +5,7 @@ import com.pockethomestead.block.AbstractHomesteadBlock;
 import com.pockethomestead.blockentity.RelativeSide;
 import com.pockethomestead.blockentity.ResourceKind;
 import com.pockethomestead.blockentity.SideMode;
+import com.pockethomestead.compat.create.CreateCompat;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.client.renderer.block.model.BlockElementFace;
@@ -118,6 +119,7 @@ public class HomesteadChestBakedModel extends BakedModelWrapper<BakedModel> {
         for (RelativeSide relativeSide : RelativeSide.values()) {
             HomesteadChestModelData.FaceState face = config.get(relativeSide);
             if (face == null || face.mode() == SideMode.DISABLED) continue;
+            if (!CreateCompat.isCreateLoaded() && (face.kind() == ResourceKind.FLUID || face.kind() == ResourceKind.STRESS)) continue;
             Direction worldSide = relativeSide.toWorld(front);
             quads.addAll(moduleQuads.get(worldSide).get(face.kind()).getOrDefault(face.mode(), List.of()));
         }
@@ -125,6 +127,7 @@ public class HomesteadChestBakedModel extends BakedModelWrapper<BakedModel> {
     }
 
     private List<Direction> stressSidesFor(@Nullable BlockState state, ModelData extraData) {
+        if (!CreateCompat.isCreateLoaded()) return List.of();
         if (state == null || extraData == null || !extraData.has(HomesteadChestModelData.FACE_CONFIG)) return List.of();
         HomesteadChestModelData.FaceConfig config = extraData.get(HomesteadChestModelData.FACE_CONFIG);
         if (config == null || config.faces().isEmpty()) return List.of();

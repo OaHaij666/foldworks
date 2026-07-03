@@ -5,6 +5,8 @@ import com.pockethomestead.client.page.ManagePage;
 import com.pockethomestead.client.page.MigrationPage;
 import com.pockethomestead.client.page.PermissionsPage;
 import com.pockethomestead.client.page.ProductionStatsPage;
+import com.pockethomestead.client.page.TabletChestPage;
+import com.pockethomestead.client.ui.HomesteadTabletGuiTextures;
 import com.pockethomestead.client.ui.Page;
 import com.pockethomestead.client.ui.Router;
 import com.pockethomestead.client.ui.Theme;
@@ -25,8 +27,8 @@ public class HomesteadScreen extends Screen {
     private static final int NAV_TOP_PAD = 6;
 
     // 跨开启持久化的状态（敏感页面不持久化，避免信息短暂泄露）
-    private static String lastPageId = "manage";
-    private static final String SAFE_DEFAULT_PAGE = "manage";
+    private static String lastPageId = "tablet_chest";
+    private static final String SAFE_DEFAULT_PAGE = "tablet_chest";
 
     private final Router router = new Router();
 
@@ -43,6 +45,7 @@ public class HomesteadScreen extends Screen {
 
     public HomesteadScreen(String initialPageId) {
         super(Component.translatable("pockethomestead.ui.title"));
+        router.register(new TabletChestPage());
         router.register(new CreatePage());
         router.register(new ManagePage());
         router.register(new PermissionsPage());
@@ -94,6 +97,13 @@ public class HomesteadScreen extends Screen {
     @Override public boolean isPauseScreen() { return false; }
 
     @Override
+    public void removed() {
+        Page cur = router.current();
+        if (cur != null) cur.onExit();
+        super.removed();
+    }
+
+    @Override
     public void tick() {
         Page cur = router.current();
         if (cur != null) cur.tick();
@@ -115,8 +125,8 @@ public class HomesteadScreen extends Screen {
         g.pose().translate(0, pop, 0);
 
         // 面板
-        Theme.shadow(g, panelX, panelY, panelW, panelH, Theme.RADIUS + 2);
-        Theme.panel(g, panelX, panelY, panelW, panelH, Theme.RADIUS + 2, Theme.SURFACE, Theme.BORDER);
+        HomesteadTabletGuiTextures.shadow(g, panelX, panelY, panelW, panelH);
+        HomesteadTabletGuiTextures.panel(g, panelX, panelY, panelW, panelH);
 
         renderHeader(g, mouseX, mouseY);
         renderSidebar(g, mouseX, mouseY);
@@ -138,7 +148,7 @@ public class HomesteadScreen extends Screen {
     private void renderHeader(GuiGraphics g, int mouseX, int mouseY) {
         // 标题
         g.drawString(font, Theme.styled(getTitle().getString()), panelX + Theme.PAD, panelY + (headerH - font.lineHeight) / 2 + 1, Theme.TEXT, false);
-        Theme.hLine(g, panelX + 1, panelY + headerH, panelW - 2, Theme.DIVIDER);
+        HomesteadTabletGuiTextures.hDivider(g, panelX + 1, panelY + headerH, panelW - 2);
 
         // 窗口控件：[关闭]
         int sz = 18;
@@ -151,17 +161,15 @@ public class HomesteadScreen extends Screen {
     private void drawCloseControl(GuiGraphics g, int x, int y, int sz, int mouseX, int mouseY) {
         boolean hover = Theme.inside(mouseX, mouseY, x, y, sz, sz);
         if (hover) {
-            Theme.fillRound(g, x, y, sz, sz, Theme.RADIUS, Theme.DANGER_SOFT);
+            HomesteadTabletGuiTextures.button(g, x, y, sz, sz, HomesteadTabletGuiTextures.ButtonState.DANGER);
             pendingTooltip = Component.translatable("pockethomestead.ui.close").getString();
         }
-        int col = hover ? Theme.DANGER : Theme.TEXT_MUTED;
-        Theme.line(g, x + 6, y + 6, x + sz - 6, y + sz - 6, 1.6f, col);
-        Theme.line(g, x + sz - 6, y + 6, x + 6, y + sz - 6, 1.6f, col);
+        HomesteadTabletGuiTextures.icon(g, HomesteadTabletGuiTextures.Icon.CLOSE, x + 2, y + 2, sz - 4);
     }
 
     private void renderSidebar(GuiGraphics g, int mouseX, int mouseY) {
         // 分隔线
-        Theme.vLine(g, panelX + sidebarW, panelY + headerH + 1, panelH - headerH - 2, Theme.DIVIDER);
+        HomesteadTabletGuiTextures.vDivider(g, panelX + sidebarW, panelY + headerH + 1, panelH - headerH - 2);
 
         int itemSize = navItemSize();
         int top = panelY + headerH + NAV_TOP_PAD;
@@ -172,60 +180,29 @@ public class HomesteadScreen extends Screen {
             boolean active = router.currentIndex() == i;
             boolean hover = Theme.inside(mouseX, mouseY, ix, iy, itemSize, itemSize);
 
+            HomesteadTabletGuiTextures.button(g, ix, iy, itemSize, itemSize,
+                    active ? HomesteadTabletGuiTextures.ButtonState.SELECTED
+                            : hover ? HomesteadTabletGuiTextures.ButtonState.HOVER
+                            : HomesteadTabletGuiTextures.ButtonState.NORMAL);
             if (active) {
-                Theme.fillRound(g, ix, iy, itemSize, itemSize, Theme.RADIUS + 1, Theme.PRIMARY_SOFT);
-                Theme.fillRound(g, ix + 5, iy + itemSize - 4, itemSize - 10, 2, 1, Theme.PRIMARY);
-            } else if (hover) {
-                Theme.fillRound(g, ix, iy, itemSize, itemSize, Theme.RADIUS + 1, Theme.SURFACE_ALT);
+                HomesteadTabletGuiTextures.hDivider(g, ix + 5, iy + itemSize - 4, itemSize - 10);
             }
-            int col = active ? Theme.PRIMARY_PRESS : (hover ? Theme.TEXT : Theme.TEXT_MUTED);
-            drawNavIcon(g, p, ix, iy, itemSize, col);
+            drawNavIcon(g, p, ix, iy, itemSize);
             if (hover) pendingTooltip = p.navTitle();
         }
     }
 
-    private void drawNavIcon(GuiGraphics g, Page page, int x, int y, int size, int color) {
-        int cx = x + size / 2;
-        int cy = y + size / 2;
-        switch (page.id()) {
-            case "create" -> {
-                int len = 16;
-                int thick = 3;
-                Theme.fillRound(g, cx - len / 2, cy - thick / 2, len, thick, 1, color);
-                Theme.fillRound(g, cx - thick / 2, cy - len / 2, thick, len, 1, color);
-            }
-            case "manage" -> {
-                int dot = 5;
-                int gap = 5;
-                int startX = cx - dot - gap / 2;
-                int startY = cy - dot - gap / 2;
-                Theme.fillRound(g, startX, startY, dot, dot, 2, color);
-                Theme.fillRound(g, startX + dot + gap, startY, dot, dot, 2, color);
-                Theme.fillRound(g, startX, startY + dot + gap, dot, dot, 2, color);
-                Theme.fillRound(g, startX + dot + gap, startY + dot + gap, dot, dot, 2, color);
-            }
-            case "production" -> {
-                int cell = 4;
-                int gap = 3;
-                int startX = cx - (cell * 3 + gap * 2) / 2;
-                int startY = cy - (cell * 3 + gap * 2) / 2;
-                for (int row = 0; row < 3; row++) {
-                    for (int col = 0; col < 3; col++) {
-                        Theme.fillRound(g, startX + col * (cell + gap), startY + row * (cell + gap), cell, cell, 1, color);
-                    }
-                }
-            }
-            case "permissions" -> {
-                Theme.fillRound(g, cx - 7, cy - 1, 14, 10, 3, color);
-                Theme.fillRound(g, cx - 4, cy - 8, 8, 9, 4, color);
-                Theme.fillRound(g, cx - 2, cy - 6, 4, 7, 2, Theme.SURFACE);
-                Theme.fillRound(g, cx - 1, cy + 3, 2, 4, 1, Theme.SURFACE);
-            }
-            default -> {
-                String icon = page.navIcon();
-                g.drawString(font, icon, x + (size - font.width(icon)) / 2, y + (size - font.lineHeight) / 2 + 1, color, false);
-            }
-        }
+    private void drawNavIcon(GuiGraphics g, Page page, int x, int y, int size) {
+        HomesteadTabletGuiTextures.Icon icon = switch (page.id()) {
+            case "create" -> HomesteadTabletGuiTextures.Icon.CREATE;
+            case "permissions" -> HomesteadTabletGuiTextures.Icon.PERMISSIONS;
+            case "production" -> HomesteadTabletGuiTextures.Icon.PRODUCTION;
+            case "migration" -> HomesteadTabletGuiTextures.Icon.MIGRATION;
+            case "tablet_chest" -> HomesteadTabletGuiTextures.Icon.MANAGE;
+            default -> HomesteadTabletGuiTextures.Icon.MANAGE;
+        };
+        int iconSize = Math.max(16, Math.min(20, size - 10));
+        HomesteadTabletGuiTextures.icon(g, icon, x + (size - iconSize) / 2, y + (size - iconSize) / 2, iconSize);
     }
 
     private void drawTooltip(GuiGraphics g, String text, int mouseX, int mouseY) {

@@ -1,5 +1,7 @@
 package com.pockethomestead.client.ui.widget;
 
+import com.pockethomestead.client.ui.ChestGuiTextures;
+import com.pockethomestead.client.ui.HomesteadTabletGuiTextures;
 import com.pockethomestead.client.ui.Theme;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -10,12 +12,14 @@ import net.minecraft.client.gui.GuiGraphics;
  */
 public class UiButton {
     public enum Variant { PRIMARY, SECONDARY, DANGER, GHOST }
+    public enum Skin { TABLET, CHEST }
 
     private final Font font = Minecraft.getInstance().font;
 
     private int x, y, w, h;
     private String label;
     private Variant variant = Variant.PRIMARY;
+    private Skin skin = Skin.TABLET;
     private boolean enabled = true;
     private Runnable onClick = () -> {};
     private float hoverAnim = 0f;
@@ -32,6 +36,7 @@ public class UiButton {
     public UiButton label(String label) { this.label = label; return this; }
     public UiButton onClick(Runnable r) { this.onClick = r; return this; }
     public UiButton enabled(boolean e) { this.enabled = e; return this; }
+    public UiButton skin(Skin skin) { this.skin = skin; return this; }
     public boolean enabled() { return enabled; }
 
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
@@ -40,19 +45,30 @@ public class UiButton {
         float target = hovered ? 1f : 0f;
         hoverAnim += (target - hoverAnim) * Math.min(1f, partialTick * 0.6f + 0.25f);
 
-        int base, hover, fill, textColor, border;
+        int textColor;
+        ChestGuiTextures.ButtonState chestState;
+        HomesteadTabletGuiTextures.ButtonState tabletState;
         switch (variant) {
-            case PRIMARY -> { base = Theme.PRIMARY; hover = Theme.PRIMARY_HOVER; textColor = Theme.TEXT_ON_PRIM; border = Theme.PRIMARY_PRESS; }
-            case DANGER  -> { base = Theme.DANGER;  hover = Theme.DANGER_HOVER;  textColor = Theme.TEXT_ON_PRIM; border = 0xFFD45555; }
-            case SECONDARY -> { base = Theme.SURFACE_ALT; hover = Theme.PRIMARY_SOFT; textColor = Theme.TEXT; border = Theme.BORDER_STRONG; }
-            default /*GHOST*/ -> { base = 0x00FFFFFF; hover = Theme.PRIMARY_SOFT; textColor = Theme.PRIMARY; border = 0x00FFFFFF; }
-        }
-        fill = Theme.lerpColor(base, hover, hoverAnim);
-
-        if (!enabled) {
-            fill = Theme.SURFACE_SUNK;
-            textColor = Theme.TEXT_FAINT;
-            border = Theme.BORDER;
+            case PRIMARY -> {
+                chestState = hovered ? ChestGuiTextures.ButtonState.HOVER : ChestGuiTextures.ButtonState.NORMAL;
+                tabletState = hovered ? HomesteadTabletGuiTextures.ButtonState.HOVER : HomesteadTabletGuiTextures.ButtonState.SELECTED;
+                textColor = Theme.PRIMARY_PRESS;
+            }
+            case DANGER -> {
+                chestState = ChestGuiTextures.ButtonState.DANGER;
+                tabletState = HomesteadTabletGuiTextures.ButtonState.DANGER;
+                textColor = 0xFFB65264;
+            }
+            case SECONDARY -> {
+                chestState = hovered ? ChestGuiTextures.ButtonState.HOVER : ChestGuiTextures.ButtonState.NORMAL;
+                tabletState = hovered ? HomesteadTabletGuiTextures.ButtonState.HOVER : HomesteadTabletGuiTextures.ButtonState.NORMAL;
+                textColor = Theme.TEXT;
+            }
+            default /*GHOST*/ -> {
+                chestState = hovered ? ChestGuiTextures.ButtonState.HOVER : ChestGuiTextures.ButtonState.NORMAL;
+                tabletState = hovered ? HomesteadTabletGuiTextures.ButtonState.HOVER : HomesteadTabletGuiTextures.ButtonState.NORMAL;
+                textColor = Theme.PRIMARY;
+            }
         }
 
         if (variant == Variant.GHOST && hoverAnim < 0.02f && enabled) {
@@ -61,13 +77,14 @@ public class UiButton {
             return;
         }
 
-        if (variant == Variant.SECONDARY || variant == Variant.GHOST || !enabled) {
-            Theme.panel(g, x, y, w, h, Theme.RADIUS, fill, border);
-        } else {
-            Theme.fillRound(g, x, y, w, h, Theme.RADIUS, fill);
-            // 顶部高光
-            Theme.fillRound(g, x + 2, y + 2, w - 4, Math.max(2, h / 2 - 2), Theme.RADIUS - 1, 0x22FFFFFF);
+        if (!enabled) {
+            chestState = ChestGuiTextures.ButtonState.DISABLED;
+            tabletState = HomesteadTabletGuiTextures.ButtonState.DISABLED;
+            textColor = Theme.TEXT_FAINT;
         }
+
+        if (skin == Skin.CHEST) ChestGuiTextures.button(g, x, y, w, h, chestState);
+        else HomesteadTabletGuiTextures.button(g, x, y, w, h, tabletState);
         Theme.textInBox(g, font, label, x, y, w, h, textColor);
     }
 

@@ -9,7 +9,9 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.saveddata.SavedData;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public class SpaceStorage extends SavedData {
@@ -37,6 +39,10 @@ public class SpaceStorage extends SavedData {
             if (sd != null) list.add(sd);
         }
         SpaceManager.getInstance().loadSpaces(list);
+        SpaceManager.getInstance().loadOwnerPermissions(loadOwnerPermissions(tag.getList("OwnerPermissions", ListTag.TAG_COMPOUND)));
+        if (tag.contains("ReturnAnchors", ListTag.TAG_COMPOUND)) {
+            PocketDimensionManager.getInstance().loadReturnAnchors(tag.getList("ReturnAnchors", ListTag.TAG_COMPOUND));
+        }
         return s;
     }
 
@@ -45,6 +51,8 @@ public class SpaceStorage extends SavedData {
         ListTag lt = new ListTag();
         for (SpaceData s : SpaceManager.getInstance().getAllSpaces()) lt.add(serialize(s));
         tag.put("Spaces", lt);
+        tag.put("OwnerPermissions", saveOwnerPermissions());
+        tag.put("ReturnAnchors", PocketDimensionManager.getInstance().saveReturnAnchors());
         return tag;
     }
 
@@ -78,6 +86,44 @@ public class SpaceStorage extends SavedData {
         }
         t.put("Members", members);
         return t;
+    }
+
+    private static ListTag saveOwnerPermissions() {
+        ListTag list = new ListTag();
+        for (Map.Entry<UUID, SpacePermission> entry : SpaceManager.getInstance().ownerPermissionsSnapshot().entrySet()) {
+            CompoundTag tag = new CompoundTag();
+            tag.putUUID("OwnerId", entry.getKey());
+            savePermission(tag, entry.getValue());
+            list.add(tag);
+        }
+        return list;
+    }
+
+    private static Map<UUID, SpacePermission> loadOwnerPermissions(ListTag list) {
+        Map<UUID, SpacePermission> result = new LinkedHashMap<>();
+        for (int i = 0; i < list.size(); i++) {
+            CompoundTag tag = list.getCompound(i);
+            if (!tag.hasUUID("OwnerId")) continue;
+            SpacePermission permission = new SpacePermission();
+            loadPermission(tag, permission);
+            result.put(tag.getUUID("OwnerId"), permission);
+        }
+        return result;
+    }
+
+    private static void savePermission(CompoundTag t, SpacePermission permission) {
+        t.putString("PermMode", permission.getMode().name());
+        t.putString("ProtectedLevel", permission.getProtectedLevel().name());
+        t.putString("PublicLevel", permission.getPublicLevel().name());
+        ListTag members = new ListTag();
+        for (SpacePermission.MemberRule rule : permission.getMemberRules().values()) {
+            CompoundTag e = new CompoundTag();
+            e.putUUID("Id", rule.id());
+            e.putString("Role", rule.role().name());
+            if (rule.overrideLevel() != null) e.putString("OverrideLevel", rule.overrideLevel().name());
+            members.add(e);
+        }
+        t.put("Members", members);
     }
 
     private static SpaceData deserialize(CompoundTag t) {

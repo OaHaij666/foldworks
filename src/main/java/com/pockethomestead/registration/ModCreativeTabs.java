@@ -1,6 +1,7 @@
 package com.pockethomestead.registration;
 
 import com.pockethomestead.PocketHomestead;
+import com.pockethomestead.compat.create.CreateCompat;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.CreativeModeTab;
@@ -20,9 +21,9 @@ public class ModCreativeTabs {
                         output.accept(ModItems.HOMESTEAD_TABLET.get());
                         output.accept(ModItems.HOMESTEAD_CHEST_ITEM.get());
                         output.accept(ModItems.STORAGE_UPGRADE.get());
-                        output.accept(ModItems.FLUID_UPGRADE.get());
+                        if (CreateCompat.isCreateLoaded()) output.accept(ModItems.FLUID_UPGRADE.get());
                         output.accept(ModItems.NETWORK_UPGRADE.get());
                         output.accept(ModItems.ENERGY_TRANSFER_UPGRADE.get());
-                        output.accept(ModItems.STRESS_UPGRADE.get());
+                        if (CreateCompat.isCreateLoaded()) output.accept(ModItems.STRESS_UPGRADE.get());
                     }).build());
 }

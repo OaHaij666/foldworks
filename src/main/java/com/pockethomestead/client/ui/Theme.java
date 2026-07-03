@@ -269,9 +269,11 @@ public final class Theme {
 
     /** 截断到最大宽度，超出加省略号。 */
     public static String ellipsize(Font font, String s, int maxWidth) {
+        if (maxWidth <= 0) return "";
         if (styledWidth(font, s) <= maxWidth) return s;
         String ell = "…";
         int ellW = styledWidth(font, ell);
+        if (maxWidth <= ellW) return ell;
         StringBuilder sb = new StringBuilder();
         int w = 0;
         for (int i = 0; i < s.length(); i++) {

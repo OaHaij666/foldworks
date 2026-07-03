@@ -8,18 +8,13 @@
   "item.pockethomestead.energy_transfer_upgrade": "Energy Transfer Upgrade",
   "item.pockethomestead.stress_upgrade": "Stress Upgrade",
   "item.pockethomestead.homestead_chest": "Homestead Chest",
-  "item.pockethomestead.portal_block": "Portal Block",
-  "item.pockethomestead.export_block": "Export Block",
 
   "block.pockethomestead.homestead_chest": "Homestead Chest",
-  "block.pockethomestead.portal_block": "Portal Block",
-  "block.pockethomestead.export_block": "Export Block",
 
   "container.pockethomestead.homestead_chest": "Homestead Chest",
-  "container.pockethomestead.portal": "Portal Block",
-  "container.pockethomestead.export": "Export Block",
 
   "pockethomestead.ui.title": "Pocket Homestead",
+  "pockethomestead.ui.nav.tablet_chest": "Tablet Storage",
   "pockethomestead.ui.nav.create": "Create",
   "pockethomestead.ui.nav.manage": "Manage",
   "pockethomestead.ui.zoom_in": "Zoom in (Ctrl +)",
@@ -76,6 +71,10 @@
   "pockethomestead.permission.no_list_hint": "This mode needs no list",
   "pockethomestead.permission.player_not_found": "Player not found: %s",
   "pockethomestead.permission.denied": "You do not have permission to do this",
+
+  "pockethomestead.tablet.bound": "Jade Tablet bound to %s",
+  "pockethomestead.tablet.bound_tooltip": "Bound chest: %s",
+  "pockethomestead.tablet.bound_location": "%s @ %s, %s, %s",
 
   "pockethomestead.space.list.title": "Homesteads",
   "pockethomestead.space.list.in_space": "You are visiting a pocket world",

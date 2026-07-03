@@ -7,6 +7,8 @@ import com.pockethomestead.blockentity.SideMode;
 import com.pockethomestead.menu.BaseChestMenu;
 import com.pockethomestead.permission.AccessControl;
 import com.pockethomestead.production.ProductionStatsStorage;
+import com.pockethomestead.item.HomesteadTabletBinding;
+import com.pockethomestead.registration.ModItems;
 import com.pockethomestead.registry.ChestRegistryManager;
 import com.pockethomestead.space.SpacePermission;
 import com.pockethomestead.transfer.GraphKey;
@@ -82,6 +84,7 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
                         if (player.server != null && be.getLevel() != null) {
                             TransferGraphStorage graphStorage = TransferGraphStorage.get(player.server);
                             graphStorage.updateChestId(oldId, newId, be.getLevel().dimension().location().toString(), be.getBlockPos());
+                            refreshBoundTabletsAfterRename(player, be, oldId, newId);
                         }
                     }
                     sendSyncToClient(player, be);
@@ -120,6 +123,26 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
             case 7, 8, 9, 10, 11, 12 -> SpacePermission.AccessLevel.USE;
             default -> SpacePermission.AccessLevel.MANAGE;
         };
+    }
+
+    private static void refreshBoundTabletsAfterRename(ServerPlayer actor, BaseChestBlockEntity be, String oldId, String newId) {
+        if (actor.server == null || be.getOwnerUUID() == null || be.getLevel() == null) return;
+        String dim = be.getLevel().dimension().location().toString();
+        for (ServerPlayer online : actor.server.getPlayerList().getPlayers()) {
+            boolean changed = false;
+            for (int i = 0; i < online.getInventory().items.size(); i++) {
+                changed |= refreshTabletStack(online.getInventory().items.get(i), be, oldId, dim, newId);
+            }
+            for (int i = 0; i < online.getInventory().offhand.size(); i++) {
+                changed |= refreshTabletStack(online.getInventory().offhand.get(i), be, oldId, dim, newId);
+            }
+            if (changed) online.getInventory().setChanged();
+        }
+    }
+
+    private static boolean refreshTabletStack(ItemStack stack, BaseChestBlockEntity be, String oldId, String dim, String newId) {
+        if (stack == null || stack.isEmpty() || !stack.is(ModItems.HOMESTEAD_TABLET.get())) return false;
+        return HomesteadTabletBinding.rewriteChestIdIfMatches(stack, be.getOwnerUUID(), oldId, dim, be.getBlockPos(), newId);
     }
 
     private static void putFromCarried(BaseChestMenu menu, BaseChestBlockEntity be, boolean onlyOne) {

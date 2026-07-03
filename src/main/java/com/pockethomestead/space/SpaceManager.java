@@ -12,11 +12,13 @@ import net.minecraft.server.level.ServerPlayer;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 public class SpaceManager {
     private static volatile SpaceManager instance;
     private final Map<UUID, SpaceData> spaces = new ConcurrentHashMap<>();
     private final Map<ResourceLocation, SpaceData> dimensionIndex = new ConcurrentHashMap<>();
+    private final Map<UUID, SpacePermission> ownerPermissions = new ConcurrentHashMap<>();
 
     private SpaceManager() {}
     public static SpaceManager getInstance() {
@@ -49,6 +51,7 @@ public class SpaceManager {
                 : biome;
         SpaceData space = new SpaceData(spaceId, ownerId, clampedWidth, clampedHeight, clampedDepth,
                 terrainType, resolvedBiome, sourceDimension, mobSpawning, structureGeneration, infinite, terrainAmplitude);
+        space.getPermission().copyFrom(ownerPermission(ownerId));
         spaces.put(spaceId, space);
         dimensionIndex.put(space.getDimensionId(), space);
         SpaceDimensionService.getInstance().loadOrCreate(server, space);
@@ -83,6 +86,7 @@ public class SpaceManager {
     public void clearSpaces() {
         spaces.clear();
         dimensionIndex.clear();
+        ownerPermissions.clear();
         PocketHomestead.LOGGER.info("清空口袋空间缓存");
     }
 
@@ -109,6 +113,7 @@ public class SpaceManager {
 
     public void addImportedSpace(MinecraftServer server, SpaceData space) {
         if (space == null) return;
+        space.getPermission().copyFrom(ownerPermission(space.getOwnerId()));
         spaces.put(space.getSpaceId(), space);
         dimensionIndex.put(space.getDimensionId(), space);
         if (server != null) SpaceDimensionService.getInstance().loadOrCreate(server, space);
@@ -123,6 +128,60 @@ public class SpaceManager {
             dimensionIndex.put(s.getDimensionId(), s);
         }
         PocketHomestead.LOGGER.info("加载了 {} 个口袋空间", spaces.size());
+    }
+
+    public SpacePermission ownerPermission(UUID ownerId) {
+        if (ownerId == null) return new SpacePermission();
+        return ownerPermissions.computeIfAbsent(ownerId, ignored -> new SpacePermission());
+    }
+
+    public void updateOwnerPermission(UUID ownerId, Consumer<SpacePermission> updater) {
+        if (ownerId == null || updater == null) return;
+        SpacePermission permission = ownerPermission(ownerId);
+        updater.accept(permission);
+        applyOwnerPermission(ownerId);
+        SpaceStorage.markDirty();
+    }
+
+    public void loadOwnerPermissions(Map<UUID, SpacePermission> loaded) {
+        ownerPermissions.clear();
+        if (loaded != null) {
+            for (Map.Entry<UUID, SpacePermission> entry : loaded.entrySet()) {
+                if (entry.getKey() == null || entry.getValue() == null) continue;
+                SpacePermission copy = new SpacePermission();
+                copy.copyFrom(entry.getValue());
+                ownerPermissions.put(entry.getKey(), copy);
+            }
+        }
+        if (ownerPermissions.isEmpty()) {
+            for (SpaceData space : spaces.values()) {
+                ownerPermissions.computeIfAbsent(space.getOwnerId(), ignored -> {
+                    SpacePermission copy = new SpacePermission();
+                    copy.copyFrom(space.getPermission());
+                    return copy;
+                });
+            }
+        }
+        for (UUID ownerId : ownerPermissions.keySet()) applyOwnerPermission(ownerId);
+    }
+
+    public Map<UUID, SpacePermission> ownerPermissionsSnapshot() {
+        Map<UUID, SpacePermission> copy = new LinkedHashMap<>();
+        for (Map.Entry<UUID, SpacePermission> entry : ownerPermissions.entrySet()) {
+            SpacePermission permission = new SpacePermission();
+            permission.copyFrom(entry.getValue());
+            copy.put(entry.getKey(), permission);
+        }
+        return copy;
+    }
+
+    private void applyOwnerPermission(UUID ownerId) {
+        SpacePermission permission = ownerPermission(ownerId);
+        for (SpaceData space : spaces.values()) {
+            if (!space.isOwner(ownerId)) continue;
+            space.getPermission().copyFrom(permission);
+            if (!space.canEnableOfflineSimulation()) space.setOfflineSimulationEnabled(false);
+        }
     }
 
     public SpaceData getSpaceByDimension(ResourceLocation dimensionId) {

@@ -97,10 +97,11 @@ public class CreateHomesteadChestBlock extends KineticBlock implements EntityBlo
 
     @Override
     public void setPlacedBy(Level level, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack stack) {
-        if (placer instanceof Player player && !level.isClientSide) {
+        if (!level.isClientSide) {
             BaseChestBlockEntity chest = HomesteadChestAccess.resolve(level.getBlockEntity(pos));
             if (chest != null) {
-                if (chest.getOwnerUUID() == null || chest.getChestId().isEmpty()) {
+                chest.loadFromItem(stack, level.registryAccess());
+                if (placer instanceof Player player && (chest.getOwnerUUID() == null || chest.getChestId().isEmpty())) {
                     chest.setOwnerUUID(player.getUUID());
                     String autoId = com.pockethomestead.registry.ChestRegistryManager.getInstance().generateNextChestId(player.getUUID());
                     chest.setChestId(autoId);

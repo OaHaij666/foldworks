@@ -2,6 +2,8 @@ package com.pockethomestead.client.screen;
 
 import com.pockethomestead.client.ClientTransferGraphCache;
 import com.pockethomestead.client.ui.Theme;
+import com.pockethomestead.client.ui.TransferGraphGuiTextures;
+import com.pockethomestead.compat.create.CreateCompat;
 import com.pockethomestead.network.RequestTransferGraphPacket;
 import com.pockethomestead.network.SaveTransferGraphPacket;
 import com.pockethomestead.network.TransferGraphSyncPacket;
@@ -34,28 +36,37 @@ import java.util.Set;
 import java.util.UUID;
 
 public class TransferGraphScreen extends Screen {
-    private static final int NODE_W = 190;
-    private static final int REROUTE_W = 220;
-    private static final int TRASH_W = 172;
-    private static final int REROUTE_ROW_Y = 54;
+    private static final int NODE_W = GraphNodeLayout.NODE_W;
+    private static final int REROUTE_W = GraphNodeLayout.REROUTE_W;
+    private static final int TRASH_W = GraphNodeLayout.TRASH_W;
+    private static final int REROUTE_ROW_Y = GraphNodeLayout.REROUTE_ROW_Y;
     private static final int SEARCH_W = 190;
     private static final int HELP_W = 292;
     private static final int HELP_H = 274;
     private static final int PORT = 7;
-    private static final int HEADER_H = 30;
-    private static final int TAB_H = 24;
-    private static final int CARD_RADIUS = 7;
-    private static final int POPUP_RADIUS = 6;
+    private static final int HEADER_H = 0;
+    private static final int DEFAULT_CONTROL_X = 18;
+    private static final int DEFAULT_CONTROL_Y = 18;
+    private static final int CONTROL_W = 108;
+    private static final int CONTROL_H = 38;
+    private static final int CONTROL_PANEL_W = 156;
+    private static final int CONTROL_PANEL_H = 118;
+    private static final int CONTROL_DROPDOWN_W = 116;
+    private static final int CONTROL_DROPDOWN_ROW_H = 18;
     private static final String SCOPE_ALL = "*";
     private static final int PORT_INSET = 12;
-    private static final int COLLAPSED_CHEST_H = 128;
-    private static final int COLLAPSED_REROUTE_H = 92;
+    private static final int COLLAPSED_CHEST_H = 160;
+    private static final int COLLAPSED_CHEST_H_NO_CREATE = 124;
+    private static final int CHEST_FIRST_FILTER_Y_NO_CREATE = 126;
+    private static final int COLLAPSED_REROUTE_H = 146;
 
     private final GraphCanvas canvas = new GraphCanvas();
 
-    private int panX = 70;
-    private int panY = 70;
-    private double zoom = 1.0;
+    private int panX = 48;
+    private int panY = 48;
+    private int controlX = DEFAULT_CONTROL_X;
+    private int controlY = DEFAULT_CONTROL_Y;
+    private double zoom = 0.62;
     private String activePageId = TransferGraph.DEFAULT_PAGE_ID;
     private MenuMode menuMode = MenuMode.NONE;
     private PopupMode popupMode = PopupMode.NONE;
@@ -66,8 +77,10 @@ public class TransferGraphScreen extends Screen {
     private int dragPreviewX, dragPreviewY;
     private boolean dragMoved;
     private boolean draggingPopup;
+    private boolean draggingControls;
+    private boolean controlsMoved;
     private boolean exitAfterSave;
-    private int popupDragOffX, popupDragOffY;
+    private int popupDragOffX, popupDragOffY, controlDragOffX, controlDragOffY;
     private String linkingFromNodeId, linkingFromPort = TransferEdge.PORT_ALL;
     private String selectedReplenishItemId;
     private String replenishTargetValue = "";
@@ -90,6 +103,7 @@ public class TransferGraphScreen extends Screen {
     private boolean dirty;
     private boolean savePending;
     private boolean validationStale = true;
+    private boolean controlsExpanded;
     private int graphSyncTicker;
     private String pendingGraphKind = "";
     private String pendingGraphId = "";
@@ -156,9 +170,7 @@ public class TransferGraphScreen extends Screen {
         ensureDraft();
         syncWidgets();
         canvas.setZoom(zoom);
-        g.fill(0, 0, width, height, 0xFFF7FBFF);
         renderGrid(g);
-        renderTabs(g, mx, my);
         renderEdges(g, mx, my);
         renderNodes(g, mx, my);
         renderHeader(g);
@@ -186,41 +198,59 @@ public class TransferGraphScreen extends Screen {
     }
 
     private void renderHeader(GuiGraphics g) {
-        g.fill(0, 0, width, HEADER_H, Theme.HEADER);
-        g.fill(0, HEADER_H - 2, width, HEADER_H, 0x12000000);
-        Theme.hLine(g, 0, HEADER_H - 1, width, Theme.BORDER);
-        text(g, "可视化传输图", 10, 10, Theme.TEXT);
-
+        int x = controlX;
+        int y = controlY;
         int statusColor = hasValidationErrors() ? Theme.DANGER : dirty ? Theme.PRIMARY_PRESS : Theme.SUCCESS;
         String status = headerStatusLabel();
-        String issue = "问题 " + ClientTransferGraphCache.validationIssues().size();
-        boolean hasIssueCount = !validationStale && !ClientTransferGraphCache.validationIssues().isEmpty();
-        int graphX = headerGraphX();
-        int graphW = headerGraphW();
-        int saveX = headerSaveX();
-        if (graphW >= 64) {
-            chip(g, graphX, 6, graphW, 18, Theme.SURFACE, Theme.BORDER);
-            text(g, Theme.ellipsize(font, currentGraphLabel(), graphW - 16), graphX + 8, 11, Theme.PRIMARY_PRESS);
-            int cursor = graphX + graphW + 8;
-            if (cursor + Theme.styledWidth(font, status) <= saveX - 4) {
-                text(g, status, cursor, 10, statusColor);
-                cursor += Theme.styledWidth(font, status) + 8;
-                if (hasIssueCount && cursor + Theme.styledWidth(font, issue) <= saveX - 4) {
-                    text(g, issue, cursor, 10, statusColor);
-                }
-            }
-        } else if (122 + Theme.styledWidth(font, status) <= saveX - 4) {
-            text(g, status, 122, 10, statusColor);
-        }
+        softPanel(g, x, y, CONTROL_W, CONTROL_H, Theme.SURFACE, Theme.BORDER);
+        softButton(g, x + 7, y + 7, 42, 24, dirty ? Theme.PRIMARY_SOFT : Theme.PRIMARY_SOFT, dirty ? Theme.PRIMARY : Theme.PRIMARY);
+        TransferGraphGuiTextures.icon(g, TransferGraphGuiTextures.Icon.SAVE, x + 19, y + 10, 20);
+        Theme.fillRound(g, x + 58, y + 15, 8, 8, 4, statusColor);
+        text(g, hasValidationErrors() ? "!" : "OK", x + 70, y + 12, statusColor);
+        TransferGraphGuiTextures.icon(g, controlsExpanded ? TransferGraphGuiTextures.Icon.CHEVRON_DOWN : TransferGraphGuiTextures.Icon.CHEVRON_RIGHT, x + 88, y + 10, 20);
 
-        chip(g, saveX, 6, 54, 18, dirty ? Theme.PRIMARY_SOFT : Theme.SURFACE_ALT, dirty ? Theme.PRIMARY : Theme.BORDER);
-        text(g, savePending ? "保存中" : "保存", saveX + 13, 11, dirty ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED);
-        chip(g, saveX + 62, 6, 54, 18, Theme.SURFACE, Theme.BORDER);
-        text(g, "放弃", saveX + 75, 11, dirty ? Theme.DANGER : Theme.TEXT_MUTED);
-        int helpX = width - 86;
-        chip(g, helpX, 6, 20, 18, popupMode == PopupMode.HELP ? Theme.PRIMARY_SOFT : Theme.SURFACE, popupMode == PopupMode.HELP ? Theme.PRIMARY : Theme.BORDER);
-        text(g, "?", helpX + 7, 11, Theme.PRIMARY_PRESS);
-        textRight(g, Math.round(zoom * 100) + "%", width - 10, 10, Theme.PRIMARY_PRESS);
+        if (!controlsExpanded) return;
+
+        int fy = y + CONTROL_H + 8;
+        softPanel(g, x, fy, CONTROL_PANEL_W, CONTROL_PANEL_H, Theme.SURFACE, Theme.BORDER);
+        Theme.fillRound(g, x + 12, fy + 16, 7, 7, 4, statusColor);
+        text(g, status, x + 25, fy + 11, statusColor);
+        TransferGraphGuiTextures.icon(g, TransferGraphGuiTextures.Icon.CHEVRON_DOWN, x + CONTROL_PANEL_W - 29, fy + 9, 20);
+
+        softButton(g, x + 10, fy + 36, 64, 22, Theme.SURFACE_ALT, Theme.BORDER);
+        TransferGraphSyncPacket.PageData activePage = page(activePageId);
+        if (activePage == null) activePage = firstPage();
+        text(g, Theme.ellipsize(font, activePage.name(), 42), x + 16, fy + 42, Theme.TEXT_MUTED);
+        TransferGraphGuiTextures.icon(g, TransferGraphGuiTextures.Icon.CHEVRON_DOWN, x + 55, fy + 37, 20);
+        softButton(g, x + 82, fy + 36, 64, 22, Theme.SURFACE_ALT, Theme.BORDER);
+        text(g, Theme.ellipsize(font, currentGraphShortLabel(), 42), x + 90, fy + 42, Theme.TEXT_MUTED);
+        TransferGraphGuiTextures.icon(g, TransferGraphGuiTextures.Icon.CHEVRON_DOWN, x + 127, fy + 37, 20);
+
+        int bx = x + 10;
+        int by = fy + 68;
+        renderToolbarIconButton(g, bx, by, TransferGraphGuiTextures.Icon.SAVE, dirty ? TransferGraphGuiTextures.ButtonStyle.BLUE : TransferGraphGuiTextures.ButtonStyle.NORMAL);
+        renderToolbarIconButton(g, bx + 32, by, TransferGraphGuiTextures.Icon.PAGE, TransferGraphGuiTextures.ButtonStyle.NORMAL);
+        renderToolbarIconButton(g, bx + 64, by, TransferGraphGuiTextures.Icon.PLUS, TransferGraphGuiTextures.ButtonStyle.NORMAL);
+        renderToolbarIconButton(g, bx + 96, by, TransferGraphGuiTextures.Icon.HELP, popupMode == PopupMode.HELP ? TransferGraphGuiTextures.ButtonStyle.SELECTED : TransferGraphGuiTextures.ButtonStyle.NORMAL);
+        chip(g, x + 10, fy + 94, 54, 18, Theme.SURFACE, Theme.PRIMARY);
+        text(g, Math.round(zoom * 100) + "%", x + 20, fy + 99, Theme.PRIMARY_PRESS);
+        chip(g, x + 84, fy + 94, 54, 18, Theme.SURFACE, Theme.DANGER);
+        text(g, "放弃", x + 98, fy + 99, dirty ? Theme.DANGER : Theme.TEXT_MUTED);
+    }
+
+    private void renderToolbarIconButton(GuiGraphics g, int x, int y, TransferGraphGuiTextures.Icon icon, TransferGraphGuiTextures.ButtonStyle style) {
+        int fill = style == TransferGraphGuiTextures.ButtonStyle.BLUE || style == TransferGraphGuiTextures.ButtonStyle.SELECTED ? Theme.PRIMARY_SOFT : Theme.SURFACE;
+        int border = style == TransferGraphGuiTextures.ButtonStyle.BLUE || style == TransferGraphGuiTextures.ButtonStyle.SELECTED ? Theme.PRIMARY : Theme.BORDER;
+        softButton(g, x, y, 26, 23, fill, border);
+        TransferGraphGuiTextures.icon(g, icon, x + 4, y + 3, 18);
+    }
+
+    private String currentGraphShortLabel() {
+        return switch (currentGraphKind()) {
+            case "PROTECTED" -> "团队";
+            case "SPACE" -> "空间";
+            default -> "私有";
+        };
     }
 
     private String headerStatusLabel() {
@@ -228,52 +258,21 @@ public class TransferGraphScreen extends Screen {
         return dirty ? "未保存" : "已保存";
     }
 
-    private int headerGraphX() {
-        return 118;
-    }
-
-    private int headerGraphW() {
-        int saveX = headerSaveX();
-        int graphX = headerGraphX();
-        int statusW = Theme.styledWidth(font, headerStatusLabel());
-        boolean hasIssueCount = !validationStale && !ClientTransferGraphCache.validationIssues().isEmpty();
-        int issueW = hasIssueCount ? Theme.styledWidth(font, "问题 " + ClientTransferGraphCache.validationIssues().size()) : 0;
-        int reserved = 8 + statusW + (hasIssueCount ? 8 + issueW : 0);
-        int w = Math.min(126, saveX - graphX - reserved - 8);
-        if (w < 72) w = Math.min(108, saveX - graphX - 8);
-        return Math.max(0, w);
-    }
-
-    private int headerSaveX() {
-        return width - 214;
-    }
-
-    private void renderTabs(GuiGraphics g, int mx, int my) {
-        int x = 8;
-        int y = HEADER_H + 6;
-        TransferGraphSyncPacket.PageData activePage = page(activePageId);
-        if (activePage == null) activePage = firstPage();
-        String label = activePage.enabled() ? activePage.name() : "⊘ " + activePage.name();
-        int w = Math.max(74, Theme.styledWidth(font, label) + 28);
-        int fill = activePage.enabled() ? Theme.PRIMARY_SOFT : 0xFFE7EBEF;
-        int border = activePage.enabled() ? Theme.PRIMARY : 0xFFC9D2DC;
-        chip(g, x, y, w, TAB_H - 4, fill, border);
-        text(g, label, x + 8, y + 6, Theme.TEXT);
-        x += w + 5;
-        chip(g, x, y, 22, TAB_H - 4, Theme.SURFACE, Theme.BORDER);
-        text(g, "+", x + 8, y + 6, Theme.PRIMARY_PRESS);
-        x += 28;
-        chip(g, x, y, 22, TAB_H - 4, fill, Theme.BORDER_STRONG);
-        text(g, "○", x + 6, y + 6, Theme.PRIMARY_PRESS);
-    }
-
     private void crispPanel(GuiGraphics g, int x, int y, int w, int h, int fill, int border) {
-        Theme.shadow(g, x, y, w, h, POPUP_RADIUS);
-        Theme.panel(g, x, y, w, h, POPUP_RADIUS, fill, border);
+        softPanel(g, x, y, w, h, fill, border);
     }
 
     private void chip(GuiGraphics g, int x, int y, int w, int h, int fill, int border) {
-        Theme.panel(g, x, y, w, h, Math.min(8, h / 2), fill, border);
+        softButton(g, x, y, w, h, fill, border);
+    }
+
+    private void softPanel(GuiGraphics g, int x, int y, int w, int h, int fill, int border) {
+        Theme.shadow(g, x, y, w, h, 12);
+        Theme.panel(g, x, y, w, h, Math.min(16, Math.max(7, Math.min(w, h) / 5)), fill, border);
+    }
+
+    private void softButton(GuiGraphics g, int x, int y, int w, int h, int fill, int border) {
+        Theme.panel(g, x, y, w, h, Math.min(10, Math.max(5, h / 2)), fill, border);
     }
 
     private void text(GuiGraphics g, String s, int x, int y, int color) {
@@ -284,17 +283,23 @@ public class TransferGraphScreen extends Screen {
         Theme.textRight(g, font, s, rx, y, color);
     }
 
+    private String compactRateLabel(int value, String resourceId) {
+        if (TransferEdge.ENERGY_FE.equals(resourceId)) return value + "FE/m";
+        if (TransferEdge.STRESS_SU.equals(resourceId)) return value + "SU/m";
+        return value + (GraphResourceUtils.isFluidResource(resourceId) ? "mB/m" : "/m");
+    }
+
     private void renderGrid(GuiGraphics g) {
-        int grid = Math.max(18, (int) Math.round(48 * zoom));
-        int top = HEADER_H + TAB_H + 8;
-        g.fill(0, top, width, height, 0xFFF7FBFF);
-        int index = 0;
-        for (int x = Math.floorMod(panX, grid); x < width; x += grid) {
-            Theme.vLine(g, x, top, height - top, index++ % 4 == 0 ? 0x147CB3E8 : 0x087CB3E8);
+        g.fill(0, 0, width, height, 0xFFFDFEFF);
+        int major = Math.max(56, (int) Math.round(72 * Math.max(0.75, Math.min(1.35, zoom))));
+        int minor = Math.max(28, major / 2);
+        int startX = Math.floorMod(panX, minor) - minor;
+        int startY = Math.floorMod(panY, minor) - minor;
+        for (int x = startX; x < width; x += minor) {
+            Theme.vLine(g, x, 0, height, Math.floorMod(x - panX, major) == 0 ? 0x2EB7D7EE : 0x1DD9EAF6);
         }
-        index = 0;
-        for (int y = top + Math.floorMod(panY, grid); y < height; y += grid) {
-            Theme.hLine(g, 0, y, width, index++ % 4 == 0 ? 0x147CB3E8 : 0x087CB3E8);
+        for (int y = startY; y < height; y += minor) {
+            Theme.hLine(g, 0, y, width, Math.floorMod(y - panY, major) == 0 ? 0x2EB7D7EE : 0x1DD9EAF6);
         }
     }
 
@@ -326,97 +331,110 @@ public class TransferGraphScreen extends Screen {
                 continue;
             }
 
-            Theme.shadow(g, 0, 0, NODE_W, h, CARD_RADIUS);
-            Theme.panel(g, 0, 0, NODE_W, h, CARD_RADIUS, fill, border);
-            int header = node.enabled() ? Theme.PRIMARY_SOFT : 0xFFDDE3EA;
-            Theme.fillRound(g, 2, 2, NODE_W - 4, 22, CARD_RADIUS - 1, header);
-            text(g, (node.enabled() ? "" : "⊘ ") + "传输箱 " + node.chestId(), 8, 7, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
+            drawNodePanel(g, NODE_W, h, node.enabled(), selected, invalid);
+            drawNodeHeader(g, NODE_W, node.enabled() ? TransferGraphGuiTextures.HeaderStyle.BLUE : TransferGraphGuiTextures.HeaderStyle.DISABLED);
+            TransferGraphGuiTextures.icon(g, TransferGraphGuiTextures.Icon.CHEST, 10, 6);
+            text(g, (node.enabled() ? "" : "⊘ ") + "传输箱 " + node.chestId(), 32, 7, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
             drawExpandButton(g, node, NODE_W);
-            text(g, GraphResourceUtils.shortPos(node.pos()), 8, 30, Theme.TEXT_MUTED);
-            drawChestStatusMarker(g, node, 72, 34);
-            renderBandwidthStatus(g, node, 82, 29);
+            text(g, GraphResourceUtils.shortPos(node.pos()), 12, 38, Theme.TEXT_MUTED);
+            drawChestStatusMarker(g, node, 72, 42);
+            renderBandwidthStatus(g, node, 82, 38);
             renderChestNode(g, node, 0, 0);
             g.pose().popPose();
         }
     }
 
+    private void drawNodePanel(GuiGraphics g, int w, int h, boolean enabled, boolean selected, boolean invalid) {
+        int fill = enabled ? Theme.SURFACE : 0xFFE9EDF2;
+        int border = invalid ? Theme.DANGER : selected ? Theme.PRIMARY_PRESS : enabled ? Theme.BORDER_STRONG : 0xFFC8D0D9;
+        softPanel(g, 0, 0, w, h, fill, border);
+    }
+
+    private void drawNodeHeader(GuiGraphics g, int w, TransferGraphGuiTextures.HeaderStyle style) {
+        int fill = switch (style) {
+            case CYAN -> 0xFFE6F7FA;
+            case PINK -> 0xFFFFEEF4;
+            case DISABLED -> 0xFFDDE3EA;
+            default -> 0xFFE6F4FF;
+        };
+        int line = switch (style) {
+            case CYAN -> 0xFF4BBBC9;
+            case PINK -> 0xFFFF84A2;
+            case DISABLED -> Theme.TEXT_FAINT;
+            default -> Theme.PRIMARY;
+        };
+        Theme.fillRound(g, 4, 4, w - 8, 26, 13, fill);
+        Theme.hLine(g, 16, 29, w - 32, line);
+    }
+
     private void renderRerouteNode(GuiGraphics g, TransferGraphSyncPacket.NodeData node, int border) {
         int h = nodeHeight(node);
-        Theme.shadow(g, 0, 0, REROUTE_W, h, CARD_RADIUS);
-        Theme.panel(g, 0, 0, REROUTE_W, h, CARD_RADIUS, node.enabled() ? Theme.SURFACE : 0xFFE9EDF2, border);
-        Theme.fillRound(g, 2, 2, REROUTE_W - 4, 24, CARD_RADIUS - 1, node.enabled() ? 0xFFEAF6FF : 0xFFDDE3EA);
-        text(g, (node.enabled() ? "" : "⊘ ") + "中转节点", 10, 8, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
+        boolean selected = node.id().equals(selectedNodeId);
+        boolean invalid = hasIssueForNode(node.id());
+        drawNodePanel(g, REROUTE_W, h, node.enabled(), selected, invalid);
+        drawNodeHeader(g, REROUTE_W, node.enabled() ? TransferGraphGuiTextures.HeaderStyle.CYAN : TransferGraphGuiTextures.HeaderStyle.DISABLED);
+        TransferGraphGuiTextures.icon(g, TransferGraphGuiTextures.Icon.REROUTE, 10, 6);
+        text(g, (node.enabled() ? "" : "⊘ ") + "中转节点", 32, 8, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
         drawExpandButton(g, node, REROUTE_W);
-        if (isExpanded(node)) text(g, "+ 输出", REROUTE_W - 78, 8, node.enabled() ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED);
-        text(g, "聚合输入", 24, 34, node.enabled() ? Theme.TEXT_MUTED : Theme.TEXT_FAINT);
+        text(g, "输入", 24, 34, node.enabled() ? Theme.TEXT_MUTED : Theme.TEXT_FAINT);
         if (isExpanded(node)) {
-            text(g, "入", 112, 34, Theme.TEXT_MUTED);
-            text(g, "出", 158, 34, Theme.TEXT_MUTED);
+            textRight(g, "入", REROUTE_W - 82, 34, Theme.TEXT_MUTED);
+            textRight(g, "出", REROUTE_W - 34, 34, Theme.TEXT_MUTED);
         } else {
-            text(g, "输出 " + rerouteOutputPorts(node).size() + " 项", 92, 34, Theme.TEXT_MUTED);
+            text(g, "输出 " + visibleRerouteOutputPorts(node).size() + " 类", 112, 34, Theme.TEXT_MUTED);
         }
-        drawPort(g, GraphNodeLayout.inputPortLocalX(), h / 2, node.enabled() ? Theme.SUCCESS : Theme.TEXT_FAINT);
 
         Map<String, TransferGraphSyncPacket.NodeFlowData> flows = rerouteFlowMap(node);
         List<String> ports = visibleRerouteOutputPorts(node);
         for (String port : ports) {
             int py = rerouteOutputLocalY(node, port);
             TransferGraphSyncPacket.NodeFlowData flow = flowForPort(port, flows);
-            drawPort(g, GraphNodeLayout.rerouteOutputPortLocalX(), py, node.enabled() ? Theme.PRIMARY : Theme.TEXT_FAINT);
-            if (TransferEdge.PORT_ALL.equals(port)) {
-                Theme.fillRound(g, 12, py - 6, 12, 12, 6, node.enabled() ? Theme.PRIMARY_SOFT_H : Theme.SURFACE_SUNK);
-                text(g, "全部物品", 32, py - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
-            } else if (TransferEdge.FLUID_ALL.equals(port)) {
+            int inColor = node.enabled() ? reroutePortColor(port, true) : Theme.TEXT_FAINT;
+            int outColor = node.enabled() ? reroutePortColor(port, false) : Theme.TEXT_FAINT;
+            drawPort(g, GraphNodeLayout.inputPortLocalX(), py, inColor);
+            drawPort(g, GraphNodeLayout.rerouteOutputPortLocalX(), py, outColor);
+            drawResourceGlyph(g, port, 28, py, node.enabled());
+            text(g, Theme.ellipsize(font, reroutePortLabel(port), 92), 54, py - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
+            if (port.startsWith(TransferEdge.FLUID_PREFIX) && !TransferEdge.FLUID_ALL.equals(port)) {
                 if (zoom > 0.24) g.renderItem(new ItemStack(Items.WATER_BUCKET), 12, py - 8);
-                text(g, "全部流体", 32, py - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
-            } else if (TransferEdge.ENERGY_FE.equals(port)) {
-                Theme.fillRound(g, 12, py - 6, 12, 12, 6, node.enabled() ? 0x33E0B43A : Theme.SURFACE_SUNK);
-                text(g, "电力 FE", 32, py - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
-            } else if (TransferEdge.STRESS_SU.equals(port)) {
-                Theme.fillRound(g, 12, py - 6, 12, 12, 6, node.enabled() ? 0x33D781D8 : Theme.SURFACE_SUNK);
-                text(g, "应力 SU", 32, py - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
-            } else if (port.startsWith(TransferEdge.FLUID_PREFIX)) {
-                if (zoom > 0.24) g.renderItem(new ItemStack(Items.WATER_BUCKET), 12, py - 8);
-                text(g, Theme.ellipsize(font, GraphResourceUtils.shortResource(port), 62), 32, py - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
-            } else if (port.startsWith(TransferEdge.ITEM_PREFIX) && zoom > 0.24) {
+            } else if (port.startsWith(TransferEdge.ITEM_PREFIX) && !TransferEdge.PORT_ALL.equals(port) && zoom > 0.24) {
                 Item item = GraphResourceUtils.resolveItem(port.substring(TransferEdge.ITEM_PREFIX.length()));
                 if (item != null) g.renderItem(new ItemStack(item), 12, py - 8);
-                text(g, Theme.ellipsize(font, GraphResourceUtils.shortResource(port), 62), 32, py - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
             }
             if (isExpanded(node)) {
-                text(g, GraphResourceUtils.resourceRateLabel(flow.inputRatePerMinute(), flow.itemId()), 104, py - 4, node.enabled() ? Theme.SUCCESS : Theme.TEXT_FAINT);
-                text(g, GraphResourceUtils.resourceRateLabel(flow.outputRatePerMinute(), flow.itemId()), 148, py - 4, node.enabled() ? Theme.PRIMARY_PRESS : Theme.TEXT_FAINT);
+                textRight(g, compactRateLabel(flow.inputRatePerMinute(), flow.itemId()), REROUTE_W - 82, py - 4, node.enabled() ? inColor : Theme.TEXT_FAINT);
+                textRight(g, compactRateLabel(flow.outputRatePerMinute(), flow.itemId()), REROUTE_W - 34, py - 4, node.enabled() ? outColor : Theme.TEXT_FAINT);
+            } else {
+                textRight(g, reroutePortShortLabel(port), REROUTE_W - 28, py - 4, node.enabled() ? outColor : Theme.TEXT_FAINT);
             }
             if (isExpanded(node) && node.filterItemIds().contains(GraphResourceUtils.filterFromPort(port))) {
                 text(g, "×", REROUTE_W - 28, py - 4, Theme.DANGER);
             }
         }
-        Theme.hLine(g, 8, h - 28, REROUTE_W - 16, Theme.DIVIDER);
-        text(g, node.enabled() ? "禁用" : "启用", 10, h - 18, Theme.PRIMARY_PRESS);
-        text(g, "删除", 62, h - 18, Theme.DANGER);
     }
 
     private void renderTrashNode(GuiGraphics g, TransferGraphSyncPacket.NodeData node, int border) {
         int h = nodeHeight(node);
-        Theme.shadow(g, 0, 0, TRASH_W, h, CARD_RADIUS);
-        Theme.panel(g, 0, 0, TRASH_W, h, CARD_RADIUS, node.enabled() ? Theme.SURFACE : 0xFFE9EDF2, border);
-        Theme.fillRound(g, 2, 2, TRASH_W - 4, 24, CARD_RADIUS - 1, node.enabled() ? 0xFFFFEFF3 : 0xFFDDE3EA);
-        text(g, (node.enabled() ? "" : "⊘ ") + "销毁节点", 10, 8, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
+        boolean selected = node.id().equals(selectedNodeId);
+        boolean invalid = hasIssueForNode(node.id());
+        drawNodePanel(g, TRASH_W, h, node.enabled(), selected, invalid);
+        drawNodeHeader(g, TRASH_W, node.enabled() ? TransferGraphGuiTextures.HeaderStyle.PINK : TransferGraphGuiTextures.HeaderStyle.DISABLED);
+        TransferGraphGuiTextures.icon(g, TransferGraphGuiTextures.Icon.TRASH, 10, 6);
+        text(g, (node.enabled() ? "" : "⊘ ") + "销毁节点", 32, 8, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
         drawExpandButton(g, node, TRASH_W);
         drawPort(g, GraphNodeLayout.inputPortLocalX(), h / 2, node.enabled() ? 0xFFE05768 : Theme.TEXT_FAINT);
         text(g, "剩余产物终点", 12, 36, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
         if (isExpanded(node)) text(g, "按连线限速销毁", 12, 52, node.enabled() ? Theme.TEXT_MUTED : Theme.TEXT_FAINT);
-        Theme.hLine(g, 8, h - 28, TRASH_W - 16, Theme.DIVIDER);
-        text(g, node.enabled() ? "禁用" : "启用", 10, h - 18, Theme.PRIMARY_PRESS);
-        text(g, "删除", 62, h - 18, Theme.DANGER);
     }
 
     private void renderPlayerInventoryNode(GuiGraphics g, TransferGraphSyncPacket.NodeData node, int border) {
         int h = nodeHeight(node);
-        Theme.shadow(g, 0, 0, TRASH_W, h, CARD_RADIUS);
-        Theme.panel(g, 0, 0, TRASH_W, h, CARD_RADIUS, node.enabled() ? Theme.SURFACE : 0xFFE9EDF2, border);
-        Theme.fillRound(g, 2, 2, TRASH_W - 4, 24, CARD_RADIUS - 1, node.enabled() ? 0xFFEAF6FF : 0xFFDDE3EA);
-        text(g, Theme.ellipsize(font, (node.enabled() ? "" : "⊘ ") + playerInventoryTitle(node), TRASH_W - 36), 10, 8, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
+        boolean selected = node.id().equals(selectedNodeId);
+        boolean invalid = hasIssueForNode(node.id());
+        drawNodePanel(g, TRASH_W, h, node.enabled(), selected, invalid);
+        drawNodeHeader(g, TRASH_W, node.enabled() ? TransferGraphGuiTextures.HeaderStyle.BLUE : TransferGraphGuiTextures.HeaderStyle.DISABLED);
+        TransferGraphGuiTextures.icon(g, TransferGraphGuiTextures.Icon.BACKPACK, 10, 6);
+        text(g, Theme.ellipsize(font, (node.enabled() ? "" : "⊘ ") + playerInventoryTitle(node), TRASH_W - 58), 32, 8, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
         drawExpandButton(g, node, TRASH_W);
         drawPort(g, GraphNodeLayout.inputPortLocalX(), h / 2, node.enabled() ? Theme.SUCCESS : Theme.TEXT_FAINT);
         text(g, "补货目标", 12, 36, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
@@ -439,9 +457,6 @@ public class TransferGraphScreen extends Screen {
                 }
             }
         }
-        Theme.hLine(g, 8, h - 28, TRASH_W - 16, Theme.DIVIDER);
-        text(g, node.enabled() ? "禁用" : "启用", 10, h - 18, Theme.PRIMARY_PRESS);
-        text(g, "删除", 62, h - 18, Theme.DANGER);
     }
 
     private String playerInventoryTitle(TransferGraphSyncPacket.NodeData node) {
@@ -459,22 +474,27 @@ public class TransferGraphScreen extends Screen {
     }
 
     private void renderChestNode(GuiGraphics g, TransferGraphSyncPacket.NodeData node, int x, int y) {
-        renderBandwidthBar(g, node, x + 8, y + 43, NODE_W - 16);
+        renderBandwidthBar(g, node, x + 12, y + 56, NODE_W - 24);
         drawResourceRow(g, node, x, y + GraphNodeLayout.chestItemLocalY(), "物品输入", "物品输出", Theme.SUCCESS, Theme.PRIMARY, SearchKind.ITEM);
-        drawResourceRow(g, node, x, y + GraphNodeLayout.chestFluidLocalY(), "流体输入", "流体输出", 0xFF62CDBD, 0xFF359E92, SearchKind.FLUID);
-        drawResourceRow(g, node, x, y + GraphNodeLayout.chestEnergyLocalY(), "电力输入", "电力输出", 0xFFE0B43A, 0xFFC48E14, null);
-        drawResourceRow(g, node, x, y + GraphNodeLayout.chestStressLocalY(), "应力输入", "应力输出", 0xFFD781D8, 0xFFB560B8, null);
+        if (createResourcesVisible()) {
+            drawResourceRow(g, node, x, y + GraphNodeLayout.chestFluidLocalY(), "流体输入", "流体输出", 0xFF62CDBD, 0xFF359E92, SearchKind.FLUID);
+        }
+        drawResourceRow(g, node, x, y + chestEnergyLocalY(), "电力输入", "电力输出", 0xFFE0B43A, 0xFFC48E14, null);
+        if (createResourcesVisible()) {
+            drawResourceRow(g, node, x, y + GraphNodeLayout.chestStressLocalY(), "应力输入", "应力输出", 0xFFD781D8, 0xFFB560B8, null);
+        }
         if (!isExpanded(node)) return;
-        text(g, "+ 其他过滤", x + 8, y + GraphNodeLayout.chestAddFilterLocalY(), node.enabled() ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED);
-        int iy = y + GraphNodeLayout.chestFirstFilterLocalY();
+        int iy = y + chestFirstFilterLocalY();
         for (String filter : node.filterItemIds()) {
+            String filterPort = GraphResourceUtils.filterPort(filter);
+            if (!isVisibleResourcePort(filterPort)) continue;
             Item item = GraphResourceUtils.resolveItem(filter);
             if (item != null && zoom > 0.22) g.renderItem(new ItemStack(item), x + 8, iy - 7);
             else if (GraphResourceUtils.isFluidResource(filter) && zoom > 0.22) g.renderItem(new ItemStack(Items.WATER_BUCKET), x + 8, iy - 7);
             text(g, Theme.ellipsize(font, GraphResourceUtils.shortResource(filter), 112), x + (zoom > 0.22 ? 28 : 8), iy - 3, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
-            Theme.fillRound(g, x + GraphNodeLayout.filterRemoveLocalX() - 5, iy - 6, 12, 12, 6, 0x22E05768);
+            softButton(g, x + GraphNodeLayout.filterRemoveLocalX() - 5, iy - 6, 12, 12, Theme.DANGER_SOFT, Theme.DANGER);
             text(g, "×", x + GraphNodeLayout.filterRemoveLocalX() - 2, iy - 5, Theme.DANGER);
-            drawPort(g, GraphNodeLayout.outputPortLocalX(), iy, node.enabled() ? portColor(GraphResourceUtils.filterPort(filter), false) : Theme.TEXT_FAINT);
+            drawPort(g, GraphNodeLayout.outputPortLocalX(), iy, node.enabled() ? portColor(filterPort, false) : Theme.TEXT_FAINT);
             iy += 18;
         }
     }
@@ -490,7 +510,7 @@ public class TransferGraphScreen extends Screen {
         int used = Math.max(0, total - remaining);
         int color = total <= 0 ? Theme.TEXT_FAINT : remaining <= 0 ? Theme.DANGER : used > 0 ? Theme.PRIMARY_PRESS : Theme.SUCCESS;
         String label = "带宽 " + remaining + "/" + total;
-        if (chest.stressBandwidthUsed() > 0) label += " 力-" + chest.stressBandwidthUsed();
+        if (createResourcesVisible() && chest.stressBandwidthUsed() > 0) label += " 力-" + chest.stressBandwidthUsed();
         textRight(g, Theme.ellipsize(font, label, NODE_W - x - 6), NODE_W - 8, y, node.enabled() ? color : Theme.TEXT_FAINT);
     }
 
@@ -512,7 +532,7 @@ public class TransferGraphScreen extends Screen {
     private void renderBandwidthBar(GuiGraphics g, TransferGraphSyncPacket.NodeData node, int x, int y, int w) {
         TransferGraphSyncPacket.ChestData chest = chestDataFor(node);
         int total = chest == null ? 0 : Math.max(0, chest.networkBandwidth());
-        int stress = chest == null ? 0 : Math.max(0, Math.min(total, chest.stressBandwidthUsed()));
+        int stress = createResourcesVisible() && chest != null ? Math.max(0, Math.min(total, chest.stressBandwidthUsed())) : 0;
         int remaining = chest == null ? 0 : Math.max(0, Math.min(total, chest.remainingTransferBandwidth()));
         int used = Math.max(0, total - remaining);
         Theme.fillRound(g, x, y, w, 5, 2, Theme.SURFACE_SUNK);
@@ -530,15 +550,56 @@ public class TransferGraphScreen extends Screen {
 
     private void drawResourceRow(GuiGraphics g, TransferGraphSyncPacket.NodeData node, int x, int y, String inLabel, String outLabel, int inColor, int outColor, SearchKind addKind) {
         drawPort(g, GraphNodeLayout.inputPortLocalX(), y, node.enabled() ? inColor : Theme.TEXT_FAINT);
-        text(g, inLabel, x + 26, y - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
-        text(g, outLabel, x + NODE_W - 82, y - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
+        String iconPort = addKind == SearchKind.FLUID ? TransferEdge.FLUID_ALL
+                : inColor == 0xFFE0B43A ? TransferEdge.ENERGY_FE
+                : inColor == 0xFFD781D8 ? TransferEdge.STRESS_SU
+                : TransferEdge.PORT_ALL;
+        drawResourceGlyph(g, iconPort, x + 28, y, node.enabled());
+        text(g, inLabel, x + 50, y - 4, node.enabled() ? Theme.TEXT : Theme.TEXT_MUTED);
         if (addKind != null) {
-            int bx = x + NODE_W - 36;
-            int fill = node.enabled() ? Theme.SURFACE_ALT : Theme.SURFACE_SUNK;
-            chip(g, bx, y - 8, 18, 14, fill, Theme.BORDER);
-            text(g, "+", bx + 6, y - 5, node.enabled() ? outColor : Theme.TEXT_FAINT);
+            int bx = x + 106;
+            softButton(g, bx, y - 8, 16, 16, node.enabled() ? Theme.PRIMARY_SOFT : Theme.SURFACE_SUNK, node.enabled() ? Theme.PRIMARY : Theme.BORDER);
+            TransferGraphGuiTextures.icon(g, TransferGraphGuiTextures.Icon.PLUS, bx, y - 8);
         }
+        textRight(g, outLabel, x + NODE_W - 26, y - 4, node.enabled() ? Theme.TEXT_MUTED : Theme.TEXT_FAINT);
         drawPort(g, GraphNodeLayout.outputPortLocalX(), y, node.enabled() ? outColor : Theme.TEXT_FAINT);
+    }
+
+    private void drawResourceGlyph(GuiGraphics g, String port, int x, int cy, boolean enabled) {
+        int y = cy - 10;
+        if (port != null && port.startsWith(TransferEdge.FLUID_PREFIX)) {
+            TransferGraphGuiTextures.icon(g, TransferGraphGuiTextures.Icon.FLUID, x, y);
+        } else if (TransferEdge.ENERGY_FE.equals(port)) {
+            TransferGraphGuiTextures.icon(g, TransferGraphGuiTextures.Icon.ENERGY, x, y);
+        } else if (TransferEdge.STRESS_SU.equals(port)) {
+            TransferGraphGuiTextures.icon(g, TransferGraphGuiTextures.Icon.STRESS, x, y);
+        } else {
+            TransferGraphGuiTextures.icon(g, TransferGraphGuiTextures.Icon.ITEM, x, y);
+        }
+        if (!enabled) g.fill(x, y, x + 18, y + 20, 0x88FFFFFF);
+    }
+
+    private int reroutePortColor(String port, boolean input) {
+        if (port != null && port.startsWith(TransferEdge.FLUID_PREFIX)) return input ? 0xFF62CDBD : 0xFF359E92;
+        if (TransferEdge.ENERGY_FE.equals(port)) return input ? 0xFFE0B43A : 0xFFC48E14;
+        if (TransferEdge.STRESS_SU.equals(port)) return input ? 0xFFD781D8 : 0xFFB560B8;
+        return input ? Theme.SUCCESS : Theme.PRIMARY;
+    }
+
+    private String reroutePortLabel(String port) {
+        if (TransferEdge.PORT_ALL.equals(port)) return "全部物品";
+        if (TransferEdge.FLUID_ALL.equals(port)) return "全部流体";
+        if (TransferEdge.ENERGY_FE.equals(port)) return "电力 FE";
+        if (TransferEdge.STRESS_SU.equals(port)) return "应力 SU";
+        return GraphResourceUtils.shortResource(port);
+    }
+
+    private String reroutePortShortLabel(String port) {
+        if (TransferEdge.PORT_ALL.equals(port)) return "物品";
+        if (TransferEdge.FLUID_ALL.equals(port)) return "流体";
+        if (TransferEdge.ENERGY_FE.equals(port)) return "电力";
+        if (TransferEdge.STRESS_SU.equals(port)) return "应力";
+        return "";
     }
 
     private void drawOutput(GuiGraphics g, int x, int y, String label, int color) {
@@ -547,14 +608,15 @@ public class TransferGraphScreen extends Screen {
     }
 
     private void drawExpandButton(GuiGraphics g, TransferGraphSyncPacket.NodeData node, int nodeW) {
-        int bx = nodeW - 21;
-        Theme.fillRound(g, bx, 6, 14, 12, 4, 0x66FFFFFF);
-        text(g, isExpanded(node) ? "▾" : "▸", bx + 4, 8, node.enabled() ? Theme.TEXT_MUTED : Theme.TEXT_FAINT);
+        int bx = nodeW - 25;
+        softButton(g, bx, 7, 16, 16, 0xFFEAF8FF, node.enabled() ? Theme.PRIMARY : Theme.BORDER);
+        TransferGraphGuiTextures.icon(g, isExpanded(node) ? TransferGraphGuiTextures.Icon.CHEVRON_DOWN : TransferGraphGuiTextures.Icon.CHEVRON_RIGHT, bx, 7);
     }
 
     private void drawPort(GuiGraphics g, int cx, int cy, int color) {
-        Theme.fillRound(g, cx - 5, cy - 5, 10, 10, 5, 0x22FFFFFF);
-        Theme.fillRound(g, cx - 4, cy - 4, 8, 8, 4, color);
+        Theme.fillRound(g, cx - 5, cy - 5, 10, 10, 5, 0xEEFFFFFF);
+        Theme.outlineRound(g, cx - 5, cy - 5, 10, 10, 5, 0x88D4E4F5);
+        Theme.fillRound(g, cx - 3, cy - 3, 6, 6, 3, color);
     }
 
     private int portColor(String portKey, boolean input) {
@@ -598,8 +660,7 @@ public class TransferGraphScreen extends Screen {
         g.pose().pushPose();
         g.pose().translate(cx, y, 0);
         g.pose().scale(s, s, 1.0f);
-        Theme.fillRound(g, -tw / 2 - 6, -4, tw + 12, 16, 8, 0xEAF7FBFF);
-        Theme.outlineRound(g, -tw / 2 - 6, -4, tw + 12, 16, 8, 0x88D4E4F5);
+        Theme.panel(g, -tw / 2 - 6, -4, tw + 12, 16, 8, 0xEAF7FBFF, 0x88D4E4F5);
         text(g, label, -tw / 2, 0, Theme.TEXT_MUTED);
         g.pose().popPose();
     }
@@ -615,18 +676,23 @@ public class TransferGraphScreen extends Screen {
         if (menuMode == MenuMode.NONE) return;
         if (menuMode == MenuMode.GRAPH_ACTION) {
             List<TransferGraphSyncPacket.GraphOptionData> options = ClientTransferGraphCache.graphOptions();
-            int h = 34 + Math.max(1, options.size()) * 18 + 22 + ("PROTECTED".equals(currentGraphKind()) ? 18 : 0);
-            crispPanel(g, menuX, menuY, 214, h, Theme.SURFACE, Theme.BORDER_STRONG);
-            text(g, "选择传输图", menuX + 8, menuY + 8, Theme.TEXT);
-            int y = menuY + 28;
+            int rows = Math.max(1, options.size()) + 1 + ("PROTECTED".equals(currentGraphKind()) ? 1 : 0);
+            int h = 8 + rows * CONTROL_DROPDOWN_ROW_H;
+            crispPanel(g, menuX, menuY, CONTROL_DROPDOWN_W, h, Theme.SURFACE, Theme.BORDER_STRONG);
+            int y = menuY + 6;
             for (TransferGraphSyncPacket.GraphOptionData option : options) {
                 boolean active = option.kind().equals(currentGraphKind()) && option.id().equals(currentGraphId());
-                text(g, active ? "●" : "○", menuX + 8, y, active ? Theme.SUCCESS : Theme.TEXT_FAINT);
-                text(g, Theme.ellipsize(font, option.label(), 150), menuX + 28, y, option.writable() ? Theme.TEXT : Theme.TEXT_MUTED);
-                y += 18;
+                renderDropdownRow(g, menuX + 5, y, CONTROL_DROPDOWN_W - 10, active ? "●" : "○",
+                        Theme.ellipsize(font, option.label(), CONTROL_DROPDOWN_W - 34),
+                        active ? Theme.SUCCESS : Theme.TEXT_FAINT,
+                        option.writable() ? Theme.TEXT : Theme.TEXT_MUTED);
+                y += CONTROL_DROPDOWN_ROW_H;
             }
-            text(g, "+ 新建团队图", menuX + 8, y + 2, Theme.PRIMARY_PRESS);
-            if ("PROTECTED".equals(currentGraphKind())) text(g, "+ 添加可编辑成员", menuX + 8, y + 20, Theme.PRIMARY_PRESS);
+            renderDropdownRow(g, menuX + 5, y, CONTROL_DROPDOWN_W - 10, "+", "新建团队图", Theme.PRIMARY_PRESS, Theme.PRIMARY_PRESS);
+            if ("PROTECTED".equals(currentGraphKind())) {
+                y += CONTROL_DROPDOWN_ROW_H;
+                renderDropdownRow(g, menuX + 5, y, CONTROL_DROPDOWN_W - 10, "+", "添加成员", Theme.PRIMARY_PRESS, Theme.PRIMARY_PRESS);
+            }
             return;
         }
         if (menuMode == MenuMode.TEAM_MEMBER_ADD) {
@@ -638,19 +704,18 @@ public class TransferGraphScreen extends Screen {
         }
         if (menuMode == MenuMode.PAGE_ACTION) {
             int rows = pages().size();
-            int h = 30 + rows * 18 + 22;
-            crispPanel(g, menuX, menuY, 210, h, Theme.SURFACE, Theme.BORDER_STRONG);
-            text(g, "分页", menuX + 8, menuY + 8, Theme.TEXT);
-            int y = menuY + 28;
+            int h = 8 + (rows + 1) * CONTROL_DROPDOWN_ROW_H;
+            crispPanel(g, menuX, menuY, CONTROL_DROPDOWN_W, h, Theme.SURFACE, Theme.BORDER_STRONG);
+            int y = menuY + 6;
             for (TransferGraphSyncPacket.PageData page : pages()) {
                 int color = page.id().equals(activePageId) ? Theme.PRIMARY_PRESS : Theme.TEXT;
-                text(g, page.enabled() ? "●" : "○", menuX + 8, y, page.enabled() ? Theme.SUCCESS : Theme.TEXT_FAINT);
-                text(g, page.name(), menuX + 28, y, color);
-                text(g, "✎", menuX + 150, y, Theme.PRIMARY_PRESS);
-                text(g, "×", menuX + 176, y, Theme.DANGER);
-                y += 18;
+                renderDropdownRow(g, menuX + 5, y, CONTROL_DROPDOWN_W - 10, page.enabled() ? "●" : "○",
+                        Theme.ellipsize(font, page.name(), CONTROL_DROPDOWN_W - 34),
+                        page.enabled() ? Theme.SUCCESS : Theme.TEXT_FAINT,
+                        color);
+                y += CONTROL_DROPDOWN_ROW_H;
             }
-            text(g, "+ 新建分页", menuX + 8, y + 2, Theme.PRIMARY_PRESS);
+            renderDropdownRow(g, menuX + 5, y, CONTROL_DROPDOWN_W - 10, "+", "新建分页", Theme.PRIMARY_PRESS, Theme.PRIMARY_PRESS);
             return;
         }
         if (menuMode == MenuMode.PAGE_DELETE_CONFIRM) {
@@ -689,6 +754,12 @@ public class TransferGraphScreen extends Screen {
         }
     }
 
+    private void renderDropdownRow(GuiGraphics g, int x, int y, int w, String marker, String label, int markerColor, int labelColor) {
+        Theme.fillRound(g, x, y - 2, w, CONTROL_DROPDOWN_ROW_H, 6, 0x00FFFFFF);
+        text(g, marker, x + 4, y + 2, markerColor);
+        text(g, label, x + 24, y + 2, labelColor);
+    }
+
     private void renderPopup(GuiGraphics g, int mx, int my, float partialTick) {
         if (popupMode == PopupMode.NONE) return;
         g.pose().pushPose();
@@ -707,7 +778,7 @@ public class TransferGraphScreen extends Screen {
         g.fill(0, 0, width, height, 0x22000000);
         crispPanel(g, x, y, HELP_W, HELP_H, Theme.SURFACE, Theme.BORDER_STRONG);
         text(g, "可视化传输说明", x + 12, y + 12, Theme.TEXT);
-        text(g, "×", x + HELP_W - 20, y + 12, Theme.TEXT_MUTED);
+        TransferGraphGuiTextures.icon(g, TransferGraphGuiTextures.Icon.CLOSE, x + HELP_W - 24, y + 8);
         int yy = y + 36;
         yy = renderHelpSection(g, x + 12, yy, "基础连接", List.of(
                 "右键空白处创建节点，拖动节点调整布局。",
@@ -739,15 +810,28 @@ public class TransferGraphScreen extends Screen {
     private void renderNodePopup(GuiGraphics g) {
         TransferGraphSyncPacket.NodeData node = node(selectedNodeId);
         if (node == null) return;
-        if (node.type().equals("REROUTE")) return;
-        int h = node.type().equals("CHEST") || node.type().equals("PLAYER_INVENTORY") ? 82 : 62;
-        crispPanel(g, popupX, popupY, 150, h, Theme.SURFACE, hasIssueForNode(node.id()) ? Theme.DANGER : Theme.BORDER_STRONG);
-        String title = node.type().equals("TRASH") ? "销毁节点" : node.type().equals("PLAYER_INVENTORY") ? playerInventoryTitle(node) : node.chestId();
+        boolean hasAddAction = node.type().equals("CHEST") || node.type().equals("PLAYER_INVENTORY") || node.type().equals("REROUTE");
+        int h = hasAddAction ? 82 : 62;
+        int w = 150;
+        crispPanel(g, popupX, popupY, w, h, Theme.SURFACE, hasIssueForNode(node.id()) ? Theme.DANGER : Theme.BORDER_STRONG);
+        String title = node.type().equals("TRASH") ? "销毁节点"
+                : node.type().equals("PLAYER_INVENTORY") ? playerInventoryTitle(node)
+                : node.type().equals("REROUTE") ? "中转节点"
+                : node.chestId();
         text(g, Theme.ellipsize(font, title, 132), popupX + 9, popupY + 9, Theme.TEXT);
-        text(g, node.enabled() ? "禁用节点" : "启用节点", popupX + 9, popupY + 28, Theme.PRIMARY_PRESS);
-        if (node.type().equals("CHEST")) text(g, "添加过滤", popupX + 9, popupY + 46, Theme.PRIMARY_PRESS);
-        if (node.type().equals("PLAYER_INVENTORY")) text(g, "添加补货", popupX + 9, popupY + 46, Theme.PRIMARY_PRESS);
-        text(g, "删除节点", popupX + 9, popupY + (node.type().equals("CHEST") || node.type().equals("PLAYER_INVENTORY") ? 64 : 46), Theme.DANGER);
+        renderNodePopupRow(g, popupX + 8, popupY + 26, 134, node.enabled() ? "禁用节点" : "启用节点", Theme.PRIMARY_PRESS);
+        if (hasAddAction) {
+            String add = node.type().equals("PLAYER_INVENTORY") ? "添加补货"
+                    : node.type().equals("REROUTE") ? "添加输出"
+                    : "添加过滤";
+            renderNodePopupRow(g, popupX + 8, popupY + 44, 134, add, Theme.PRIMARY_PRESS);
+        }
+        renderNodePopupRow(g, popupX + 8, popupY + (hasAddAction ? 62 : 44), 134, "删除节点", Theme.DANGER);
+    }
+
+    private void renderNodePopupRow(GuiGraphics g, int x, int y, int w, String label, int color) {
+        Theme.fillRound(g, x, y, w, 16, 6, 0x00FFFFFF);
+        text(g, label, x + 4, y + 4, color);
     }
 
     private void renderReroutePopup(GuiGraphics g, TransferGraphSyncPacket.NodeData node) {
@@ -872,7 +956,8 @@ public class TransferGraphScreen extends Screen {
                 : searchKind == SearchKind.FLUID ? "添加流体过滤"
                 : "添加过滤";
         text(g, title, popupX + 9, popupY + 10, Theme.TEXT);
-        Theme.panel(g, popupX + 8, popupY + 26, SEARCH_W - 16, 18, 5, 0xFFFFFFFF, Theme.BORDER);
+        TransferGraphGuiTextures.icon(g, TransferGraphGuiTextures.Icon.CLOSE, popupX + SEARCH_W - 24, popupY + 7);
+        Theme.panel(g, popupX + 8, popupY + 26, SEARCH_W - 16, 18, 5, searchFocused ? 0xFFFFFFFF : Theme.SURFACE_SUNK, searchFocused ? Theme.PRIMARY : Theme.BORDER);
         String shown = searchValue.isEmpty() ? "搜索资源" : searchValue;
         int textColor = searchValue.isEmpty() ? Theme.TEXT_FAINT : Theme.TEXT;
         text(g, Theme.ellipsize(font, shown + (searchFocused && (graphSyncTicker / 10) % 2 == 0 ? "_" : ""), SEARCH_W - 28), popupX + 13, popupY + 31, textColor);
@@ -906,10 +991,19 @@ public class TransferGraphScreen extends Screen {
         ensureDraft();
         if (popupMode == PopupMode.EXIT_CONFIRM) return handlePopupClick(mx, my, button);
         if (button == 0 && handleHeaderClick(mx, my)) return true;
-        if (button == 0 && handleTabs(mx, my)) return true;
         if (handleMenuClick(mx, my, button)) return true;
         if (handlePopupClick(mx, my, button)) return true;
         if (button == 1) {
+            TransferGraphSyncPacket.NodeData node = nodeAt(mx, my);
+            if (node != null) {
+                selectedNodeId = node.id();
+                selectedEdgeId = null;
+                popupMode = PopupMode.NODE;
+                menuMode = MenuMode.NONE;
+                popupX = (int) mx + 8;
+                popupY = (int) my + 8;
+                return true;
+            }
             menuMode = MenuMode.ROOT;
             popupMode = PopupMode.NONE;
             menuX = (int) mx;
@@ -1002,63 +1096,84 @@ public class TransferGraphScreen extends Screen {
     }
 
     private boolean handleHeaderClick(double mx, double my) {
-        if (my < 0 || my >= HEADER_H) return false;
-        int graphX = headerGraphX();
-        int graphW = headerGraphW();
-        if (graphW >= 64 && inside(mx, my, graphX, 6, graphW, 18)) {
-            menuMode = MenuMode.GRAPH_ACTION;
-            menuX = clamp(graphX, 4, Math.max(4, width - 218));
-            menuY = HEADER_H + 4;
+        int x = controlX;
+        int y = controlY;
+        if (inside(mx, my, x, y, CONTROL_W, CONTROL_H)) {
+            draggingControls = true;
+            controlsMoved = false;
+            controlDragOffX = (int) mx - controlX;
+            controlDragOffY = (int) my - controlY;
+            menuMode = MenuMode.NONE;
             popupMode = PopupMode.NONE;
             return true;
         }
-        int saveX = headerSaveX();
-        if (inside(mx, my, saveX, 6, 54, 18)) {
+
+        if (!controlsExpanded) return false;
+        int fy = y + CONTROL_H + 8;
+        if (!inside(mx, my, x, fy, CONTROL_PANEL_W, CONTROL_PANEL_H)) return false;
+        if (inside(mx, my, x, fy, CONTROL_PANEL_W, 30)) {
+            draggingControls = true;
+            controlsMoved = false;
+            controlDragOffX = (int) mx - controlX;
+            controlDragOffY = (int) my - controlY;
+            menuMode = MenuMode.NONE;
+            popupMode = PopupMode.NONE;
+            return true;
+        }
+        if (inside(mx, my, x + CONTROL_PANEL_W - 30, fy + 8, 22, 22)) {
+            controlsExpanded = false;
+            return true;
+        }
+        if (inside(mx, my, x + 10, fy + 36, 64, 22)) {
+            menuMode = MenuMode.PAGE_ACTION;
+            menuX = x + 10;
+            menuY = fy + 58;
+            popupMode = PopupMode.NONE;
+            return true;
+        }
+        if (inside(mx, my, x + 82, fy + 36, 64, 22)) {
+            menuMode = MenuMode.GRAPH_ACTION;
+            menuX = x + 40;
+            menuY = fy + 58;
+            popupMode = PopupMode.NONE;
+            return true;
+        }
+        int bx = x + 10;
+        int by = fy + 68;
+        if (inside(mx, my, bx, by, 26, 23)) {
             saveDraft();
             return true;
         }
-        if (inside(mx, my, saveX + 62, 6, 54, 18)) {
-            discardDraft();
+        if (inside(mx, my, bx + 32, by, 26, 23)) {
+            menuMode = MenuMode.PAGE_ACTION;
+            menuX = x + 10;
+            menuY = fy + 58;
+            popupMode = PopupMode.NONE;
             return true;
         }
-        int helpX = width - 86;
-        if (inside(mx, my, helpX, 6, 20, 18)) {
-            popupMode = popupMode == PopupMode.HELP ? PopupMode.NONE : PopupMode.HELP;
-            menuMode = MenuMode.NONE;
-            focusedEdgeField = EdgeField.NONE;
-            return true;
-        }
-        return false;
-    }
-
-    private boolean handleTabs(double mx, double my) {
-        int x = 8, y = HEADER_H + 6;
-        TransferGraphSyncPacket.PageData activePage = page(activePageId);
-        if (activePage == null) activePage = firstPage();
-        String label = activePage.enabled() ? activePage.name() : "⊘ " + activePage.name();
-        int w = Math.max(74, Theme.styledWidth(font, label) + 28);
-        if (mx >= x && mx < x + w && my >= y && my < y + TAB_H - 4) return true;
-        x += w + 5;
-        if (mx >= x && mx < x + 22 && my >= y && my < y + TAB_H - 4) {
+        if (inside(mx, my, bx + 64, by, 26, 23)) {
             menuMode = MenuMode.PAGE_CREATE;
-            menuX = x;
-            menuY = y + TAB_H;
+            menuX = bx + 64;
+            menuY = fy + CONTROL_PANEL_H + 4;
             if (pageNameEdit != null) {
                 pageNameEdit.setMaxLength(24);
                 pageNameEdit.setValue("新页面");
                 pageNameEdit.setFocused(true);
             }
-            return true;
-        }
-        x += 28;
-        if (mx >= x && mx < x + 22 && my >= y && my < y + TAB_H - 4) {
-            menuMode = MenuMode.PAGE_ACTION;
-            menuX = x;
-            menuY = y + TAB_H;
             popupMode = PopupMode.NONE;
             return true;
         }
-        return false;
+        if (inside(mx, my, bx + 96, by, 26, 23)) {
+            popupMode = popupMode == PopupMode.HELP ? PopupMode.NONE : PopupMode.HELP;
+            menuMode = MenuMode.NONE;
+            focusedEdgeField = EdgeField.NONE;
+            return true;
+        }
+        if (inside(mx, my, x + 84, fy + 94, 54, 18)) {
+            discardDraft();
+            return true;
+        }
+        return true;
     }
 
     private boolean handleMenuClick(double mx, double my, int button) {
@@ -1069,17 +1184,17 @@ public class TransferGraphScreen extends Screen {
         }
         if (menuMode == MenuMode.GRAPH_ACTION) {
             List<TransferGraphSyncPacket.GraphOptionData> options = ClientTransferGraphCache.graphOptions();
-            int row = ((int) my - (menuY + 24)) / 18;
-            if (mx >= menuX && mx < menuX + 214 && row >= 0 && row < options.size()) {
+            int row = ((int) my - (menuY + 6)) / CONTROL_DROPDOWN_ROW_H;
+            if (mx >= menuX && mx < menuX + CONTROL_DROPDOWN_W && row >= 0 && row < options.size()) {
                 TransferGraphSyncPacket.GraphOptionData option = options.get(row);
                 requestGraph(option.kind(), option.id());
             } else {
-                int createY = menuY + 30 + options.size() * 18;
-                if (mx >= menuX && mx < menuX + 214 && my >= createY && my < createY + 20) {
+                int createY = menuY + 6 + options.size() * CONTROL_DROPDOWN_ROW_H;
+                if (mx >= menuX && mx < menuX + CONTROL_DROPDOWN_W && my >= createY && my < createY + CONTROL_DROPDOWN_ROW_H) {
                     PacketDistributor.sendToServer(new TransferTeamPacket("CREATE", "", "团队"));
                     dirty = false;
                     savePending = false;
-                } else if ("PROTECTED".equals(currentGraphKind()) && mx >= menuX && mx < menuX + 214 && my >= createY + 18 && my < createY + 38) {
+                } else if ("PROTECTED".equals(currentGraphKind()) && mx >= menuX && mx < menuX + CONTROL_DROPDOWN_W && my >= createY + CONTROL_DROPDOWN_ROW_H && my < createY + CONTROL_DROPDOWN_ROW_H * 2) {
                     pendingTeamId = currentGraphId();
                     menuMode = MenuMode.TEAM_MEMBER_ADD;
                     if (pageNameEdit != null) {
@@ -1098,35 +1213,19 @@ public class TransferGraphScreen extends Screen {
             return true;
         }
         if (menuMode == MenuMode.PAGE_ACTION) {
-            if (mx < menuX || mx >= menuX + 210) {
+            if (mx < menuX || mx >= menuX + CONTROL_DROPDOWN_W) {
                 menuMode = MenuMode.NONE;
                 return true;
             }
-            int row = ((int) my - (menuY + 24)) / 18;
+            int row = ((int) my - (menuY + 6)) / CONTROL_DROPDOWN_ROW_H;
             if (row >= 0 && row < pages().size()) {
                 TransferGraphSyncPacket.PageData page = pages().get(row);
-                if (mx < menuX + 24) {
-                    togglePage(page.id());
-                } else if (mx >= menuX + 146 && mx < menuX + 170) {
-                    pendingDeletePageId = page.id();
-                    menuMode = MenuMode.PAGE_RENAME;
-                    if (pageNameEdit != null) {
-                        pageNameEdit.setMaxLength(24);
-                        pageNameEdit.setValue(page.name());
-                        pageNameEdit.setFocused(true);
-                    }
-                } else if (mx >= menuX + 172 && mx < menuX + 196) {
-                    pendingDeletePageId = page.id();
-                    if (pageNodeCount(page.id()) > 0) menuMode = MenuMode.PAGE_DELETE_CONFIRM;
-                    else deletePage(page.id());
-                } else {
-                    activePageId = page.id();
-                    menuMode = MenuMode.NONE;
-                }
+                activePageId = page.id();
+                menuMode = MenuMode.NONE;
                 return true;
             }
-            int createY = menuY + 30 + pages().size() * 18;
-            if (my >= createY && my < createY + 20) {
+            int createY = menuY + 6 + pages().size() * CONTROL_DROPDOWN_ROW_H;
+            if (my >= createY && my < createY + CONTROL_DROPDOWN_ROW_H) {
                 menuMode = MenuMode.PAGE_CREATE;
                 if (pageNameEdit != null) {
                     pageNameEdit.setMaxLength(24);
@@ -1221,6 +1320,12 @@ public class TransferGraphScreen extends Screen {
                 searchFocused = false;
                 return true;
             }
+            if (inside(mx, my, popupX + SEARCH_W - 26, popupY + 5, 20, 20)) {
+                popupMode = PopupMode.NONE;
+                draggingPopup = false;
+                searchFocused = false;
+                return true;
+            }
             if (inside(mx, my, popupX, popupY, SEARCH_W, 22)) {
                 draggingPopup = true;
                 popupDragOffX = (int) mx - popupX;
@@ -1253,35 +1358,18 @@ public class TransferGraphScreen extends Screen {
         if (popupMode == PopupMode.NODE && selectedNodeId != null) {
             TransferGraphSyncPacket.NodeData node = node(selectedNodeId);
             if (node == null) return true;
-            if (node.type().equals("REROUTE")) {
-                double lx = scaledPopupLocalX(mx);
-                double ly = scaledPopupLocalY(my);
-                if (inside(lx, ly, 150, 5, 50, 18)) {
-                    openSearchPopup(node, mx, my, SearchKind.ALL);
-                    return true;
-                }
-                List<TransferGraphSyncPacket.NodeFlowData> flows = rerouteFlowRows(node);
-                int row = ((int) ly - 41) / 20;
-                if (row >= 0 && row < Math.min(5, flows.size()) && inside(lx, ly, 186, 42 + row * 20, 16, 16)) {
-                    TransferGraphSyncPacket.NodeFlowData flow = flows.get(row);
-                    if (node.filterItemIds().contains(flow.itemId())) removeFilterItem(node.id(), flow.itemId());
-                    return true;
-                }
-                int h = reroutePopupHeight(node);
-                if (ly >= h - 24 && ly < h - 2) {
-                    if (lx < 64) toggleNode(selectedNodeId);
-                    else if (lx < 136) {
-                        deleteNode(selectedNodeId);
-                        popupMode = PopupMode.NONE;
-                    }
-                }
+            boolean hasAddAction = node.type().equals("CHEST") || node.type().equals("PLAYER_INVENTORY") || node.type().equals("REROUTE");
+            int popupH = hasAddAction ? 82 : 62;
+            if (!inside(mx, my, popupX, popupY, 150, popupH)) {
+                popupMode = PopupMode.NONE;
                 return true;
             }
-            int row = ((int) my - popupY - 22) / 18;
+            int row = ((int) my - popupY - 24) / 18;
             if (row == 0) toggleNode(selectedNodeId);
             else if (row == 1 && node.type().equals("CHEST")) openSearchPopup(node, popupX, popupY, SearchKind.ALL);
             else if (row == 1 && node.type().equals("PLAYER_INVENTORY")) openSearchPopup(node, popupX, popupY, SearchKind.ITEM);
-            else if ((row == 1 && !node.type().equals("CHEST") && !node.type().equals("PLAYER_INVENTORY")) || row == 2) {
+            else if (row == 1 && node.type().equals("REROUTE")) openSearchPopup(node, popupX, popupY, SearchKind.ALL);
+            else if ((row == 1 && !hasAddAction) || row == 2) {
                 deleteNode(selectedNodeId);
                 popupMode = PopupMode.NONE;
             }
@@ -1342,7 +1430,7 @@ public class TransferGraphScreen extends Screen {
     private void openSearchPopup(TransferGraphSyncPacket.NodeData node, double mx, double my, SearchKind kind) {
         selectedNodeId = node.id();
         searchForEdgeItem = false;
-        searchKind = kind == null ? SearchKind.ALL : kind;
+        searchKind = !createResourcesVisible() && kind == SearchKind.FLUID ? SearchKind.ITEM : kind == null ? SearchKind.ALL : kind;
         popupMode = PopupMode.SEARCH;
         popupX = clamp((int) mx + 8, 4, Math.max(4, width - SEARCH_W - 4));
         popupY = clamp((int) my + 8, HEADER_H + 4, Math.max(HEADER_H + 4, height - 78));
@@ -1367,10 +1455,6 @@ public class TransferGraphScreen extends Screen {
     private boolean handleRerouteNodeClick(TransferGraphSyncPacket.NodeData node, double mx, double my) {
         double lx = nodeLocalX(node, mx);
         double ly = nodeLocalY(node, my);
-        if (isExpanded(node) && inside(lx, ly, REROUTE_W - 84, 4, 58, 22)) {
-            openSearchPopup(node, nodeScreenX(node) + scaled(REROUTE_W - 58), nodeScreenY(node) + scaled(20), SearchKind.ALL);
-            return true;
-        }
         List<String> ports = visibleRerouteOutputPorts(node);
         for (String port : ports) {
             int py = rerouteOutputLocalY(node, port);
@@ -1381,21 +1465,30 @@ public class TransferGraphScreen extends Screen {
                 return true;
             }
         }
-        int h = nodeHeight(node);
-        if (inside(lx, ly, 8, h - 24, 46, 20)) {
-            toggleNode(node.id());
-            return true;
-        }
-        if (inside(lx, ly, 58, h - 24, 46, 20)) {
-            deleteNode(node.id());
-            popupMode = PopupMode.NONE;
-            return true;
-        }
         return false;
     }
 
     @Override
     public boolean mouseReleased(double mx, double my, int button) {
+        if (button == 0 && draggingControls) {
+            if (!controlsMoved) {
+                int x = controlX;
+                int y = controlY;
+                if (inside(mx, my, x + 7, y + 7, 42, 24)) {
+                    saveDraft();
+                } else if (inside(mx, my, x, y, CONTROL_W, CONTROL_H)) {
+                    controlsExpanded = !controlsExpanded;
+                } else if (controlsExpanded) {
+                    int fy = y + CONTROL_H + 8;
+                    if (inside(mx, my, x + CONTROL_PANEL_W - 30, fy + 8, 22, 22)) {
+                        controlsExpanded = false;
+                    }
+                }
+            }
+            draggingControls = false;
+            controlsMoved = false;
+            return true;
+        }
         if (button == 0 && linkingFromNodeId != null) {
             PortHit input = inputAt(mx, my);
             if (input != null) createEdge(input.nodeId(), input.portKey());
@@ -1409,13 +1502,8 @@ public class TransferGraphScreen extends Screen {
             } else {
                 TransferGraphSyncPacket.NodeData node = node(nodeId);
                 if (node != null) {
-                    if (node.type().equals("REROUTE")) {
-                        popupMode = PopupMode.NONE;
-                    } else {
-                        popupMode = PopupMode.NODE;
-                        popupX = nodeScreenX(node) + scaled(nodeWidth(node)) + 10;
-                        popupY = nodeScreenY(node);
-                    }
+                    selectedNodeId = node.id();
+                    popupMode = PopupMode.NONE;
                 }
             }
             draggingNodeId = null;
@@ -1427,6 +1515,14 @@ public class TransferGraphScreen extends Screen {
 
     @Override
     public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
+        if (draggingControls && button == 0) {
+            controlX = clamp((int) mx - controlDragOffX, 4, Math.max(4, width - CONTROL_W - 4));
+            int expandedHeight = controlsExpanded ? CONTROL_H + 8 + CONTROL_PANEL_H : CONTROL_H;
+            controlY = clamp((int) my - controlDragOffY, 4, Math.max(4, height - expandedHeight - 4));
+            if (Math.abs(dx) > 0.0 || Math.abs(dy) > 0.0) controlsMoved = true;
+            menuMode = MenuMode.NONE;
+            return true;
+        }
         if (draggingPopup && button == 0) {
             popupX = clamp((int) mx - popupDragOffX, 4, Math.max(4, width - SEARCH_W - 4));
             popupY = clamp((int) my - popupDragOffY, HEADER_H + 4, Math.max(HEADER_H + 4, height - searchPopupHeight(searchResults()) - 4));
@@ -1603,6 +1699,10 @@ public class TransferGraphScreen extends Screen {
 
     private void createEdge(String toNodeId, String toPortKey) {
         if (linkingFromNodeId == null) return;
+        if (!isVisibleResourcePort(linkingFromPort) || !isVisibleResourcePort(toPortKey)) {
+            linkingFromNodeId = null;
+            return;
+        }
         TransferGraphSyncPacket.NodeData from = node(linkingFromNodeId);
         TransferGraphSyncPacket.NodeData to = node(toNodeId);
         if (from == null || to == null || from.id().equals(to.id())) {
@@ -1756,6 +1856,7 @@ public class TransferGraphScreen extends Screen {
 
     private void addFilterItem(String nodeId, String itemId) {
         itemId = GraphResourceUtils.normalizeFilterResource(itemId);
+        if (!isVisibleResourcePort(GraphResourceUtils.filterPort(itemId))) return;
         TransferGraphSyncPacket.NodeData n = node(nodeId);
         if (n == null || (!n.type().equals("CHEST") && !n.type().equals("REROUTE")) || n.filterItemIds().contains(itemId)) return;
         List<String> filters = new ArrayList<>(n.filterItemIds());
@@ -1834,6 +1935,7 @@ public class TransferGraphScreen extends Screen {
 
     private void updateEdgeItemRate(String edgeId, String itemId, boolean enabled, int seconds, int items) {
         if (itemId == null || itemId.isBlank()) return;
+        if (!isVisibleResourcePort(GraphResourceUtils.filterPort(itemId))) return;
         for (int i = 0; i < draftEdges.size(); i++) {
             TransferGraphSyncPacket.EdgeData e = draftEdges.get(i);
             if (e.id().equals(edgeId)) {
@@ -1946,30 +2048,81 @@ public class TransferGraphScreen extends Screen {
     }
 
     private List<TransferGraphSyncPacket.EdgeData> visibleEdges() {
-        return edges().stream().filter(e -> e.pageId().equals(activePageId)).toList();
+        return edges().stream()
+                .filter(e -> e.pageId().equals(activePageId))
+                .filter(e -> createResourcesVisible() || (!isCreateResourcePort(e.fromPortKey()) && !isCreateResourcePort(e.toPortKey())))
+                .toList();
     }
 
     private boolean isExpanded(TransferGraphSyncPacket.NodeData node) {
         return node != null && node.expanded();
     }
 
+    private boolean createResourcesVisible() {
+        return CreateCompat.isCreateLoaded();
+    }
+
+    private boolean isCreateResourcePort(String port) {
+        return port != null && (port.startsWith(TransferEdge.FLUID_PREFIX) || port.startsWith(TransferEdge.STRESS_PREFIX));
+    }
+
+    private boolean isVisibleResourcePort(String port) {
+        return createResourcesVisible() || !isCreateResourcePort(port);
+    }
+
+    private List<String> rerouteCategoryPorts() {
+        return createResourcesVisible()
+                ? List.of(TransferEdge.PORT_ALL, TransferEdge.FLUID_ALL, TransferEdge.ENERGY_FE, TransferEdge.STRESS_SU)
+                : List.of(TransferEdge.PORT_ALL, TransferEdge.ENERGY_FE);
+    }
+
+    private Set<String> chestSourceScopes() {
+        return createResourcesVisible()
+                ? Set.of(SCOPE_ALL, TransferEdge.FLUID_ALL, TransferEdge.ENERGY_FE, TransferEdge.STRESS_SU)
+                : Set.of(SCOPE_ALL, TransferEdge.ENERGY_FE);
+    }
+
+    private int collapsedChestHeight() {
+        return createResourcesVisible() ? COLLAPSED_CHEST_H : COLLAPSED_CHEST_H_NO_CREATE;
+    }
+
+    private int chestEnergyLocalY() {
+        return createResourcesVisible() ? GraphNodeLayout.chestEnergyLocalY() : GraphNodeLayout.chestFluidLocalY();
+    }
+
+    private int chestFirstFilterLocalY() {
+        return createResourcesVisible() ? GraphNodeLayout.chestFirstFilterLocalY() : CHEST_FIRST_FILTER_Y_NO_CREATE;
+    }
+
     private List<String> visibleRerouteOutputPorts(TransferGraphSyncPacket.NodeData node) {
         List<String> ports = rerouteOutputPorts(node);
         if (isExpanded(node)) return ports;
-        if (ports.contains(TransferEdge.PORT_ALL) || ports.isEmpty()) return List.of(TransferEdge.PORT_ALL);
-        if (ports.contains(TransferEdge.FLUID_ALL)) return List.of(TransferEdge.FLUID_ALL);
-        return List.of(ports.get(0));
+        List<String> visible = new ArrayList<>();
+        for (String port : rerouteCategoryPorts()) {
+            if (ports.isEmpty() || ports.contains(port)) visible.add(port);
+        }
+        return visible.isEmpty() ? rerouteCategoryPorts() : visible;
+    }
+
+    private String rerouteCategoryPort(String portKey) {
+        if (portKey != null && portKey.startsWith(TransferEdge.FLUID_PREFIX)) return TransferEdge.FLUID_ALL;
+        if (TransferEdge.ENERGY_FE.equals(portKey) || (portKey != null && portKey.startsWith(TransferEdge.ENERGY_PREFIX))) return TransferEdge.ENERGY_FE;
+        if (TransferEdge.STRESS_SU.equals(portKey) || (portKey != null && portKey.startsWith(TransferEdge.STRESS_PREFIX))) return TransferEdge.STRESS_SU;
+        return TransferEdge.PORT_ALL;
     }
 
     private int nodeHeight(TransferGraphSyncPacket.NodeData node) {
         if (node.type().equals("REROUTE")) {
             if (!isExpanded(node)) return COLLAPSED_REROUTE_H;
-            return 86 + Math.max(1, rerouteOutputPorts(node).size()) * 20;
+            return Math.max(COLLAPSED_REROUTE_H, REROUTE_ROW_Y + Math.max(4, rerouteOutputPorts(node).size()) * 24 + 14);
         }
-        if (node.type().equals("TRASH")) return isExpanded(node) ? 88 : 78;
-        if (node.type().equals("PLAYER_INVENTORY")) return isExpanded(node) ? 104 + Math.max(1, node.replenishRules().size()) * 18 : 78;
-        if (!isExpanded(node)) return COLLAPSED_CHEST_H;
-        return GraphNodeLayout.chestFirstFilterLocalY() + Math.max(1, node.filterItemIds().size()) * 18 + 12;
+        if (node.type().equals("TRASH")) return isExpanded(node) ? 88 : 74;
+        if (node.type().equals("PLAYER_INVENTORY")) return isExpanded(node) ? 82 + Math.max(1, node.replenishRules().size()) * 18 : 78;
+        if (!isExpanded(node)) return collapsedChestHeight();
+        int visibleFilterCount = Math.max(1, (int) node.filterItemIds().stream()
+                .filter(filter -> isVisibleResourcePort(GraphResourceUtils.filterPort(filter)))
+                .count());
+        return chestFirstFilterLocalY() + visibleFilterCount * 18 + 12;
     }
 
     private int nodeWidth(TransferGraphSyncPacket.NodeData node) {
@@ -2004,7 +2157,7 @@ public class TransferGraphScreen extends Screen {
     }
 
     private int energyOutputY(TransferGraphSyncPacket.NodeData node) {
-        return nodeScreenY(node) + scaled(GraphNodeLayout.chestEnergyLocalY());
+        return nodeScreenY(node) + scaled(chestEnergyLocalY());
     }
 
     private int stressOutputY(TransferGraphSyncPacket.NodeData node) {
@@ -2012,7 +2165,7 @@ public class TransferGraphScreen extends Screen {
     }
 
     private int firstFilterY(TransferGraphSyncPacket.NodeData node) {
-        return nodeScreenY(node) + scaled(GraphNodeLayout.chestFirstFilterLocalY());
+        return nodeScreenY(node) + scaled(chestFirstFilterLocalY());
     }
 
     private int inputY(TransferGraphSyncPacket.NodeData node) {
@@ -2020,18 +2173,26 @@ public class TransferGraphScreen extends Screen {
     }
 
     private int chestInputY(TransferGraphSyncPacket.NodeData node, String sourcePort) {
+        if (node.type().equals("REROUTE")) return nodeScreenY(node) + scaled(rerouteInputLocalY(sourcePort));
         if (!node.type().equals("CHEST")) return inputY(node);
         String inputPort = TransferEdge.inputPortFor(sourcePort);
-        if (TransferEdge.FLUID_IN.equals(inputPort)) return fluidOutputY(node);
+        if (TransferEdge.FLUID_IN.equals(inputPort)) return createResourcesVisible() ? fluidOutputY(node) : allOutputY(node);
         if (TransferEdge.ENERGY_IN.equals(inputPort)) return energyOutputY(node);
-        if (TransferEdge.STRESS_IN.equals(inputPort)) return stressOutputY(node);
+        if (TransferEdge.STRESS_IN.equals(inputPort)) return createResourcesVisible() ? stressOutputY(node) : allOutputY(node);
         return allOutputY(node);
     }
 
     private int rerouteOutputLocalY(TransferGraphSyncPacket.NodeData node, String portKey) {
         List<String> ports = visibleRerouteOutputPorts(node);
-        int index = Math.max(0, ports.indexOf(portKey));
-        return REROUTE_ROW_Y + index * 20;
+        int index = ports.indexOf(portKey);
+        if (index < 0) index = ports.indexOf(rerouteCategoryPort(portKey));
+        if (index < 0) index = 0;
+        return REROUTE_ROW_Y + index * 24;
+    }
+
+    private int rerouteInputLocalY(String portKey) {
+        int index = Math.max(0, rerouteCategoryPorts().indexOf(rerouteCategoryPort(portKey)));
+        return REROUTE_ROW_Y + index * 24;
     }
 
     private int rerouteOutputY(TransferGraphSyncPacket.NodeData node, String portKey) {
@@ -2050,13 +2211,15 @@ public class TransferGraphScreen extends Screen {
             }
             int y = allOutputY(node);
             if (hit(mx, my, x, y)) return new PortHit(node.id(), TransferEdge.PORT_ALL);
-            if (hit(mx, my, x, fluidOutputY(node))) return new PortHit(node.id(), TransferEdge.FLUID_ALL);
+            if (createResourcesVisible() && hit(mx, my, x, fluidOutputY(node))) return new PortHit(node.id(), TransferEdge.FLUID_ALL);
             if (hit(mx, my, x, energyOutputY(node))) return new PortHit(node.id(), TransferEdge.ENERGY_FE);
-            if (hit(mx, my, x, stressOutputY(node))) return new PortHit(node.id(), TransferEdge.STRESS_SU);
+            if (createResourcesVisible() && hit(mx, my, x, stressOutputY(node))) return new PortHit(node.id(), TransferEdge.STRESS_SU);
             if (!isExpanded(node)) continue;
             int iy = firstFilterY(node);
             for (String filter : node.filterItemIds()) {
-                if (hit(mx, my, x, iy)) return new PortHit(node.id(), GraphResourceUtils.filterPort(filter));
+                String filterPort = GraphResourceUtils.filterPort(filter);
+                if (!isVisibleResourcePort(filterPort)) continue;
+                if (hit(mx, my, x, iy)) return new PortHit(node.id(), filterPort);
                 iy += scaled(18);
             }
         }
@@ -2069,9 +2232,12 @@ public class TransferGraphScreen extends Screen {
             int x = nodeScreenX(node) + scaled(GraphNodeLayout.inputPortLocalX());
             if (node.type().equals("CHEST")) {
                 if (hit(mx, my, x, allOutputY(node))) return new PortHit(node.id(), TransferEdge.ITEM_IN);
-                if (hit(mx, my, x, fluidOutputY(node))) return new PortHit(node.id(), TransferEdge.FLUID_IN);
+                if (createResourcesVisible() && hit(mx, my, x, fluidOutputY(node))) return new PortHit(node.id(), TransferEdge.FLUID_IN);
                 if (hit(mx, my, x, energyOutputY(node))) return new PortHit(node.id(), TransferEdge.ENERGY_IN);
-                if (hit(mx, my, x, stressOutputY(node))) return new PortHit(node.id(), TransferEdge.STRESS_IN);
+                if (createResourcesVisible() && hit(mx, my, x, stressOutputY(node))) return new PortHit(node.id(), TransferEdge.STRESS_IN);
+            } else if (node.type().equals("REROUTE")) {
+                String targetPort = TransferEdge.inputPortFor(linkingFromPort);
+                if (hit(mx, my, x, nodeScreenY(node) + scaled(rerouteInputLocalY(linkingFromPort)))) return new PortHit(node.id(), targetPort);
             } else if (hit(mx, my, x, inputY(node))) {
                 String targetPort = TransferEdge.inputPortFor(linkingFromPort);
                 if (node.type().equals("TRASH") && (TransferEdge.ENERGY_IN.equals(targetPort) || TransferEdge.STRESS_IN.equals(targetPort))) return null;
@@ -2088,17 +2254,16 @@ public class TransferGraphScreen extends Screen {
     }
 
     private boolean chestAddHit(TransferGraphSyncPacket.NodeData node, double mx, double my) {
-        return node.type().equals("CHEST") && isExpanded(node) && mx >= nodeScreenX(node) + scaled(8) && mx < nodeScreenX(node) + scaled(90)
-                && my >= nodeScreenY(node) + scaled(GraphNodeLayout.chestAddFilterLocalY() - 5) && my < nodeScreenY(node) + scaled(GraphNodeLayout.chestAddFilterLocalY() + 14);
+        return false;
     }
 
     private SearchKind chestQuickFilterHit(TransferGraphSyncPacket.NodeData node, double mx, double my) {
         if (!node.type().equals("CHEST")) return null;
         double lx = nodeLocalX(node, mx);
         double ly = nodeLocalY(node, my);
-        int bx = NODE_W - 36;
-        if (inside(lx, ly, bx, GraphNodeLayout.chestItemLocalY() - 8, 18, 14)) return SearchKind.ITEM;
-        if (inside(lx, ly, bx, GraphNodeLayout.chestFluidLocalY() - 8, 18, 14)) return SearchKind.FLUID;
+        int bx = 106;
+        if (inside(lx, ly, bx, GraphNodeLayout.chestItemLocalY() - 8, 16, 16)) return SearchKind.ITEM;
+        if (createResourcesVisible() && inside(lx, ly, bx, GraphNodeLayout.chestFluidLocalY() - 8, 16, 16)) return SearchKind.FLUID;
         return null;
     }
 
@@ -2106,6 +2271,8 @@ public class TransferGraphScreen extends Screen {
         if (!node.type().equals("CHEST") || !isExpanded(node)) return null;
         int y = firstFilterY(node);
         for (String filter : node.filterItemIds()) {
+            String filterPort = GraphResourceUtils.filterPort(filter);
+            if (!isVisibleResourcePort(filterPort)) continue;
             if (mx >= nodeScreenX(node) + scaled(GraphNodeLayout.filterRemoveLocalX() - 8) && mx < nodeScreenX(node) + scaled(GraphNodeLayout.filterRemoveLocalX() + 9)
                     && my >= y - scaled(8) && my < y + scaled(8)) {
                 removeFilterItem(node.id(), filter);
@@ -2129,13 +2296,15 @@ public class TransferGraphScreen extends Screen {
     private int[] outputPos(TransferGraphSyncPacket.NodeData node, String portKey) {
         if (node.type().equals("REROUTE")) return new int[]{nodeScreenX(node) + scaled(GraphNodeLayout.rerouteOutputPortLocalX()), rerouteOutputY(node, portKey)};
         if (TransferEdge.PORT_ALL.equals(portKey)) return new int[]{nodeScreenX(node) + scaled(GraphNodeLayout.outputPortLocalX()), allOutputY(node)};
-        if (TransferEdge.FLUID_ALL.equals(portKey)) return new int[]{nodeScreenX(node) + scaled(GraphNodeLayout.outputPortLocalX()), fluidOutputY(node)};
+        if (TransferEdge.FLUID_ALL.equals(portKey) && createResourcesVisible()) return new int[]{nodeScreenX(node) + scaled(GraphNodeLayout.outputPortLocalX()), fluidOutputY(node)};
         if (TransferEdge.ENERGY_FE.equals(portKey)) return new int[]{nodeScreenX(node) + scaled(GraphNodeLayout.outputPortLocalX()), energyOutputY(node)};
-        if (TransferEdge.STRESS_SU.equals(portKey)) return new int[]{nodeScreenX(node) + scaled(GraphNodeLayout.outputPortLocalX()), stressOutputY(node)};
+        if (TransferEdge.STRESS_SU.equals(portKey) && createResourcesVisible()) return new int[]{nodeScreenX(node) + scaled(GraphNodeLayout.outputPortLocalX()), stressOutputY(node)};
         if (!isExpanded(node)) return new int[]{nodeScreenX(node) + scaled(GraphNodeLayout.outputPortLocalX()), allOutputY(node)};
         int y = firstFilterY(node);
         for (String filter : node.filterItemIds()) {
-            if (GraphResourceUtils.filterPort(filter).equals(portKey)) return new int[]{nodeScreenX(node) + scaled(GraphNodeLayout.outputPortLocalX()), y};
+            String filterPort = GraphResourceUtils.filterPort(filter);
+            if (!isVisibleResourcePort(filterPort)) continue;
+            if (filterPort.equals(portKey)) return new int[]{nodeScreenX(node) + scaled(GraphNodeLayout.outputPortLocalX()), y};
             y += scaled(18);
         }
         return new int[]{nodeScreenX(node) + scaled(GraphNodeLayout.outputPortLocalX()), allOutputY(node)};
@@ -2200,18 +2369,27 @@ public class TransferGraphScreen extends Screen {
     private List<String> rerouteOutputPorts(TransferGraphSyncPacket.NodeData node) {
         LinkedHashSet<String> ports = new LinkedHashSet<>();
         Set<String> scope = inputScopes().getOrDefault(node.id(), Set.of());
+        boolean hasItemScope = scope.stream().anyMatch(resource -> resource.startsWith(TransferEdge.ITEM_PREFIX));
+        boolean hasFluidScope = scope.stream().anyMatch(resource -> resource.startsWith(TransferEdge.FLUID_PREFIX));
         if (scope.contains(SCOPE_ALL) || scope.isEmpty()) {
             ports.add(TransferEdge.PORT_ALL);
         }
-        if (scope.contains(TransferEdge.FLUID_ALL) || scope.isEmpty()) ports.add(TransferEdge.FLUID_ALL);
+        if (hasItemScope) ports.add(TransferEdge.PORT_ALL);
+        if (createResourcesVisible() && (scope.contains(TransferEdge.FLUID_ALL) || hasFluidScope || scope.isEmpty())) ports.add(TransferEdge.FLUID_ALL);
         if (scope.contains(TransferEdge.ENERGY_FE) || scope.isEmpty()) ports.add(TransferEdge.ENERGY_FE);
-        if (scope.contains(TransferEdge.STRESS_SU) || scope.isEmpty()) ports.add(TransferEdge.STRESS_SU);
+        if (createResourcesVisible() && (scope.contains(TransferEdge.STRESS_SU) || scope.isEmpty())) ports.add(TransferEdge.STRESS_SU);
         for (String resource : scope) {
+            if (!isVisibleResourcePort(resource)) continue;
             if (resource.startsWith(TransferEdge.ITEM_PREFIX) || resource.startsWith(TransferEdge.FLUID_PREFIX)
                     || TransferEdge.ENERGY_FE.equals(resource) || TransferEdge.STRESS_SU.equals(resource)) ports.add(resource);
         }
-        for (String filter : node.filterItemIds()) ports.add(GraphResourceUtils.filterPort(filter));
-        for (TransferGraphSyncPacket.NodeFlowData flow : node.flowStats()) ports.add(flow.itemId());
+        for (String filter : node.filterItemIds()) {
+            String port = GraphResourceUtils.filterPort(filter);
+            if (isVisibleResourcePort(port)) ports.add(port);
+        }
+        for (TransferGraphSyncPacket.NodeFlowData flow : node.flowStats()) {
+            if (isVisibleResourcePort(flow.itemId())) ports.add(flow.itemId());
+        }
         for (TransferGraphSyncPacket.EdgeData edge : visibleEdges()) {
             if (edge.fromNodeId().equals(node.id())) ports.add(edge.fromPortKey());
         }
@@ -2219,18 +2397,23 @@ public class TransferGraphScreen extends Screen {
     }
 
     private List<TransferGraphSyncPacket.NodeFlowData> rerouteFlowRows(TransferGraphSyncPacket.NodeData node) {
-        List<TransferGraphSyncPacket.NodeFlowData> rows = new ArrayList<>(node.flowStats());
+        List<TransferGraphSyncPacket.NodeFlowData> rows = new ArrayList<>();
+        for (TransferGraphSyncPacket.NodeFlowData flow : node.flowStats()) {
+            if (isVisibleResourcePort(flow.itemId())) rows.add(flow);
+        }
         Set<String> seen = new LinkedHashSet<>();
         for (TransferGraphSyncPacket.NodeFlowData flow : rows) seen.add(flow.itemId());
         Set<String> scope = inputScopes().getOrDefault(node.id(), Set.of());
         if (!scope.contains(SCOPE_ALL) || !scope.contains(TransferEdge.FLUID_ALL)) {
             for (String itemId : scope) {
                 if (itemId.equals(SCOPE_ALL) || itemId.equals(TransferEdge.FLUID_ALL)) continue;
+                if (!isVisibleResourcePort(itemId)) continue;
                 if (seen.add(itemId)) rows.add(new TransferGraphSyncPacket.NodeFlowData(itemId, 0, 0, 0, 0));
             }
         }
         for (String itemId : node.filterItemIds()) {
             String resourceId = GraphResourceUtils.filterPort(itemId);
+            if (!isVisibleResourcePort(resourceId)) continue;
             if (seen.add(resourceId)) rows.add(new TransferGraphSyncPacket.NodeFlowData(resourceId, 0, 0, 0, 0));
         }
         return rows;
@@ -2243,6 +2426,12 @@ public class TransferGraphScreen extends Screen {
     }
 
     private TransferGraphSyncPacket.NodeFlowData flowForPort(String port, Map<String, TransferGraphSyncPacket.NodeFlowData> flows) {
+        if (TransferEdge.PORT_ALL.equals(port)) return aggregateFlow(port, flows, TransferEdge.ITEM_PREFIX);
+        if (TransferEdge.FLUID_ALL.equals(port)) return aggregateFlow(port, flows, TransferEdge.FLUID_PREFIX);
+        if (TransferEdge.ENERGY_FE.equals(port) || TransferEdge.STRESS_SU.equals(port)) {
+            TransferGraphSyncPacket.NodeFlowData flow = flows.get(port);
+            return flow != null ? flow : new TransferGraphSyncPacket.NodeFlowData(port, 0, 0, 0, 0);
+        }
         if (port != null && port.startsWith(TransferEdge.ITEM_PREFIX)) {
             TransferGraphSyncPacket.NodeFlowData flow = flows.get(port);
             return flow != null ? flow : new TransferGraphSyncPacket.NodeFlowData(port, 0, 0, 0, 0);
@@ -2264,6 +2453,21 @@ public class TransferGraphScreen extends Screen {
         return new TransferGraphSyncPacket.NodeFlowData(port == null ? TransferEdge.PORT_ALL : port, inputRate, outputRate, inputTotal, outputTotal);
     }
 
+    private TransferGraphSyncPacket.NodeFlowData aggregateFlow(String port, Map<String, TransferGraphSyncPacket.NodeFlowData> flows, String prefix) {
+        int inputRate = 0;
+        int outputRate = 0;
+        long inputTotal = 0;
+        long outputTotal = 0;
+        for (TransferGraphSyncPacket.NodeFlowData flow : flows.values()) {
+            if (!flow.itemId().startsWith(prefix)) continue;
+            inputRate += flow.inputRatePerMinute();
+            outputRate += flow.outputRatePerMinute();
+            inputTotal += flow.inputTotal();
+            outputTotal += flow.outputTotal();
+        }
+        return new TransferGraphSyncPacket.NodeFlowData(port, inputRate, outputRate, inputTotal, outputTotal);
+    }
+
     private int reroutePopupHeight(TransferGraphSyncPacket.NodeData node) {
         return 74 + Math.max(1, Math.min(5, rerouteFlowRows(node).size())) * 20;
     }
@@ -2272,7 +2476,7 @@ public class TransferGraphScreen extends Screen {
         Map<String, Set<String>> scopes = new HashMap<>();
         for (TransferGraphSyncPacket.EdgeData edge : visibleEdges()) {
             TransferGraphSyncPacket.NodeData from = node(edge.fromNodeId());
-            if (from != null && from.type().equals("CHEST")) addScope(scopes.computeIfAbsent(edge.toNodeId(), id -> new LinkedHashSet<>()), edge.fromPortKey(), Set.of(SCOPE_ALL, TransferEdge.FLUID_ALL, TransferEdge.ENERGY_FE, TransferEdge.STRESS_SU));
+            if (from != null && from.type().equals("CHEST")) addScope(scopes.computeIfAbsent(edge.toNodeId(), id -> new LinkedHashSet<>()), edge.fromPortKey(), chestSourceScopes());
         }
         boolean changed;
         do {
@@ -2292,6 +2496,7 @@ public class TransferGraphScreen extends Screen {
     }
 
     private void addScope(Set<String> target, String port, Set<String> allowed) {
+        if (!isVisibleResourcePort(port)) return;
         if (TransferEdge.PORT_ALL.equals(port)) {
             if (allowed.contains(SCOPE_ALL)) target.add(SCOPE_ALL);
             for (String resource : allowed) if (resource.startsWith(TransferEdge.ITEM_PREFIX)) target.add(resource);
@@ -2315,7 +2520,7 @@ public class TransferGraphScreen extends Screen {
         lastSearch = q;
         if (q.isEmpty()) return cachedSearch = List.of();
         List<String> result = new ArrayList<>();
-        if (searchKind != SearchKind.ITEM) {
+        if (createResourcesVisible() && searchKind != SearchKind.ITEM) {
             for (Fluid fluid : BuiltInRegistries.FLUID) {
                 if (fluid == Fluids.EMPTY) continue;
                 ResourceLocation id = BuiltInRegistries.FLUID.getKey(fluid);

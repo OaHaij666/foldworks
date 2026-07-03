@@ -71,13 +71,11 @@ public record UpdatePermissionPayload(UUID spaceId, SpacePermission.AccessMode m
             if (!(context.player() instanceof ServerPlayer player)) return;
             SpaceData space = SpaceManager.getInstance().getSpace(payload.spaceId());
             if (space == null || !space.can(player.getUUID(), SpacePermission.AccessLevel.MANAGE)) return;
-            space.getPermission().setMode(payload.mode());
-            space.getPermission().setProtectedLevel(payload.protectedLevel());
-            space.getPermission().setPublicLevel(payload.publicLevel());
-            if (!space.canEnableOfflineSimulation()) {
-                space.setOfflineSimulationEnabled(false);
-            }
-            com.pockethomestead.space.SpaceStorage.markDirty();
+            SpaceManager.getInstance().updateOwnerPermission(space.getOwnerId(), permission -> {
+                permission.setMode(payload.mode());
+                permission.setProtectedLevel(payload.protectedLevel());
+                permission.setPublicLevel(payload.publicLevel());
+            });
             SpaceListPayload.sendToAll(player.server);
         });
     }

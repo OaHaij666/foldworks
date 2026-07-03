@@ -8,6 +8,8 @@ import com.pockethomestead.transfer.TransferGraphStorage;
 import com.pockethomestead.transfer.TransferTeam;
 import com.pockethomestead.transfer.TransferTeamStorage;
 import io.netty.buffer.ByteBuf;
+import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -72,6 +74,11 @@ public record TransferTeamPacket(String action, String teamId, String value) imp
                 String[] parts = packet.value == null ? new String[0] : packet.value.split("\\|", -1);
                 if (parts.length != 2) return;
                 UUID memberId = parseUuid(parts[0]);
+                if (memberId == null && !parts[0].isBlank() && player.server.getProfileCache() != null) {
+                    memberId = player.server.getProfileCache().get(parts[0].trim())
+                            .map(com.mojang.authlib.GameProfile::getId)
+                            .orElse(null);
+                }
                 SpacePermission.AccessLevel level;
                 try {
                     level = SpacePermission.AccessLevel.valueOf(parts[1]);
@@ -81,6 +88,9 @@ public record TransferTeamPacket(String action, String teamId, String value) imp
                 if (memberId != null) {
                     team.setMember(memberId, level);
                     storage.setDirty();
+                } else if (!parts[0].isBlank()) {
+                    player.sendSystemMessage(Component.translatable("pockethomestead.permission.player_not_found", parts[0])
+                            .withStyle(ChatFormatting.RED));
                 }
             }
             RequestTransferGraphPacket.sendGraphTo(player, GraphKey.protectedGraph(teamId));

@@ -83,6 +83,20 @@ public class TransferGraph {
         return changed;
     }
 
+    public boolean relocateChest(String chestId, String oldDimensionKey, BlockPos oldPos, String newDimensionKey, BlockPos newPos) {
+        boolean changed = false;
+        for (TransferNode node : nodes.values()) {
+            if (node.getNodeType() == TransferNode.NodeType.CHEST
+                    && node.getChestId().equals(chestId)
+                    && node.getDimensionKey().equals(oldDimensionKey)
+                    && node.getPos().equals(oldPos)) {
+                node.setLocation(newDimensionKey, newPos);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
     public TransferNode addNode(String pageId, String chestId, String dimensionKey, BlockPos pos, int x, int y) {
         if (!pages.containsKey(pageId)) pageId = ensureDefaultPage().getId();
         TransferNode existing = findNode(chestId, dimensionKey, pos);

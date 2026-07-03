@@ -37,8 +37,8 @@ public class TransferNode {
     private String pageId;
     private final NodeType type;
     private String chestId;
-    private final String dimensionKey;
-    private final BlockPos pos;
+    private String dimensionKey;
+    private BlockPos pos;
     private int x;
     private int y;
     private boolean expanded;
@@ -101,6 +101,10 @@ public class TransferNode {
 
     public void setPageId(String pageId) { this.pageId = pageId; }
     public void setChestId(String chestId) { this.chestId = chestId == null ? "" : chestId; }
+    public void setLocation(String dimensionKey, BlockPos pos) {
+        this.dimensionKey = dimensionKey == null ? "" : dimensionKey;
+        this.pos = pos == null ? BlockPos.ZERO : pos;
+    }
     public void setPosition(int x, int y) { this.x = x; this.y = y; }
     public void setExpanded(boolean expanded) { this.expanded = expanded; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
