@@ -58,6 +58,22 @@ public record CreateSpaceConfigPayload(ResourceLocation sourceDimension) impleme
                 int w = Math.max(min, Math.min(max, pending.width()));
                 int d = Math.max(min, Math.min(max, pending.depth()));
 
+                // 经验收费：创造模式免费；有限世界按面积，无限世界固定费用
+                if (!player.isCreative()) {
+                    int expCost = pending.infinite()
+                            ? ModConfig.EXP_COST_INFINITE.get()
+                            : w * d * ModConfig.EXP_COST_PER_BLOCK.get();
+                    if (expCost > 0) {
+                        int totalExp = Math.toIntExact(Math.round(player.experienceLevel * 100.0 + player.experienceProgress * player.getXpNeededForNextLevel()));
+                        if (totalExp < expCost) {
+                            player.displayClientMessage(net.minecraft.network.chat.Component.translatable(
+                                    "pockethomestead.space.create.insufficient_exp", expCost), true);
+                            return;
+                        }
+                        player.giveExperiencePoints(-expCost);
+                    }
+                }
+
                 SpaceData space = SpaceManager.getInstance().createSpace(
                         player.server, player.getUUID(),
                         w, 64, d,

@@ -2,7 +2,6 @@ package com.pockethomestead;
 
 import com.pockethomestead.command.PocketHomesteadCommand;
 import com.pockethomestead.archive.SpaceArchiveTransferManager;
-import com.pockethomestead.dimension.PocketMobSpawner;
 import com.pockethomestead.dimension.PocketDimensionManager;
 import com.pockethomestead.offline.OfflineChestSnapshotStorage;
 import com.pockethomestead.permission.AccessControl;
@@ -12,6 +11,7 @@ import com.pockethomestead.space.SpaceManager;
 import com.pockethomestead.space.SpacePermission;
 import com.pockethomestead.space.SpaceStorage;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.level.Level;
@@ -91,7 +91,6 @@ public class ModEvents {
     public static void onServerTick(ServerTickEvent.Post event) {
         SpaceScheduler.getInstance().onServerTick(event);
         PocketDimensionManager.getInstance().onServerTick(event.getServer());
-        PocketMobSpawner.tick(event.getServer());
         SpaceArchiveTransferManager.tick(event.getServer());
     }
 

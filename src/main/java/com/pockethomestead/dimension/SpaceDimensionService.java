@@ -14,17 +14,14 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BlockTags;
-import net.minecraft.util.valueproviders.UniformInt;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.biome.FixedBiomeSource;
 import net.minecraft.world.level.chunk.ChunkGenerator;
-import net.minecraft.world.level.dimension.BuiltinDimensionTypes;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.levelgen.Heightmap;
 
 import java.util.Optional;
-import java.util.OptionalLong;
 
 public final class SpaceDimensionService {
     private static final SpaceDimensionService INSTANCE = new SpaceDimensionService();
@@ -129,28 +126,9 @@ public final class SpaceDimensionService {
     }
 
     DimensionType createDimensionType(MinecraftServer server, SpaceData space) {
-        if (space.isInfinite()) {
-            ServerLevel src = server.getLevel(sourceDimKey(space));
-            if (src == null) src = server.overworld();
-            return copyDimensionType(src.dimensionType());
-        }
-        return new DimensionType(
-                OptionalLong.empty(),
-                true,
-                false,
-                false,
-                true,
-                1.0,
-                true,
-                false,
-                -64,
-                384,
-                384,
-                BlockTags.INFINIBURN_OVERWORLD,
-                BuiltinDimensionTypes.OVERWORLD_EFFECTS,
-                0.0F,
-                new DimensionType.MonsterSettings(false, true, UniformInt.of(0, 7), 0)
-        );
+        ServerLevel src = server.getLevel(sourceDimKey(space));
+        if (src == null) src = server.overworld();
+        return copyDimensionType(src.dimensionType());
     }
 
     private DimensionType copyDimensionType(DimensionType source) {

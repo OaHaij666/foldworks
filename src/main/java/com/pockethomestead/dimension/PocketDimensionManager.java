@@ -73,8 +73,6 @@ public class PocketDimensionManager {
         long readyAtTick = player.server.overworld().getGameTime() + Math.max(0, delayTicks);
         pendingTeleports.add(new PendingTeleport(player.getUUID(), space.getSpaceId(), readyAtTick));
         player.sendSystemMessage(Component.literal("口袋空间正在准备，请稍候...").withStyle(ChatFormatting.YELLOW));
-        PocketHomestead.LOGGER.info("排队传送玩家 {} 到空间 {}, 延迟{}tick",
-                player.getName().getString(), space.getSpaceId(), delayTicks);
     }
 
     public void onServerTick(MinecraftServer server) {

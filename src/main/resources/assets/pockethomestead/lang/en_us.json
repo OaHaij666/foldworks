@@ -113,5 +113,6 @@
 
   "pockethomestead.team.delete.not_empty": "Transfer graph under this team is not empty. Remove all nodes and edges before deleting.",
 
-  "pockethomestead.space.create.limit_exceeded": "Space count limit reached (%s)"
+  "pockethomestead.space.create.limit_exceeded": "Space count limit reached (%s)",
+  "pockethomestead.space.create.insufficient_exp": "Insufficient experience, requires %s XP"
 }

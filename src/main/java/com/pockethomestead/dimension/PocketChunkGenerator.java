@@ -219,8 +219,6 @@ public class PocketChunkGenerator extends ChunkGenerator {
     public void spawnOriginalMobs(WorldGenRegion region) {
         SpaceData space = getSpace();
         if (space == null || !space.isMobSpawning()) return;
-        // ChunkGenerator.spawnOriginalMobs 是抽象方法，直接调用 NaturalSpawner.spawnMobsForChunkGeneration
-        // 这与 NoiseBasedChunkGenerator 的实现方式一致
         ChunkPos chunkPos = region.getCenter();
         Holder<Biome> biome = region.getBiome(chunkPos.getWorldPosition());
         NaturalSpawner.spawnMobsForChunkGeneration(region, biome, chunkPos, region.getRandom());

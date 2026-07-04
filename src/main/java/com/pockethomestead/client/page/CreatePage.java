@@ -251,12 +251,31 @@ public class CreatePage extends Page {
         int btnY = formBottom + 8;
         int cancelW = 96;
         cancelBtn.bounds(x + w - pad - cancelW, btnY, cancelW, 28);
+        int createW = w - pad * 2 - cancelW - Theme.GAP;
         createBtn.label(status.isEmpty()
                         ? Component.translatable("pockethomestead.space.create_and_enter").getString()
                         : status)
-                .bounds(formX, btnY, w - pad * 2 - cancelW - Theme.GAP, 28)
+                .bounds(formX, btnY, createW, 28)
                 .render(g, mouseX, mouseY, partialTick);
+        // 经验预估：在创建按钮正下方一行小字，仅显示数字
+        if (status.isEmpty()) {
+            int expCost = estimateExpCost();
+            String expText = String.valueOf(expCost);
+            int expW = Theme.styledWidth(font, expText);
+            int expX = formX + createW - expW;
+            int expY = btnY + 30;
+            g.drawString(font, Theme.styled(expText), expX, expY, Theme.TEXT_FAINT, false);
+        }
         cancelBtn.render(g, mouseX, mouseY, partialTick);
+    }
+
+    private int estimateExpCost() {
+        if (mc.player != null && mc.player.isCreative()) return 0;
+        TerrainMode mode = TERRAIN_MODES[terrainIndex];
+        if (mode == TerrainMode.INFINITE) return ModConfig.EXP_COST_INFINITE.get();
+        int wv = parseSize(widthInput);
+        int dv = parseSize(depthInput);
+        return wv * dv * ModConfig.EXP_COST_PER_BLOCK.get();
     }
 
     private int section(GuiGraphics g, int x, int y, String label, boolean enabled) {

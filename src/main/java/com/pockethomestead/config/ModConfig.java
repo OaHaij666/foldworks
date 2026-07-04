@@ -67,6 +67,15 @@ public class ModConfig {
             .comment("每个玩家最多可创建的口袋空间数量（0 = 不限制）")
             .defineInRange("maxSpacesPerPlayer", 16, 0, 1024);
 
+    // 创建空间经验消耗：每格1点经验，无限世界固定16万
+    public static final ModConfigSpec.IntValue EXP_COST_PER_BLOCK = BUILDER
+            .comment("创建有限空间时每格(1x1)消耗的经验点数（创造模式免费）")
+            .defineInRange("expCostPerBlock", 1, 0, 1000000);
+
+    public static final ModConfigSpec.IntValue EXP_COST_INFINITE = BUILDER
+            .comment("创建无限世界时固定消耗的经验点数（创造模式免费）")
+            .defineInRange("expCostInfinite", 160000, 0, Integer.MAX_VALUE);
+
     // ── 箱子传输配置 ──────────────────────────────────────────────────────────
 
     public static final ModConfigSpec.IntValue BASE_CHEST_CAPACITY = BUILDER

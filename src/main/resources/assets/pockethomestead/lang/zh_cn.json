@@ -113,5 +113,6 @@
 
   "pockethomestead.team.delete.not_empty": "团队下的传输图不为空，请先清空节点与连线后再删除",
 
-  "pockethomestead.space.create.limit_exceeded": "已达空间数量上限 (%s)"
+  "pockethomestead.space.create.limit_exceeded": "已达空间数量上限 (%s)",
+  "pockethomestead.space.create.insufficient_exp": "经验不足，需要 %s 点经验"
 }
