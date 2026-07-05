@@ -6,6 +6,7 @@ import com.pockethomestead.network.SpaceArchiveClientChunkPacket;
 import com.pockethomestead.network.SpaceArchiveServerPacket;
 import com.pockethomestead.network.SpaceListPayload;
 import com.pockethomestead.space.SpaceData;
+import com.pockethomestead.space.SpaceExperienceCost;
 import com.pockethomestead.space.SpaceManager;
 import com.pockethomestead.space.SpacePermission;
 import net.minecraft.server.MinecraftServer;
@@ -46,7 +47,8 @@ public final class SpaceArchiveTransferManager {
         DOWNLOADS.clear();
     }
 
-    public static void beginUpload(ServerPlayer player, String sessionId, String fileName, long totalBytes, String sha256) {
+    public static void beginUpload(ServerPlayer player, String sessionId, String fileName, long totalBytes, String sha256,
+                                   int archiveWidth, int archiveDepth, boolean archiveInfinite) {
         if (player == null || sessionId == null || sessionId.isBlank()) return;
         try {
             if (UPLOADS.size() + DOWNLOADS.size() >= ModConfig.SPACE_ARCHIVE_MAX_CONCURRENT_TRANSFERS.get()) {
@@ -61,6 +63,17 @@ public final class SpaceArchiveTransferManager {
                 sendError(player, sessionId, "上传会话重复");
                 return;
             }
+            if (archiveWidth <= 0 || archiveDepth <= 0) {
+                sendError(player, sessionId, "空间包缺少尺寸信息，请重新导出后再上传");
+                return;
+            }
+            int chargedWidth = Math.max(16, Math.min(archiveWidth, 512));
+            int chargedDepth = Math.max(16, Math.min(archiveDepth, 512));
+            int expCost = SpaceExperienceCost.chargeableCost(player, chargedWidth, chargedDepth, archiveInfinite);
+            if (!SpaceExperienceCost.canAfford(player, expCost)) {
+                sendError(player, sessionId, "经验不足，需要 " + expCost + " 点经验");
+                return;
+            }
             Path staging = SpaceArchiveService.archiveWorkDir(player.server)
                     .resolve("staging")
                     .resolve(sessionId + SpaceArchiveService.EXTENSION + ".upload");
@@ -68,7 +81,8 @@ public final class SpaceArchiveTransferManager {
             Files.deleteIfExists(staging);
             UPLOADS.put(sessionId, new UploadSession(player.getUUID(), staging, fileName, totalBytes, sha256,
                     player.server.overworld().getGameTime()));
-            PacketDistributor.sendToPlayer(player, SpaceArchiveServerPacket.simple("UPLOAD_READY", sessionId, fileName, "准备上传"));
+            String message = expCost > 0 ? "准备上传，预计消耗经验 " + expCost : "准备上传";
+            PacketDistributor.sendToPlayer(player, SpaceArchiveServerPacket.simple("UPLOAD_READY", sessionId, fileName, message));
         } catch (Exception e) {
             PocketHomestead.LOGGER.error("创建空间包上传会话失败", e);
             sendError(player, sessionId, "创建上传会话失败: " + e.getMessage());
@@ -113,17 +127,25 @@ public final class SpaceArchiveTransferManager {
     public static void beginDownload(ServerPlayer player, UUID spaceId, String sessionId) {
         if (player == null || spaceId == null || sessionId == null || sessionId.isBlank()) return;
         try {
+            PocketHomestead.LOGGER.info("空间包下载请求: session={} player={} space={}",
+                    shortSession(sessionId), player.getGameProfile().getName(), spaceId);
             if (UPLOADS.size() + DOWNLOADS.size() >= ModConfig.SPACE_ARCHIVE_MAX_CONCURRENT_TRANSFERS.get()) {
+                PocketHomestead.LOGGER.warn("空间包下载拒绝: session={} 原因=并发达到上限 active={}",
+                        shortSession(sessionId), UPLOADS.size() + DOWNLOADS.size());
                 sendError(player, sessionId, "服务器正在处理其他空间包，请稍后再试");
                 return;
             }
             SpaceData space = SpaceManager.getInstance().getSpace(spaceId);
             if (space == null) {
+                PocketHomestead.LOGGER.warn("空间包下载拒绝: session={} 原因=空间不存在 space={}",
+                        shortSession(sessionId), spaceId);
                 sendError(player, sessionId, "空间不存在");
                 return;
             }
             SpacePermission.AccessLevel required = downloadLevel();
             if (!space.can(player.getUUID(), required)) {
+                PocketHomestead.LOGGER.warn("空间包下载拒绝: session={} 原因=权限不足 required={} player={} space={}",
+                        shortSession(sessionId), required, player.getGameProfile().getName(), spaceId);
                 sendError(player, sessionId, "权限不足，至少需要 " + required.name());
                 return;
             }
@@ -131,11 +153,15 @@ public final class SpaceArchiveTransferManager {
             long size = Files.size(archive);
             if (size > ModConfig.SPACE_ARCHIVE_MAX_BYTES.get()) {
                 Files.deleteIfExists(archive);
+                PocketHomestead.LOGGER.warn("空间包下载拒绝: session={} 原因=空间包过大 size={} max={}",
+                        shortSession(sessionId), size, ModConfig.SPACE_ARCHIVE_MAX_BYTES.get());
                 sendError(player, sessionId, "空间包超过服务器限制");
                 return;
             }
             DownloadSession download = new DownloadSession(player.getUUID(), archive, archive.getFileName().toString(), size);
             DOWNLOADS.put(sessionId, download);
+            PocketHomestead.LOGGER.info("空间包下载开始: session={} file={} bytes={} chunks={} chunkSize={} path={}",
+                    shortSession(sessionId), download.fileName, download.totalBytes, download.totalChunks(), download.chunkSize, archive);
             PacketDistributor.sendToPlayer(player, SpaceArchiveServerPacket.beginDownload(sessionId, download.fileName, download.totalBytes, download.totalChunks()));
         } catch (Exception e) {
             PocketHomestead.LOGGER.error("创建空间包下载失败", e);
@@ -177,18 +203,19 @@ public final class SpaceArchiveTransferManager {
             try {
                 int read = session.input.readNBytes(session.buffer, 0, session.chunkSize);
                 if (read > 0) {
-                    byte[] chunk;
-                    if (read == session.buffer.length) {
-                        chunk = session.buffer;
-                    } else {
-                        chunk = java.util.Arrays.copyOf(session.buffer, read);
-                    }
+                    byte[] chunk = java.util.Arrays.copyOf(session.buffer, read);
                     PacketDistributor.sendToPlayer(player, SpaceArchiveServerPacket.downloadChunk(
                             sessionId, session.fileName, session.index, session.totalChunks(), session.totalBytes, chunk));
                     session.index++;
                     session.sentBytes += read;
+                    if (session.index == 1 || session.index == session.totalChunks() || session.index % 40 == 0) {
+                        PocketHomestead.LOGGER.info("空间包下载发送: session={} chunk={}/{} sent={}/{}",
+                                shortSession(sessionId), session.index, session.totalChunks(), session.sentBytes, session.totalBytes);
+                    }
                 }
                 if (read == 0 || session.sentBytes >= session.totalBytes) {
+                    PocketHomestead.LOGGER.info("空间包下载发送完成: session={} file={} sent={}/{} chunks={}",
+                            shortSession(sessionId), session.fileName, session.sentBytes, session.totalBytes, session.index);
                     PacketDistributor.sendToPlayer(player, SpaceArchiveServerPacket.simple("DOWNLOAD_END", sessionId, session.fileName, "下载完成"));
                     session.closeAndDelete();
                     iterator.remove();
@@ -212,14 +239,15 @@ public final class SpaceArchiveTransferManager {
             failUpload(player, sessionId, "上传校验失败");
             return;
         }
-        SpaceArchiveService.ImportResult result = SpaceArchiveService.importArchive(player.server, session.path, player.getUUID());
+        SpaceArchiveService.ImportResult result = SpaceArchiveService.importArchive(player.server, session.path, player);
         UPLOADS.remove(sessionId);
         Files.deleteIfExists(session.path);
+        String expText = result.chargedExperience() > 0 ? "，消耗经验 " + result.chargedExperience() : "";
         PacketDistributor.sendToPlayer(player, SpaceArchiveServerPacket.simple(
                 "UPLOAD_DONE",
                 sessionId,
                 session.fileName,
-                "已创建服务器空间 " + result.name() + "，箱子 " + result.remappedChests() + " 个，图元素 " + result.importedNodes() + " 个"
+                "已创建服务器空间 " + result.name() + "，箱子 " + result.remappedChests() + " 个，图元素 " + result.importedNodes() + " 个" + expText
         ));
         SpaceListPayload.sendToAll(player.server);
     }
@@ -236,6 +264,10 @@ public final class SpaceArchiveTransferManager {
     }
 
     private static void sendError(ServerPlayer player, String sessionId, String message) {
+        PocketHomestead.LOGGER.warn("空间包传输错误: session={} player={} message={}",
+                shortSession(sessionId),
+                player == null ? "<null>" : player.getGameProfile().getName(),
+                message);
         if (player != null) PacketDistributor.sendToPlayer(player, SpaceArchiveServerPacket.simple("ERROR", sessionId, "", message));
     }
 
@@ -245,6 +277,11 @@ public final class SpaceArchiveTransferManager {
         } catch (Exception e) {
             return SpacePermission.AccessLevel.WRITE;
         }
+    }
+
+    private static String shortSession(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) return "<blank>";
+        return sessionId.length() <= 8 ? sessionId : sessionId.substring(0, 8);
     }
 
     private static final class UploadSession {

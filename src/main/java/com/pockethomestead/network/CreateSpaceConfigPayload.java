@@ -4,6 +4,7 @@ import com.pockethomestead.PocketHomestead;
 import com.pockethomestead.config.ModConfig;
 import com.pockethomestead.dimension.PocketDimensionManager;
 import com.pockethomestead.space.SpaceData;
+import com.pockethomestead.space.SpaceExperienceCost;
 import com.pockethomestead.space.SpaceManager;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -58,21 +59,13 @@ public record CreateSpaceConfigPayload(ResourceLocation sourceDimension) impleme
                 int w = Math.max(min, Math.min(max, pending.width()));
                 int d = Math.max(min, Math.min(max, pending.depth()));
 
-                // 经验收费：创造模式免费；有限世界按面积，无限世界固定费用
-                if (!player.isCreative()) {
-                    int expCost = pending.infinite()
-                            ? ModConfig.EXP_COST_INFINITE.get()
-                            : w * d * ModConfig.EXP_COST_PER_BLOCK.get();
-                    if (expCost > 0) {
-                        int totalExp = Math.toIntExact(Math.round(player.experienceLevel * 100.0 + player.experienceProgress * player.getXpNeededForNextLevel()));
-                        if (totalExp < expCost) {
-                            player.displayClientMessage(net.minecraft.network.chat.Component.translatable(
-                                    "pockethomestead.space.create.insufficient_exp", expCost), true);
-                            return;
-                        }
-                        player.giveExperiencePoints(-expCost);
-                    }
+                int expCost = SpaceExperienceCost.chargeableCost(player, w, d, pending.infinite());
+                if (!SpaceExperienceCost.canAfford(player, expCost)) {
+                    player.displayClientMessage(net.minecraft.network.chat.Component.translatable(
+                            "pockethomestead.space.create.insufficient_exp", expCost), true);
+                    return;
                 }
+                SpaceExperienceCost.charge(player, expCost);
 
                 SpaceData space = SpaceManager.getInstance().createSpace(
                         player.server, player.getUUID(),
@@ -82,7 +75,7 @@ public record CreateSpaceConfigPayload(ResourceLocation sourceDimension) impleme
                         pending.mobs(), pending.structs(),
                         pending.infinite(), pending.amplitude());
 
-                PocketDimensionManager.getInstance().queueTeleportToSpace(player, space);
+                PocketDimensionManager.getInstance().queueTeleportToNewSpace(player, space);
 
                 // 推送最新列表
                 SpaceListPayload.sendToAll(player.server);

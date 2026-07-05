@@ -1,10 +1,12 @@
 package com.pockethomestead.client;
 
+import com.pockethomestead.PocketHomestead;
 import com.pockethomestead.archive.SpaceArchiveService;
 import com.pockethomestead.config.ModConfig;
 import com.pockethomestead.network.SpaceArchiveClientChunkPacket;
 import com.pockethomestead.network.SpaceArchiveRequestPacket;
 import com.pockethomestead.network.SpaceArchiveServerPacket;
+import com.pockethomestead.space.SpaceExperienceCost;
 import net.minecraft.client.Minecraft;
 import net.neoforged.neoforge.network.PacketDistributor;
 
@@ -57,6 +59,8 @@ public final class ClientSpaceArchiveTransfer {
         if (spaceId == null) return;
         String sessionId = UUID.randomUUID().toString();
         status = "已请求服务器导出空间...";
+        PocketHomestead.LOGGER.info("客户端请求下载空间包: session={} space={} dir={}",
+                shortSession(sessionId), spaceId, archiveDir());
         PacketDistributor.sendToServer(SpaceArchiveRequestPacket.download(spaceId, sessionId));
     }
 
@@ -69,13 +73,24 @@ public final class ClientSpaceArchiveTransfer {
             String sessionId = UUID.randomUUID().toString();
             long size = Files.size(archive);
             String sha = sha256(archive);
+            SpaceArchiveService.ArchiveSummary summary = SpaceArchiveService.readSummary(archive);
+            int expCost = estimateUploadExpCost(summary);
             upload = new Upload(sessionId, archive, archive.getFileName().toString(), size, sha);
-            status = "正在请求上传空间包...";
-            PacketDistributor.sendToServer(SpaceArchiveRequestPacket.uploadBegin(sessionId, upload.fileName, size, sha));
+            status = expCost > 0 ? "正在请求上传空间包，预计消耗经验 " + expCost : "正在请求上传空间包...";
+            PacketDistributor.sendToServer(SpaceArchiveRequestPacket.uploadBegin(sessionId, upload.fileName, size, sha,
+                    summary.width(), summary.depth(), summary.infinite()));
         } catch (Exception e) {
             upload = null;
             status = "准备上传失败: " + e.getMessage();
         }
+    }
+
+    public static int estimateUploadExpCost(Path archive) throws IOException {
+        return estimateUploadExpCost(SpaceArchiveService.readSummary(archive));
+    }
+
+    public static void setStatus(String message) {
+        if (message != null && !message.isBlank()) status = message;
     }
 
     public static void tickUpload() {
@@ -104,7 +119,9 @@ public final class ClientSpaceArchiveTransfer {
             case "UPLOAD_READY" -> {
                 if (upload != null && upload.sessionId.equals(packet.sessionId())) {
                     upload.ready = true;
-                    status = "服务器已接受，开始上传...";
+                    status = packet.message() == null || packet.message().isBlank()
+                            ? "服务器已接受，开始上传..."
+                            : packet.message();
                 }
             }
             case "UPLOAD_DONE" -> {
@@ -132,49 +149,90 @@ public final class ClientSpaceArchiveTransfer {
         return status;
     }
 
+    private static int estimateUploadExpCost(SpaceArchiveService.ArchiveSummary summary) {
+        if (Minecraft.getInstance().player != null && Minecraft.getInstance().player.isCreative()) return 0;
+        return SpaceExperienceCost.costFor(Math.max(16, Math.min(summary.width(), 512)),
+                Math.max(16, Math.min(summary.depth(), 512)),
+                summary.infinite());
+    }
+
     private static void beginDownload(SpaceArchiveServerPacket packet) {
         try {
             Files.createDirectories(archiveDir());
             Path target = archiveDir().resolve(sanitize(packet.fileName()));
             Path tmp = archiveDir().resolve(sanitize(packet.fileName()) + ".download");
             Files.deleteIfExists(tmp);
+            if (download != null) {
+                PocketHomestead.LOGGER.warn("客户端收到新的下载开始，清理旧会话: old={} new={}",
+                        shortSession(download.sessionId), shortSession(packet.sessionId()));
+                download.close();
+            }
             download = new Download(packet.sessionId(), target, tmp, packet.totalChunks(), packet.totalBytes());
             status = "下载空间包中 0%";
+            PocketHomestead.LOGGER.info("客户端开始接收空间包: session={} file={} bytes={} chunks={} tmp={} target={}",
+                    shortSession(packet.sessionId()), packet.fileName(), packet.totalBytes(), packet.totalChunks(), tmp, target);
         } catch (IOException e) {
             download = null;
             status = "创建下载文件失败: " + e.getMessage();
+            PocketHomestead.LOGGER.error("客户端创建空间包下载文件失败: session={}", shortSession(packet.sessionId()), e);
         }
     }
 
     private static void writeDownloadChunk(SpaceArchiveServerPacket packet) {
-        if (download == null || !download.sessionId.equals(packet.sessionId())) return;
+        if (download == null || !download.sessionId.equals(packet.sessionId())) {
+            PocketHomestead.LOGGER.warn("客户端忽略下载分块: session={} 当前会话={} index={}",
+                    shortSession(packet.sessionId()), download == null ? "<none>" : shortSession(download.sessionId), packet.index());
+            return;
+        }
         try {
             if (packet.index() != download.nextIndex) {
                 status = "下载分块顺序错误";
+                PocketHomestead.LOGGER.warn("客户端下载分块顺序错误: session={} expected={} actual={} bytes={}",
+                        shortSession(packet.sessionId()), download.nextIndex, packet.index(), packet.data().length);
                 download.close();
                 download = null;
                 return;
             }
             Files.write(download.tmp, packet.data(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
             download.nextIndex++;
+            download.receivedBytes += packet.data().length;
             status = "下载空间包中 " + Math.min(100, (int) Math.round(download.nextIndex * 100.0 / Math.max(1, download.totalChunks))) + "%";
+            if (download.nextIndex == 1 || download.nextIndex == download.totalChunks || download.nextIndex % 40 == 0) {
+                PocketHomestead.LOGGER.info("客户端接收空间包分块: session={} chunk={}/{} received={}/{}",
+                        shortSession(packet.sessionId()), download.nextIndex, download.totalChunks, download.receivedBytes, download.totalBytes);
+            }
         } catch (IOException e) {
             download.close();
             download = null;
             status = "写入下载文件失败: " + e.getMessage();
+            PocketHomestead.LOGGER.error("客户端写入空间包下载分块失败: session={} index={}",
+                    shortSession(packet.sessionId()), packet.index(), e);
         }
     }
 
     private static void finishDownload(SpaceArchiveServerPacket packet) {
         if (download == null || !download.sessionId.equals(packet.sessionId())) {
             status = packet.message();
+            PocketHomestead.LOGGER.warn("客户端收到下载结束但会话不匹配: session={} 当前会话={} message={}",
+                    shortSession(packet.sessionId()), download == null ? "<none>" : shortSession(download.sessionId), packet.message());
             return;
         }
         try {
+            long actualBytes = Files.exists(download.tmp) ? Files.size(download.tmp) : 0L;
+            if (actualBytes != download.totalBytes) {
+                status = "下载大小不匹配: " + actualBytes + "/" + download.totalBytes;
+                PocketHomestead.LOGGER.warn("客户端空间包下载大小不匹配: session={} actual={} expected={} tmp={}",
+                        shortSession(packet.sessionId()), actualBytes, download.totalBytes, download.tmp);
+                download.close();
+                return;
+            }
             Files.move(download.tmp, download.target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             status = "已保存到 " + download.target;
+            PocketHomestead.LOGGER.info("客户端空间包已保存: session={} target={} bytes={}",
+                    shortSession(packet.sessionId()), download.target, actualBytes);
         } catch (IOException e) {
             status = "保存下载文件失败: " + e.getMessage();
+            PocketHomestead.LOGGER.error("客户端保存空间包下载文件失败: session={}", shortSession(packet.sessionId()), e);
         } finally {
             download = null;
         }
@@ -212,6 +270,11 @@ public final class ClientSpaceArchiveTransfer {
         return name.endsWith(SpaceArchiveService.EXTENSION) ? name : name + SpaceArchiveService.EXTENSION;
     }
 
+    private static String shortSession(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) return "<blank>";
+        return sessionId.length() <= 8 ? sessionId : sessionId.substring(0, 8);
+    }
+
     private static final class Upload {
         private final String sessionId;
         private final Path path;
@@ -247,6 +310,7 @@ public final class ClientSpaceArchiveTransfer {
         private final int totalChunks;
         private final long totalBytes;
         private int nextIndex;
+        private long receivedBytes;
 
         private Download(String sessionId, Path target, Path tmp, int totalChunks, long totalBytes) {
             this.sessionId = sessionId;

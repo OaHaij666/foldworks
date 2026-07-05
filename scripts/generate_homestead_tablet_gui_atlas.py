@@ -93,6 +93,12 @@ def draw_icon(d: D, kind: str, x: int, y: int, color=BLUE_DEEP):
         for ox, oy in ((4, 4), (16, 4), (4, 16), (16, 16)):
             d.rr((x + ox, y + oy, x + ox + 8, y + oy + 8), 3, color, color)
             d.rect((x + ox + 2, y + oy + 2, x + ox + 6, y + oy + 3), mix(WHITE, color, 0.18))
+    elif kind == "tablet_chest":
+        d.rr((x + 5, y + 8, x + 23, y + 24), 4, color, color)
+        d.rect((x + 7, y + 6, x + 21, y + 11), fill=mix(color, WHITE, 0.18))
+        d.line((x + 8, y + 14, x + 20, y + 14), WHITE, 2)
+        d.rr((x + 9, y + 17, x + 13, y + 21), 2, mix(WHITE, color, 0.18), mix(WHITE, color, 0.18))
+        d.rr((x + 15, y + 17, x + 19, y + 21), 2, mix(WHITE, color, 0.18), mix(WHITE, color, 0.18))
     elif kind == "permissions":
         d.rr((x + 5, y + 12, x + 23, y + 25), 4, color, color)
         d.arc((x + 8, y + 3, x + 20, y + 17), 180, 360, color, 4)
@@ -187,6 +193,7 @@ def draw_atlas() -> Image.Image:
         ("settings", MUTED), ("enter", BLUE_DEEP), ("offline", MUTED), ("delete", PINK),
         ("refresh", BLUE_DEEP), ("download", BLUE_DEEP), ("upload", BLUE_DEEP),
         ("search", MUTED), ("team", CYAN), ("archive", GOLD),
+        ("tablet_chest", BLUE_DEEP),
     ]
     for i, (kind, color) in enumerate(icons):
         draw_icon(d, kind, (i % 8) * 32, 112 + (i // 8) * 32, color)

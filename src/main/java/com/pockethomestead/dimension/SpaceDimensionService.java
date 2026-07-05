@@ -3,6 +3,7 @@ package com.pockethomestead.dimension;
 import com.pockethomestead.PocketHomestead;
 import com.pockethomestead.space.SpaceData;
 import com.pockethomestead.space.SpaceManager;
+import com.pockethomestead.util.Constants;
 import dev.galacticraft.dynamicdimensions.api.DynamicDimensionRegistry;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
@@ -17,6 +18,8 @@ import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.biome.FixedBiomeSource;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -46,6 +49,23 @@ public final class SpaceDimensionService {
         ServerLevel level = registry.createDynamicDimension(space.getDimensionId(), generator, type);
         if (level == null) {
             throw new IllegalStateException("无法加载空间维度: " + space.getDimensionId());
+        }
+        return level;
+    }
+
+    public ServerLevel loadExisting(MinecraftServer server, SpaceData space) {
+        ServerLevel loaded = server.getLevel(space.getDimensionKey());
+        if (loaded != null) {
+            return loaded;
+        }
+
+        DynamicDimensionRegistry registry = DynamicDimensionRegistry.from(server);
+        ChunkGenerator generator = createGenerator(server, space);
+        DimensionType type = createDimensionType(server, space);
+
+        ServerLevel level = registry.loadDynamicDimension(space.getDimensionId(), generator, type);
+        if (level == null) {
+            throw new IllegalStateException("无法加载已有空间维度: " + space.getDimensionId());
         }
         return level;
     }
@@ -88,6 +108,36 @@ public final class SpaceDimensionService {
         }
         int surfaceY = generator.getBaseHeight(0, 0, Heightmap.Types.WORLD_SURFACE_WG, level, level.getChunkSource().randomState());
         return new BlockPos(0, Math.max(surfaceY + 1, level.getSeaLevel() + 1), 0);
+    }
+
+    public void clearOutsideBoundary(ServerLevel level, SpaceData space) {
+        if (level == null || space == null || space.isInfinite()) return;
+        int halfW = space.getWidth() / 2;
+        int halfD = space.getDepth() / 2;
+        int minX = -halfW - 3;
+        int maxX = halfW + 2;
+        int minZ = -halfD - 3;
+        int maxZ = halfD + 2;
+        int minY = Math.max(level.getMinBuildHeight(), Constants.BEDROCK_LAYER_Y);
+        int maxY = Math.min(level.getMaxBuildHeight(), Constants.WORLD_MAX_Y);
+        BlockState air = Blocks.AIR.defaultBlockState();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        int columns = 0;
+        int changed = 0;
+
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                if (x >= -halfW && x < halfW && z >= -halfD && z < halfD) continue;
+                columns++;
+                for (int y = minY; y < maxY; y++) {
+                    pos.set(x, y, z);
+                    if (level.getBlockState(pos).isAir()) continue;
+                    if (level.setBlock(pos, air, 2)) changed++;
+                }
+            }
+        }
+        PocketHomestead.LOGGER.info("口袋空间边界外侧清理完成: space={} columns={} changed={}",
+                space.getSpaceId(), columns, changed);
     }
 
     public ChunkGenerator buildGenerator(MinecraftServer server, SpaceData space) {

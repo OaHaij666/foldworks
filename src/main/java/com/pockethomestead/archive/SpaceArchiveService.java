@@ -2,6 +2,7 @@ package com.pockethomestead.archive;
 
 import com.pockethomestead.PocketHomestead;
 import com.pockethomestead.space.SpaceData;
+import com.pockethomestead.space.SpaceExperienceCost;
 import com.pockethomestead.space.SpaceManager;
 import com.pockethomestead.space.SpacePermission;
 import com.pockethomestead.transfer.GraphKey;
@@ -20,6 +21,7 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.storage.RegionFileStorage;
@@ -29,6 +31,8 @@ import net.minecraft.world.level.storage.LevelResource;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
@@ -71,14 +75,19 @@ public final class SpaceArchiveService {
     private SpaceArchiveService() {
     }
 
-    public record ImportResult(UUID spaceId, String name, int remappedChests, int importedNodes) {}
+    public record ArchiveSummary(String name, int width, int height, int depth, boolean infinite) {}
+    public record ImportResult(UUID spaceId, String name, int remappedChests, int importedNodes, int chargedExperience) {}
 
     public static Path exportSpace(MinecraftServer server, SpaceData space, UUID requester) throws IOException {
         if (server == null || space == null) throw new IOException("空间不存在");
+        PocketHomestead.LOGGER.info("空间包导出准备: space={} name={} dimension={} requester={}",
+                space.getSpaceId(), space.getName(), space.getDimensionId(), requester);
         server.saveEverything(false, true, true);
 
         Path dimensionPath = dimensionPath(server, space.getDimensionId());
         if (!Files.isDirectory(dimensionPath)) {
+            PocketHomestead.LOGGER.warn("空间包导出失败: 维度目录不存在 space={} path={}",
+                    space.getSpaceId(), dimensionPath);
             throw new IOException("空间维度目录不存在: " + dimensionPath);
         }
 
@@ -96,6 +105,11 @@ public final class SpaceArchiveService {
         manifest.setProperty("ownerId", space.getOwnerId().toString());
         manifest.setProperty("dimensionId", space.getDimensionId().toString());
         manifest.setProperty("name", space.getName());
+        manifest.setProperty("width", Integer.toString(space.getWidth()));
+        manifest.setProperty("height", Integer.toString(space.getHeight()));
+        manifest.setProperty("depth", Integer.toString(space.getDepth()));
+        manifest.setProperty("infinite", Boolean.toString(space.isInfinite()));
+        manifest.setProperty("terrainType", space.getTerrainType().name());
         manifest.setProperty("experimental", "true");
         manifest.setProperty("warning", "Experimental feature. Space archives may be incomplete or incompatible.");
         if (requester != null) manifest.setProperty("exportedBy", requester.toString());
@@ -105,23 +119,37 @@ public final class SpaceArchiveService {
             manifest.store(zip, "Pocket Homestead experimental space archive");
             zip.closeEntry();
 
-            zip.putNextEntry(new ZipEntry(SPACE_NBT));
-            NbtIo.writeCompressed(spaceTag(space), zip);
-            zip.closeEntry();
+            putCompressedNbt(zip, SPACE_NBT, spaceTag(space));
+            putCompressedNbt(zip, GRAPH_NBT, exportSpaceGraph(server, space));
 
-            zip.putNextEntry(new ZipEntry(GRAPH_NBT));
-            NbtIo.writeCompressed(exportSpaceGraph(server, space), zip);
-            zip.closeEntry();
-
+            PocketHomestead.LOGGER.info("空间包导出压缩维度目录: space={} source={}", space.getSpaceId(), dimensionPath);
             zipDirectory(zip, dimensionPath, DIMENSION_DIR);
         }
         Files.move(tmp, archive, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        PocketHomestead.LOGGER.info("空间包导出完成: space={} archive={} bytes={}",
+                space.getSpaceId(), archive, Files.size(archive));
         return archive;
     }
 
-    public static ImportResult importArchive(MinecraftServer server, Path archive, UUID targetOwner) throws IOException {
-        if (server == null || archive == null || targetOwner == null) throw new IOException("导入参数无效");
+    private static void putCompressedNbt(ZipOutputStream zip, String name, CompoundTag tag) throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        NbtIo.writeCompressed(tag, bytes);
+        zip.putNextEntry(new ZipEntry(name));
+        bytes.writeTo(zip);
+        zip.closeEntry();
+    }
+
+    public static ImportResult importArchive(MinecraftServer server, Path archive, ServerPlayer player) throws IOException {
+        if (server == null || archive == null || player == null) throw new IOException("导入参数无效");
         if (!Files.isRegularFile(archive)) throw new IOException("空间包不存在");
+        UUID targetOwner = player.getUUID();
+        ArchiveSummary summary = readSummary(archive);
+        int summaryWidth = Math.max(16, Math.min(summary.width(), 512));
+        int summaryDepth = Math.max(16, Math.min(summary.depth(), 512));
+        int expCost = SpaceExperienceCost.chargeableCost(player, summaryWidth, summaryDepth, summary.infinite());
+        if (!SpaceExperienceCost.canAfford(player, expCost)) {
+            throw new IOException("经验不足，需要 " + expCost + " 点经验");
+        }
 
         Path work = archiveWorkDir(server).resolve("imports").resolve(UUID.randomUUID().toString());
         Files.createDirectories(work);
@@ -141,6 +169,10 @@ public final class SpaceArchiveService {
             int clampedWidth = Math.max(16, Math.min(original.getWidth(), 512));
             int clampedHeight = Math.max(16, Math.min(original.getHeight(), 512));
             int clampedDepth = Math.max(16, Math.min(original.getDepth(), 512));
+            expCost = SpaceExperienceCost.chargeableCost(player, clampedWidth, clampedDepth, original.isInfinite());
+            if (!SpaceExperienceCost.canAfford(player, expCost)) {
+                throw new IOException("经验不足，需要 " + expCost + " 点经验");
+            }
             SpaceData imported = new SpaceData(
                     newSpaceId,
                     targetOwner,
@@ -171,7 +203,10 @@ public final class SpaceArchiveService {
 
             SpaceManager.getInstance().addImportedSpace(server, imported);
             int importedNodes = importGraphSubset(server, work.resolve(GRAPH_NBT), original.getDimensionId(), newDimension, newSpaceId, chestIdMap);
-            return new ImportResult(imported.getSpaceId(), imported.getName(), remappedChests, importedNodes);
+            SpaceExperienceCost.charge(player, expCost);
+            PocketHomestead.LOGGER.info("空间包导入完成: player={} space={} name={} expCost={}",
+                    player.getGameProfile().getName(), imported.getSpaceId(), imported.getName(), expCost);
+            return new ImportResult(imported.getSpaceId(), imported.getName(), remappedChests, importedNodes, expCost);
         } finally {
             deleteDirectory(work);
         }
@@ -179,6 +214,44 @@ public final class SpaceArchiveService {
 
     public static Path archiveWorkDir(MinecraftServer server) {
         return server.getWorldPath(LevelResource.ROOT).resolve("pockethomestead").resolve("archives");
+    }
+
+    public static ArchiveSummary readSummary(Path archive) throws IOException {
+        if (archive == null || !Files.isRegularFile(archive)) throw new IOException("空间包不存在");
+        Properties manifest = null;
+        CompoundTag spaceTag = null;
+        int entryCount = 0;
+        try (ZipInputStream zip = new ZipInputStream(Files.newInputStream(archive))) {
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                if (++entryCount > MAX_ZIP_ENTRIES) {
+                    throw new IOException("空间包条目过多（>" + MAX_ZIP_ENTRIES + "），疑似 Zip Bomb");
+                }
+                String name = entry.getName();
+                if (!entry.isDirectory() && MANIFEST.equals(name)) {
+                    manifest = new Properties();
+                    manifest.load(zip);
+                } else if (!entry.isDirectory() && SPACE_NBT.equals(name)) {
+                    spaceTag = readCompressedNbtEntry(zip, name);
+                }
+                zip.closeEntry();
+                if (manifest != null && hasManifestSummary(manifest)) break;
+            }
+        }
+        if (manifest != null && hasManifestSummary(manifest)) {
+            return new ArchiveSummary(
+                    manifest.getProperty("name", "导入空间"),
+                    intProperty(manifest, "width"),
+                    intProperty(manifest, "height"),
+                    intProperty(manifest, "depth"),
+                    Boolean.parseBoolean(manifest.getProperty("infinite", "false"))
+            );
+        }
+        if (spaceTag != null) {
+            SpaceData space = readSpace(spaceTag);
+            return new ArchiveSummary(space.getName(), space.getWidth(), space.getHeight(), space.getDepth(), space.isInfinite());
+        }
+        throw new IOException("空间包缺少计费信息");
     }
 
     public static Path dimensionPath(MinecraftServer server, ResourceLocation dimensionId) {
@@ -255,6 +328,34 @@ public final class SpaceArchiveService {
         );
         if (tag.contains("Name")) space.setName(tag.getString("Name"));
         return space;
+    }
+
+    private static CompoundTag readCompressedNbtEntry(InputStream input, String entryName) throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        long total = 0;
+        int read;
+        while ((read = input.read(buffer)) >= 0) {
+            if (read == 0) continue;
+            bytes.write(buffer, 0, read);
+            total += read;
+            if (total > MAX_SINGLE_ENTRY_BYTES) {
+                throw new IOException("空间包单条目过大（>" + MAX_SINGLE_ENTRY_BYTES + "）: " + entryName);
+            }
+        }
+        return NbtIo.readCompressed(new ByteArrayInputStream(bytes.toByteArray()), NbtAccounter.create(NBT_HEAP_LIMIT));
+    }
+
+    private static boolean hasManifestSummary(Properties manifest) {
+        return manifest.containsKey("width") && manifest.containsKey("height") && manifest.containsKey("depth") && manifest.containsKey("infinite");
+    }
+
+    private static int intProperty(Properties manifest, String key) throws IOException {
+        try {
+            return Integer.parseInt(manifest.getProperty(key));
+        } catch (Exception e) {
+            throw new IOException("空间包 manifest 字段无效: " + key, e);
+        }
     }
 
     private static CompoundTag exportSpaceGraph(MinecraftServer server, SpaceData space) {
@@ -465,6 +566,8 @@ public final class SpaceArchiveService {
     }
 
     private static void unzip(Path archive, Path target) throws IOException {
+        Path safeTarget = target.toAbsolutePath().normalize();
+        Files.createDirectories(safeTarget);
         long totalUncompressed = 0;
         int entryCount = 0;
         try (ZipInputStream zip = new ZipInputStream(Files.newInputStream(archive))) {
@@ -473,8 +576,8 @@ public final class SpaceArchiveService {
                 if (++entryCount > MAX_ZIP_ENTRIES) {
                     throw new IOException("空间包条目过多（>" + MAX_ZIP_ENTRIES + "），疑似 Zip Bomb");
                 }
-                Path out = target.resolve(entry.getName()).normalize();
-                if (!out.startsWith(target)) throw new IOException("空间包路径非法: " + entry.getName());
+                Path out = safeTarget.resolve(entry.getName()).normalize();
+                if (!out.startsWith(safeTarget)) throw new IOException("空间包路径非法: " + entry.getName());
                 if (entry.isDirectory()) {
                     Files.createDirectories(out);
                 } else {
@@ -511,10 +614,12 @@ public final class SpaceArchiveService {
     }
 
     private static void copyDirectory(Path source, Path target) throws IOException {
-        try (var stream = Files.walk(source)) {
+        Path safeSource = source.toAbsolutePath().normalize();
+        Path safeTarget = target.toAbsolutePath().normalize();
+        try (var stream = Files.walk(safeSource)) {
             for (Path path : stream.sorted().toList()) {
-                Path out = target.resolve(source.relativize(path).toString()).normalize();
-                if (!out.startsWith(target)) throw new IOException("空间目录路径非法");
+                Path out = safeTarget.resolve(safeSource.relativize(path.toAbsolutePath().normalize())).normalize();
+                if (!out.startsWith(safeTarget)) throw new IOException("空间目录路径非法");
                 if (Files.isDirectory(path)) Files.createDirectories(out);
                 else {
                     Files.createDirectories(out.getParent());

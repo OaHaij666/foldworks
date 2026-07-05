@@ -118,7 +118,7 @@ public class SpaceManager {
         space.getPermission().copyFrom(ownerPermission(space.getOwnerId()));
         spaces.put(space.getSpaceId(), space);
         dimensionIndex.put(space.getDimensionId(), space);
-        if (server != null) SpaceDimensionService.getInstance().loadOrCreate(server, space);
+        if (server != null) SpaceDimensionService.getInstance().loadExisting(server, space);
         SpaceStorage.markDirty();
     }
 

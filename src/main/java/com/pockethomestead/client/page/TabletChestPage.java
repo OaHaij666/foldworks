@@ -53,7 +53,6 @@ public class TabletChestPage extends Page {
     private EditBox searchBox;
     private EditBox suiteSearchBox;
     private EditBox suiteQtyBox;
-    private UiButton refreshButton;
     private UiButton sortButton;
     private SortMode sortMode = SortMode.COUNT;
     private int chestScrollRow;
@@ -129,7 +128,6 @@ public class TabletChestPage extends Page {
         suiteQtyBox.setTextColor(Theme.TEXT);
         suiteQtyBox.setTextColorUneditable(Theme.TEXT_FAINT);
         suiteQtyBox.setFilter(value -> value.isEmpty() || value.chars().allMatch(Character::isDigit));
-        refreshButton = new UiButton("刷新", UiButton.Variant.SECONDARY).onClick(this::requestSync);
         sortButton = new UiButton("排序", UiButton.Variant.SECONDARY).onClick(this::cycleSort);
     }
 
@@ -182,19 +180,21 @@ public class TabletChestPage extends Page {
     }
 
     private void renderToolbar(GuiGraphics g, int mouseX, int mouseY, int top, int toolbarH, int left, int toolbarW) {
-        int effectiveW = Math.max(toolbarW, Math.min(430, x + w - Theme.PAD - left));
-        int right = left + effectiveW;
+        int right = left + toolbarW;
         int sortW = 34;
-        int refreshW = 34;
-        int searchW = Math.max(72, Math.min(130, effectiveW / 3));
+        int searchW = Math.max(46, Math.min(60, toolbarW - sortW - 72));
 
         String title = ClientTabletChestCache.available()
-                ? "绑定: " + ClientTabletChestCache.chestId()
+                ? ClientTabletChestCache.chestId()
                 : "玉盘仓库";
-        Theme.text(g, font, Theme.ellipsize(font, title, right - left - searchW - sortW - refreshW - 22), left, top + 7, Theme.TEXT);
+        Theme.text(g, font, title, left, top + 7, Theme.TEXT);
+        if (!ClientTabletChestCache.available()) {
+            if (searchBox != null) searchBox.setFocused(false);
+            Theme.hLine(g, x, top + toolbarH, w, Theme.DIVIDER);
+            return;
+        }
 
-        int refreshX = right - refreshW;
-        int sortX = refreshX - 4 - sortW;
+        int sortX = right - sortW;
         int searchX = sortX - 4 - searchW;
         Theme.panel(g, searchX, top + 3, searchW, 18, Theme.RADIUS, Theme.SURFACE_SUNK, searchBox.isFocused() ? Theme.PRIMARY : Theme.BORDER);
         searchBox.setX(searchX + 6);
@@ -203,7 +203,6 @@ public class TabletChestPage extends Page {
         searchBox.render(g, mouseX, mouseY, 0);
 
         sortButton.label(sortMode.label).bounds(sortX, top + 2, sortW, 20).render(g, mouseX, mouseY, 0);
-        refreshButton.bounds(refreshX, top + 2, refreshW, 20).render(g, mouseX, mouseY, 0);
 
         Theme.hLine(g, x, top + toolbarH, w, Theme.DIVIDER);
     }
@@ -874,7 +873,8 @@ public class TabletChestPage extends Page {
 
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
-        if (searchBox != null && Theme.inside(mx, my, searchBox.getX() - 6, searchBox.getY() - 5, searchBox.getWidth() + 12, 18)) {
+        boolean controlsVisible = ClientTabletChestCache.available();
+        if (controlsVisible && searchBox != null && Theme.inside(mx, my, searchBox.getX() - 6, searchBox.getY() - 5, searchBox.getWidth() + 12, 18)) {
             searchBox.setFocused(true);
             if (suiteSearchBox != null) suiteSearchBox.setFocused(false);
             if (suiteQtyBox != null && suiteQtyBox.isFocused()) {
@@ -885,8 +885,7 @@ public class TabletChestPage extends Page {
             return true;
         }
         if (searchBox != null) searchBox.setFocused(false);
-        if (sortButton != null && sortButton.mouseClicked(mx, my, button)) return true;
-        if (refreshButton != null && refreshButton.mouseClicked(mx, my, button)) return true;
+        if (controlsVisible && sortButton != null && sortButton.mouseClicked(mx, my, button)) return true;
         if (!ClientTabletChestCache.available()) return false;
 
         if (handleFurnaceClick(mx, my, button)) return true;

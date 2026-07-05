@@ -70,8 +70,16 @@ public class PocketDimensionManager {
     }
 
     public void queueTeleportToSpace(ServerPlayer player, SpaceData space, int delayTicks) {
+        queueTeleportToSpace(player, space, delayTicks, false);
+    }
+
+    public void queueTeleportToNewSpace(ServerPlayer player, SpaceData space) {
+        queueTeleportToSpace(player, space, 15, true);
+    }
+
+    private void queueTeleportToSpace(ServerPlayer player, SpaceData space, int delayTicks, boolean clearOutsideBoundary) {
         long readyAtTick = player.server.overworld().getGameTime() + Math.max(0, delayTicks);
-        pendingTeleports.add(new PendingTeleport(player.getUUID(), space.getSpaceId(), readyAtTick));
+        pendingTeleports.add(new PendingTeleport(player.getUUID(), space.getSpaceId(), readyAtTick, clearOutsideBoundary));
         player.sendSystemMessage(Component.literal("口袋空间正在准备，请稍候...").withStyle(ChatFormatting.YELLOW));
     }
 
@@ -89,7 +97,7 @@ public class PocketDimensionManager {
             ServerPlayer player = server.getPlayerList().getPlayer(pending.playerId);
             SpaceData space = SpaceManager.getInstance().getSpace(pending.spaceId);
             if (player != null && space != null) {
-                teleportToSpace(player, space);
+                teleportToSpace(player, space, pending.clearOutsideBoundary);
             } else {
                 PocketHomestead.LOGGER.warn("传送失败: 玩家={} 空间={}", player, pending.spaceId);
             }
@@ -98,6 +106,10 @@ public class PocketDimensionManager {
     }
 
     public void teleportToSpace(ServerPlayer player, SpaceData space) {
+        teleportToSpace(player, space, false);
+    }
+
+    private void teleportToSpace(ServerPlayer player, SpaceData space, boolean clearOutsideBoundary) {
         if (!space.canAccess(player.getUUID())) {
             player.sendSystemMessage(Component.literal("你没有权限进入该口袋空间").withStyle(ChatFormatting.RED));
             return;
@@ -117,6 +129,10 @@ public class PocketDimensionManager {
             playerAnchors.put(player.getUUID(), new ReturnAnchor(
                     player.level().dimension(), player.position(), player.getYRot(), player.getXRot()));
             com.pockethomestead.space.SpaceStorage.markDirty();
+        }
+
+        if (clearOutsideBoundary && !space.isInfinite()) {
+            SpaceDimensionService.getInstance().clearOutsideBoundary(target, space);
         }
 
         BlockPos center = SpaceDimensionService.getInstance().prepareSafeSpawn(target, space);
@@ -198,5 +214,5 @@ public class PocketDimensionManager {
     }
 
     private record ReturnAnchor(ResourceKey<Level> dimension, Vec3 position, float yRot, float xRot) {}
-    private record PendingTeleport(UUID playerId, UUID spaceId, long readyAtTick) {}
+    private record PendingTeleport(UUID playerId, UUID spaceId, long readyAtTick, boolean clearOutsideBoundary) {}
 }

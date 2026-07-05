@@ -203,7 +203,7 @@ public class HomesteadScreen extends Screen {
             case "permissions" -> HomesteadTabletGuiTextures.Icon.PERMISSIONS;
             case "production" -> HomesteadTabletGuiTextures.Icon.PRODUCTION;
             case "migration" -> HomesteadTabletGuiTextures.Icon.MIGRATION;
-            case "tablet_chest" -> HomesteadTabletGuiTextures.Icon.MANAGE;
+            case "tablet_chest" -> HomesteadTabletGuiTextures.Icon.TABLET_CHEST;
             default -> HomesteadTabletGuiTextures.Icon.MANAGE;
         };
         int iconSize = Math.max(16, Math.min(20, size - 10));

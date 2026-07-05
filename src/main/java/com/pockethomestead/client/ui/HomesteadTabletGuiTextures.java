@@ -38,6 +38,7 @@ public final class HomesteadTabletGuiTextures {
     private static final Sprite ICON_PRODUCTION = new Sprite(96, 112, 32, 32, 0);
     private static final Sprite ICON_MIGRATION = new Sprite(128, 112, 32, 32, 0);
     private static final Sprite ICON_CLOSE = new Sprite(160, 112, 32, 32, 0);
+    private static final Sprite ICON_TABLET_CHEST = new Sprite(0, 176, 32, 32, 0);
 
     private HomesteadTabletGuiTextures() {
     }
@@ -56,6 +57,7 @@ public final class HomesteadTabletGuiTextures {
         PERMISSIONS,
         PRODUCTION,
         MIGRATION,
+        TABLET_CHEST,
         CLOSE
     }
 
@@ -94,6 +96,7 @@ public final class HomesteadTabletGuiTextures {
             case PERMISSIONS -> ICON_PERMISSIONS;
             case PRODUCTION -> ICON_PRODUCTION;
             case MIGRATION -> ICON_MIGRATION;
+            case TABLET_CHEST -> ICON_TABLET_CHEST;
             case CLOSE -> ICON_CLOSE;
         };
         blit(g, x, y, size, size, sprite.u, sprite.v, sprite.w, sprite.h);
