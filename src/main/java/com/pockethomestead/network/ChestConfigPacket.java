@@ -318,8 +318,9 @@ public record ChestConfigPacket(int action, String value, ItemStack stack) imple
 
         ProductionStatsStorage productionStats = ProductionStatsStorage.get(serverLevel.getServer());
         String productionKey = be.productionChestKey();
-        boolean productionStatsEnabled = be.getOwnerUUID() != null && productionStats.isChestEnabled(be.getOwnerUUID(), productionKey);
-        String productionGroupId = be.getOwnerUUID() == null ? "" : productionStats.chestGroup(be.getOwnerUUID(), productionKey);
+        String productionScopeKey = be.productionStatsScopeKey();
+        boolean productionStatsEnabled = !productionScopeKey.isBlank() && productionStats.isChestEnabled(productionScopeKey, productionKey);
+        String productionGroupId = productionScopeKey.isBlank() ? "" : productionStats.chestGroup(productionScopeKey, productionKey);
         com.pockethomestead.space.SpaceData space = com.pockethomestead.space.SpaceManager.getInstance()
                 .getSpaceByDimension(be.getLevel().dimension().location());
         boolean spaceOfflineSimulationEnabled = space != null && space.isOfflineSimulationEnabled();

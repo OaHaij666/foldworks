@@ -2,6 +2,7 @@ package com.pockethomestead.registry;
 
 import com.pockethomestead.blockentity.BaseChestBlockEntity;
 import com.pockethomestead.blockentity.HomesteadChestAccess;
+import com.pockethomestead.moving.MovingChestRegistry;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -158,6 +159,8 @@ public class ChestRegistryManager {
             if (be != null && be.getChestId().equals(chestId)) {
                 return be;
             }
+            be = MovingChestRegistry.findChest(loc.dimensionKey, loc.pos, chestId);
+            if (be != null && ownerUUID.equals(be.getOwnerUUID())) return be;
         }
         return null;
     }
@@ -180,6 +183,8 @@ public class ChestRegistryManager {
             if (be != null && ownerUUID.equals(be.getOwnerUUID()) && chestUUID.equals(be.getChestUUID())) {
                 return be;
             }
+            be = MovingChestRegistry.findChest(loc.dimensionKey, loc.pos, registered.chestId());
+            if (be != null && ownerUUID.equals(be.getOwnerUUID()) && chestUUID.equals(be.getChestUUID())) return be;
         }
         return null;
     }

@@ -662,6 +662,34 @@ def generate_stress_upgrade() -> Image.Image:
     return make_upgrade_strip(stress_upgrade_frame)
 
 
+def suite_upgrade_frame(phase: int) -> Image.Image:
+    image = draw_upgrade_card("jade", phase)
+    glow = [0, 12, 26, 12][phase % 4]
+
+    def paint(d: ImageDraw.ImageDraw, s: int) -> None:
+        handle = [(25.8, 43.4), (42.7, 26.5), (46.7, 30.5), (29.8, 47.4)]
+        d.polygon(scaled_points([(x + 1.2, y + 1.2) for x, y in handle], s), fill=(0, 0, 0, 90))
+        d.polygon(scaled_points(handle, s), fill=CARD_INK)
+        d.polygon(scaled_points([(27.7, 42.4), (41.9, 28.2), (44.8, 31.1), (30.6, 45.3)], s), fill=adjust(color("jade"), glow - 18))
+        d.line(scaled_points([(29.4, 41.0), (40.7, 29.8)], s), fill=(222, 255, 240, 210), width=max(1, int(1.0 * s)))
+
+        jaw = [(20.8, 24.7), (27.2, 18.2), (36.9, 27.9), (32.2, 32.6), (28.0, 28.4), (24.9, 31.5)]
+        d.polygon(scaled_points([(x + 1.0, y + 1.2) for x, y in jaw], s), fill=(0, 0, 0, 88))
+        d.polygon(scaled_points(jaw, s), fill=CARD_INK)
+        d.polygon(scaled_points([(23.3, 24.9), (27.3, 20.9), (34.2, 27.8), (32.0, 30.0), (28.1, 26.1), (25.1, 29.1)], s), fill=adjust(color("jade"), glow))
+
+        d.ellipse(scaled_box((38.4, 38.1, 47.9, 47.6), s), fill=CARD_INK)
+        d.ellipse(scaled_box((40.2, 39.9, 46.1, 45.8), s), fill=adjust(color("jade_dark"), glow))
+        d.ellipse(scaled_box((42.0, 41.7, 44.3, 44.0), s), fill=CARD_PAPER)
+
+    paint_aa(image, paint)
+    return image
+
+
+def generate_suite_upgrade() -> Image.Image:
+    return make_upgrade_strip(suite_upgrade_frame)
+
+
 def generate_tablet_frame(phase: int) -> Image.Image:
     image = img((64, 64))
     d = ImageDraw.Draw(image)
@@ -828,6 +856,7 @@ def write_mcmeta() -> None:
         "network_upgrade",
         "energy_transfer_upgrade",
         "stress_upgrade",
+        "suite_upgrade",
     ):
         (ITEM / f"{name}.png.mcmeta").write_text(
             json.dumps({"animation": {"frametime": 7, "frames": [0, 1, 2, 3]}}, indent=2) + "\n",
@@ -888,6 +917,7 @@ def main() -> None:
         ITEM / "network_upgrade.png": generate_network_upgrade(),
         ITEM / "energy_transfer_upgrade.png": generate_energy_upgrade(),
         ITEM / "stress_upgrade.png": generate_stress_upgrade(),
+        ITEM / "suite_upgrade.png": generate_suite_upgrade(),
         ITEM / "homestead_tablet.png": generate_tablet(),
     }
     for path, image in outputs.items():

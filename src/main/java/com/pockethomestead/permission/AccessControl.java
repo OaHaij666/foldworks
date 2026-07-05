@@ -5,6 +5,8 @@ import com.pockethomestead.blockentity.HomesteadChestAccess;
 import com.pockethomestead.space.SpaceData;
 import com.pockethomestead.space.SpaceManager;
 import com.pockethomestead.space.SpacePermission;
+import com.pockethomestead.transfer.GraphKey;
+import com.pockethomestead.transfer.TransferTeamStorage;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -34,6 +36,14 @@ public final class AccessControl {
         return canChest(playerId, chest, SpacePermission.AccessLevel.USE);
     }
 
+    public static boolean canViewChest(ServerPlayer player, BaseChestBlockEntity chest) {
+        return player != null && canViewChest(player.getUUID(), chest);
+    }
+
+    public static boolean canViewChest(UUID playerId, BaseChestBlockEntity chest) {
+        return canChest(playerId, chest, SpacePermission.AccessLevel.VIEW);
+    }
+
     public static boolean canConfigureChest(ServerPlayer player, BaseChestBlockEntity chest) {
         return player != null && canConfigureChest(player.getUUID(), chest);
     }
@@ -49,11 +59,30 @@ public final class AccessControl {
     public static boolean canChest(UUID playerId, BaseChestBlockEntity chest, SpacePermission.AccessLevel required) {
         if (playerId == null || chest == null) return false;
         if (playerId.equals(chest.getOwnerUUID())) return true;
-        // 使用 BE 缓存的所属空间引用，避免热路径每次查 SpaceManager.dimensionIndex
-        SpaceData space = chest.getContainingSpace();
-        // 非口袋维度（主世界等）无空间限制：任何玩家都可操作箱子，遵循原版 Minecraft 行为
-        if (space == null) return true;
-        return space.can(playerId, required);
+        GraphKey.Kind kind = chest.getGraphKind();
+        return switch (kind) {
+            case PUBLIC -> true;
+            case PRIVATE -> SpaceManager.getInstance()
+                    .ownerPermission(chest.getOwnerUUID())
+                    .can(playerId, false, required);
+            case SPACE -> {
+                if (ownerPermissionAllows(chest.getOwnerUUID(), playerId, required)) yield true;
+                SpaceData space = chest.getContainingSpace();
+                yield space != null && space.can(playerId, required);
+            }
+            case PROTECTED -> {
+                if (ownerPermissionAllows(chest.getOwnerUUID(), playerId, required)) yield true;
+                UUID teamId = chest.getGraphTeamId();
+                if (teamId == null || chest.getLevel() == null || chest.getLevel().isClientSide) yield false;
+                if (!(chest.getLevel() instanceof ServerLevel serverLevel)) yield false;
+                yield TransferTeamStorage.get(serverLevel.getServer()).can(playerId, teamId, required);
+            }
+        };
+    }
+
+    private static boolean ownerPermissionAllows(UUID ownerId, UUID playerId, SpacePermission.AccessLevel required) {
+        if (ownerId == null || playerId == null || ownerId.equals(playerId)) return false;
+        return SpaceManager.getInstance().ownerPermission(ownerId).levelFor(playerId).allows(required);
     }
 
     public static BaseChestBlockEntity loadedChest(ServerPlayer player, String dimensionKey, BlockPos pos) {

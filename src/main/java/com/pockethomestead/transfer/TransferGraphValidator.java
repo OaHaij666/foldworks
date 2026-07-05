@@ -2,6 +2,7 @@ package com.pockethomestead.transfer;
 
 import com.pockethomestead.blockentity.BaseChestBlockEntity;
 import com.pockethomestead.blockentity.HomesteadChestAccess;
+import com.pockethomestead.moving.MovingChestRegistry;
 import com.pockethomestead.offline.OfflineChestSnapshotStorage;
 import com.pockethomestead.space.SpaceData;
 import com.pockethomestead.space.SpaceManager;
@@ -80,6 +81,9 @@ public final class TransferGraphValidator {
                     if (in.isEmpty()) issues.add(new Issue(Severity.ERROR, node.getId(), "", "中转点不能只有输出，没有输入"));
                     if (out.isEmpty()) issues.add(new Issue(Severity.ERROR, node.getId(), "", "中转点不能只收不出"));
                 }
+                case LIMIT_GATE -> validateLimitGate(node, nodes, in, out, outgoing, issues);
+                case JUMP_INPUT -> validateJumpInput(node, nodes, in, out, issues);
+                case JUMP_OUTPUT -> validateJumpOutput(node, nodes, in, out, issues);
                 case TRASH -> {
                     if (!out.isEmpty()) issues.add(new Issue(Severity.ERROR, node.getId(), "", "销毁节点不能有输出"));
                     if (in.isEmpty()) issues.add(new Issue(Severity.WARN, node.getId(), "", "销毁节点没有输入"));
@@ -91,6 +95,8 @@ public final class TransferGraphValidator {
                 }
             }
         }
+
+        validateJumpBindings(nodes, incoming, outgoing, issues);
 
         detectCycles(nodes, outgoing, issues);
         validateRerouteItemScopes(nodes, incoming, outgoing, issues);
@@ -146,6 +152,7 @@ public final class TransferGraphValidator {
                 continue;
             }
             BaseChestBlockEntity be = HomesteadChestAccess.resolve(level.getBlockEntity(node.getPos()));
+            if (be == null) be = MovingChestRegistry.findChest(node.getDimensionKey(), node.getPos(), node.getChestId());
             if (be == null) {
                 validateSnapshotRuntime(node, server, key, createLoaded,
                         stressOutgoing.getOrDefault(node.getId(), false),
@@ -272,13 +279,21 @@ public final class TransferGraphValidator {
     private static boolean validDirection(TransferNode from, TransferNode to) {
         if (from.getNodeType() == TransferNode.NodeType.TRASH) return false;
         if (from.getNodeType() == TransferNode.NodeType.PLAYER_INVENTORY) return false;
-        return from.getNodeType() == TransferNode.NodeType.CHEST || from.getNodeType() == TransferNode.NodeType.REROUTE;
+        if (from.getNodeType() == TransferNode.NodeType.JUMP_INPUT) return false;
+        return from.getNodeType() == TransferNode.NodeType.CHEST
+                || from.getNodeType() == TransferNode.NodeType.REROUTE
+                || from.getNodeType() == TransferNode.NodeType.LIMIT_GATE
+                || from.getNodeType() == TransferNode.NodeType.JUMP_OUTPUT;
     }
 
     private static boolean validPort(TransferNode from, String port) {
         if (from.getNodeType() == TransferNode.NodeType.TRASH) return false;
         if (from.getNodeType() == TransferNode.NodeType.PLAYER_INVENTORY) return false;
-        if (from.getNodeType() == TransferNode.NodeType.REROUTE) return isAll(port) || validItemPort(port) || validFluidPort(port) || validEnergyPort(port) || validStressPort(port);
+        if (from.getNodeType() == TransferNode.NodeType.JUMP_INPUT) return false;
+        if (from.getNodeType() == TransferNode.NodeType.LIMIT_GATE) return validExactResourcePort(port);
+        if (from.getNodeType() == TransferNode.NodeType.REROUTE || from.getNodeType() == TransferNode.NodeType.JUMP_OUTPUT) {
+            return isAll(port) || validItemPort(port) || validFluidPort(port) || validEnergyPort(port) || validStressPort(port);
+        }
         if (isAll(port) || TransferEdge.FLUID_ALL.equals(port) || TransferEdge.ENERGY_FE.equals(port) || TransferEdge.STRESS_SU.equals(port)) return true;
         if (validFluidPort(port)) return true;
         if (!validItemPort(port)) return false;
@@ -292,12 +307,138 @@ public final class TransferGraphValidator {
         if (to.getNodeType() == TransferNode.NodeType.PLAYER_INVENTORY) {
             return TransferEdge.ITEM_IN.equals(port);
         }
-        return (to.getNodeType() == TransferNode.NodeType.CHEST || to.getNodeType() == TransferNode.NodeType.REROUTE)
+        if (to.getNodeType() == TransferNode.NodeType.JUMP_OUTPUT) return false;
+        return (to.getNodeType() == TransferNode.NodeType.CHEST
+                || to.getNodeType() == TransferNode.NodeType.REROUTE
+                || to.getNodeType() == TransferNode.NodeType.LIMIT_GATE
+                || to.getNodeType() == TransferNode.NodeType.JUMP_INPUT)
                 && (TransferEdge.PORT_IN.equals(port)
                 || TransferEdge.ITEM_IN.equals(port)
                 || TransferEdge.FLUID_IN.equals(port)
                 || TransferEdge.ENERGY_IN.equals(port)
                 || TransferEdge.STRESS_IN.equals(port));
+    }
+
+    private static void validateLimitGate(TransferNode node, Map<String, TransferNode> nodes, List<TransferEdge> in,
+                                          List<TransferEdge> out, Map<String, List<TransferEdge>> outgoing,
+                                          List<Issue> issues) {
+        if (in.size() != 1) issues.add(new Issue(Severity.ERROR, node.getId(), "", "限量门必须且只能有一条输入"));
+        if (out.size() != 1) issues.add(new Issue(Severity.ERROR, node.getId(), "", "限量门必须且只能有一条输出"));
+        if (!node.isGateRangeValid()) issues.add(new Issue(Severity.ERROR, node.getId(), "", "限量门区间下界不能大于上界"));
+        if (node.getGateMin() == TransferNode.GATE_UNBOUNDED && node.getGateMax() == TransferNode.GATE_UNBOUNDED) {
+            issues.add(new Issue(Severity.ERROR, node.getId(), "", "限量门不能把 [-∞,+∞] 作为放行区间"));
+        }
+        if (in.size() == 1) {
+            TransferEdge edge = in.get(0);
+            if (!validExactResourcePort(edge.getFromPortKey())) {
+                issues.add(new Issue(Severity.ERROR, node.getId(), edge.getId(), "限量门输入必须是单一物品、流体、电力或应力"));
+            }
+        }
+        if (in.size() == 1 && out.size() == 1 && !in.get(0).getFromPortKey().equals(out.get(0).getFromPortKey())) {
+            issues.add(new Issue(Severity.ERROR, node.getId(), out.get(0).getId(), "限量门输出必须沿用输入资源"));
+        }
+        if (!node.isGateCheckSource() && in.size() == 1 && out.size() == 1 && validExactResourcePort(in.get(0).getFromPortKey())
+                && resolveGateDestination(nodes, outgoing, node, in.get(0).getFromPortKey(), new HashSet<>()) == null) {
+            issues.add(new Issue(Severity.ERROR, node.getId(), out.get(0).getId(), "限量门后方必须是唯一的目标箱子或背包"));
+        }
+    }
+
+    private static void validateJumpInput(TransferNode node, Map<String, TransferNode> nodes, List<TransferEdge> in,
+                                          List<TransferEdge> out, List<Issue> issues) {
+        if (in.size() != 1) issues.add(new Issue(Severity.ERROR, node.getId(), "", "跳线入口必须且只能有一条输入"));
+        if (!out.isEmpty()) issues.add(new Issue(Severity.ERROR, node.getId(), "", "跳线入口不能有普通输出"));
+        TransferNode linked = nodes.get(node.getLinkedNodeId());
+        if (linked == null || linked.getNodeType() != TransferNode.NodeType.JUMP_OUTPUT) {
+            issues.add(new Issue(Severity.ERROR, node.getId(), "", "跳线入口还没有绑定出口"));
+        } else if (!linked.getPageId().equals(node.getPageId())) {
+            issues.add(new Issue(Severity.ERROR, node.getId(), "", "跳线入口和出口必须在同一分页"));
+        }
+    }
+
+    private static void validateJumpOutput(TransferNode node, Map<String, TransferNode> nodes, List<TransferEdge> in,
+                                           List<TransferEdge> out, List<Issue> issues) {
+        if (!in.isEmpty()) issues.add(new Issue(Severity.ERROR, node.getId(), "", "跳线出口不能接收普通输入"));
+        if (out.size() != 1) issues.add(new Issue(Severity.ERROR, node.getId(), "", "跳线出口必须且只能有一条输出"));
+        TransferNode linked = nodes.get(node.getLinkedNodeId());
+        if (linked == null || linked.getNodeType() != TransferNode.NodeType.JUMP_INPUT) {
+            issues.add(new Issue(Severity.ERROR, node.getId(), "", "跳线出口缺少对应入口"));
+        } else if (!linked.getPageId().equals(node.getPageId())) {
+            issues.add(new Issue(Severity.ERROR, node.getId(), "", "跳线入口和出口必须在同一分页"));
+        }
+    }
+
+    private static void validateJumpBindings(Map<String, TransferNode> nodes,
+                                             Map<String, List<TransferEdge>> incoming,
+                                             Map<String, List<TransferEdge>> outgoing,
+                                             List<Issue> issues) {
+        Map<String, String> outputByInput = new HashMap<>();
+        for (TransferNode node : nodes.values()) {
+            if (node.getNodeType() != TransferNode.NodeType.JUMP_OUTPUT) continue;
+            String inputId = node.getLinkedNodeId();
+            if (inputId == null || inputId.isBlank()) continue;
+            String previous = outputByInput.putIfAbsent(inputId, node.getId());
+            if (previous != null) {
+                issues.add(new Issue(Severity.ERROR, node.getId(), "", "一个跳线入口只能绑定一个出口"));
+            }
+            TransferNode input = nodes.get(inputId);
+            if (input == null) continue;
+            List<TransferEdge> in = incoming.getOrDefault(input.getId(), List.of());
+            List<TransferEdge> out = outgoing.getOrDefault(node.getId(), List.of());
+            if (in.size() == 1 && out.size() == 1 && !in.get(0).getFromPortKey().equals(out.get(0).getFromPortKey())) {
+                issues.add(new Issue(Severity.ERROR, node.getId(), out.get(0).getId(), "跳线出口输出必须沿用入口资源"));
+            }
+        }
+    }
+
+    private static TransferNode resolveGateDestination(Map<String, TransferNode> nodes, Map<String, List<TransferEdge>> outgoing,
+                                                       TransferNode start, String scopePort, Set<String> visited) {
+        TransferNode cursor = start;
+        String currentScope = scopePort;
+        for (int i = 0; i < 32 && cursor != null && visited.add(cursor.getId()); i++) {
+            TransferEdge edge = singleOutgoingForScope(outgoing, cursor.getId(), currentScope);
+            if (edge == null) return null;
+            currentScope = intersectPorts(currentScope, edge.getFromPortKey());
+            if (currentScope == null) return null;
+            TransferNode target = nodes.get(edge.getToNodeId());
+            if (target == null) return null;
+            if (target.getNodeType() == TransferNode.NodeType.CHEST || target.getNodeType() == TransferNode.NodeType.PLAYER_INVENTORY) return target;
+            if (target.getNodeType() == TransferNode.NodeType.JUMP_INPUT) {
+                target = nodes.get(target.getLinkedNodeId());
+                if (target == null || target.getNodeType() != TransferNode.NodeType.JUMP_OUTPUT) return null;
+            }
+            if (target.getNodeType() == TransferNode.NodeType.REROUTE
+                    || target.getNodeType() == TransferNode.NodeType.LIMIT_GATE
+                    || target.getNodeType() == TransferNode.NodeType.JUMP_OUTPUT) {
+                cursor = target;
+            } else {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static TransferEdge singleOutgoingForScope(Map<String, List<TransferEdge>> outgoing, String nodeId, String scopePort) {
+        TransferEdge result = null;
+        for (TransferEdge edge : outgoing.getOrDefault(nodeId, List.of())) {
+            if (intersectPorts(scopePort, edge.getFromPortKey()) == null) continue;
+            if (result != null) return null;
+            result = edge;
+        }
+        return result;
+    }
+
+    private static String intersectPorts(String current, String next) {
+        if (current == null || current.isBlank()) current = TransferEdge.ITEM_ALL;
+        if (next == null || next.isBlank()) next = TransferEdge.ITEM_ALL;
+        if (TransferEdge.ITEM_ALL.equals(current)) return next.startsWith(TransferEdge.FLUID_PREFIX)
+                || next.startsWith(TransferEdge.ENERGY_PREFIX)
+                || next.startsWith(TransferEdge.STRESS_PREFIX) ? null : next;
+        if (TransferEdge.ITEM_ALL.equals(next)) return current.startsWith(TransferEdge.FLUID_PREFIX)
+                || current.startsWith(TransferEdge.ENERGY_PREFIX)
+                || current.startsWith(TransferEdge.STRESS_PREFIX) ? null : current;
+        if (TransferEdge.FLUID_ALL.equals(current) && next.startsWith(TransferEdge.FLUID_PREFIX)) return next;
+        if (TransferEdge.FLUID_ALL.equals(next) && current.startsWith(TransferEdge.FLUID_PREFIX)) return current;
+        return current.equals(next) ? current : null;
     }
 
     private static boolean isAll(String port) {
@@ -315,6 +456,12 @@ public final class TransferGraphValidator {
         if (port == null || !port.startsWith(TransferEdge.FLUID_PREFIX)) return false;
         ResourceLocation id = ResourceLocation.tryParse(port.substring(TransferEdge.FLUID_PREFIX.length()));
         return id != null && BuiltInRegistries.FLUID.get(id) != Fluids.EMPTY;
+    }
+
+    private static boolean validExactResourcePort(String port) {
+        if (port == null) return false;
+        if (TransferEdge.PORT_ALL.equals(port) || TransferEdge.FLUID_ALL.equals(port)) return false;
+        return validItemPort(port) || validFluidPort(port) || validEnergyPort(port) || validStressPort(port);
     }
 
     private static boolean validEnergyPort(String port) {
@@ -365,7 +512,18 @@ public final class TransferGraphValidator {
         do {
             changed = false;
             for (TransferNode node : nodes.values()) {
-                if (node.getNodeType() != TransferNode.NodeType.REROUTE) continue;
+                if (node.getNodeType() != TransferNode.NodeType.JUMP_INPUT) continue;
+                TransferNode linked = nodes.get(node.getLinkedNodeId());
+                if (linked == null || linked.getNodeType() != TransferNode.NodeType.JUMP_OUTPUT) continue;
+                Set<String> scope = inputScopes.getOrDefault(node.getId(), Set.of());
+                if (scope.isEmpty()) continue;
+                Set<String> target = inputScopes.computeIfAbsent(linked.getId(), id -> new LinkedHashSet<>());
+                int before = target.size();
+                target.addAll(scope);
+                changed |= target.size() != before;
+            }
+            for (TransferNode node : nodes.values()) {
+                if (!propagatesOutgoingScope(node)) continue;
                 Set<String> scope = inputScopes.getOrDefault(node.getId(), Set.of());
                 for (TransferEdge out : outgoing.getOrDefault(node.getId(), List.of())) {
                     Set<String> target = inputScopes.computeIfAbsent(out.getToNodeId(), id -> new LinkedHashSet<>());
@@ -398,6 +556,12 @@ public final class TransferGraphValidator {
                 }
             }
         }
+    }
+
+    private static boolean propagatesOutgoingScope(TransferNode node) {
+        return node.getNodeType() == TransferNode.NodeType.REROUTE
+                || node.getNodeType() == TransferNode.NodeType.LIMIT_GATE
+                || node.getNodeType() == TransferNode.NodeType.JUMP_OUTPUT;
     }
 
     private static void addScope(Set<String> scope, String port) {

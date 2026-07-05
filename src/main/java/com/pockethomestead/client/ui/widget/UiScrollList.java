@@ -52,7 +52,7 @@ public class UiScrollList<T> {
 
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         scroll = Math.max(0, Math.min(scroll, maxScroll()));
-        g.enableScissor(x, y, x + w, y + h);
+        Theme.enableScissor(g, x, y, x + w, y + h);
         if (items != null) {
             for (int i = 0; i < items.size(); i++) {
                 int rowY = y + i * (rowH + gap) - (int) scroll;

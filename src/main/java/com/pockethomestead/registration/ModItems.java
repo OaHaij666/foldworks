@@ -27,6 +27,9 @@ public class ModItems {
     public static final DeferredItem<Item> STRESS_UPGRADE = ITEMS.register("stress_upgrade",
             () -> new Item(new Item.Properties()));
 
+    public static final DeferredItem<Item> SUITE_UPGRADE = ITEMS.register("suite_upgrade",
+            () -> new Item(new Item.Properties()));
+
     public static final DeferredItem<net.minecraft.world.item.BlockItem> HOMESTEAD_CHEST_ITEM =
             ITEMS.registerSimpleBlockItem(ModBlocks.HOMESTEAD_CHEST);
 }

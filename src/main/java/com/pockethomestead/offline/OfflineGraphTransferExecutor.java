@@ -5,6 +5,7 @@ import com.pockethomestead.blockentity.HomesteadChestAccess;
 import com.pockethomestead.blockentity.HomesteadStressEndpoint;
 import com.pockethomestead.blockentity.StoredItemStack;
 import com.pockethomestead.config.ModConfig;
+import com.pockethomestead.moving.MovingChestRegistry;
 import com.pockethomestead.transfer.GraphKey;
 import com.pockethomestead.transfer.TransferEdge;
 import com.pockethomestead.transfer.TransferGraph;
@@ -172,6 +173,26 @@ public final class OfflineGraphTransferExecutor {
         // recordTransferResult 在 finally 前调用，此时 path 已包含完整路径。
         path.add(edge);
         try {
+            if (targetNode.getNodeType() == TransferNode.NodeType.LIMIT_GATE) {
+                int gateBudget = limitGateBudget(ctx, pageId, targetNode, scopePort, routeBudget);
+                if (gateBudget <= 0) {
+                    recordTransferResult(ctx, path, new TransferResult(Map.of(), TransferBlockReason.RECEIVER,
+                            firstMatchingResourceId(ctx.source(), scopePort, ctx.gameTime())));
+                    return 0;
+                }
+                return followOutgoingEdges(ctx, pageId, targetNode.getId(), scopePort, path, visitedNodes, canVoid, gateBudget, bandwidth);
+            }
+
+            if (targetNode.getNodeType() == TransferNode.NodeType.JUMP_INPUT) {
+                TransferNode output = linkedJumpOutput(ctx.graph(), targetNode);
+                if (output == null || !output.isEnabled() || !visitedNodes.add(output.getId())) return 0;
+                try {
+                    return followOutgoingEdges(ctx, pageId, output.getId(), scopePort, path, visitedNodes, canVoid, routeBudget, bandwidth);
+                } finally {
+                    visitedNodes.remove(output.getId());
+                }
+            }
+
             if (targetNode.getNodeType() == TransferNode.NodeType.REROUTE) {
                 return followOutgoingEdges(ctx, pageId, targetNode.getId(), scopePort, path, visitedNodes, canVoid, routeBudget, bandwidth);
             }
@@ -797,14 +818,143 @@ public final class OfflineGraphTransferExecutor {
         if (level == null) return null;
         BaseChestBlockEntity be = HomesteadChestAccess.resolve(level.getBlockEntity(node.getPos()));
         if (be != null && be.getChestId().equals(node.getChestId()) && be.hasNetworkUpgrade()) return be;
-        return null;
+        return MovingChestRegistry.findChest(node.getDimensionKey(), node.getPos(), node.getChestId());
     }
 
     private static OfflineChestSnapshotStorage.Snapshot snapshotTarget(Context ctx, TransferNode node) {
         OfflineChestSnapshotStorage.Snapshot snapshot = ctx.storage().findSnapshot(node.getDimensionKey(), node.getPos(), node.getChestId());
-        if (snapshot == null || snapshot.loaded() || !snapshot.hasNetworkUpgrade()) return null;
+        if (snapshot == null || snapshot.loaded() || snapshot.moving() || !snapshot.hasNetworkUpgrade()) return null;
         if (!snapshot.matchesGraph(ctx.graph().getKey()) || !snapshot.shouldSimulate(ctx.server())) return null;
         return snapshot;
+    }
+
+    private static int limitGateBudget(Context ctx, String pageId, TransferNode gate, String scopePort, int routeBudget) {
+        if (gate == null || gate.getNodeType() != TransferNode.NodeType.LIMIT_GATE || routeBudget <= 0) return 0;
+        String resourceId = exactGateResource(scopePort);
+        if (resourceId == null) return 0;
+        if (gate.isGateCheckSource()) {
+            int amount = snapshotResourceAmount(ctx.source(), resourceId, ctx.gameTime());
+            return gate.sourceGateBudgetWithinPassRange(amount, routeBudget);
+        }
+        TransferNode destination = resolveGateDestination(ctx.graph(), pageId, gate, scopePort, new HashSet<>());
+        if (destination == null) return 0;
+        int amount = destinationResourceAmount(ctx, destination, resourceId);
+        return gate.gateBudgetWithinPassRange(amount, routeBudget);
+    }
+
+    private static TransferNode resolveGateDestination(TransferGraph graph, String pageId, TransferNode start,
+                                                       String scopePort, Set<String> visited) {
+        TransferNode cursor = start;
+        String currentScope = scopePort;
+        for (int i = 0; i < 32 && cursor != null && visited.add(cursor.getId()); i++) {
+            if (!cursor.isEnabled() || !cursor.getPageId().equals(pageId)) return null;
+            TransferEdge edge = singleOutgoingForScope(graph, cursor.getId(), currentScope);
+            if (edge == null || !edge.getPageId().equals(pageId)) return null;
+            currentScope = intersectPorts(currentScope, edge.getFromPortKey());
+            if (currentScope == null) return null;
+            TransferNode target = graph.getNode(edge.getToNodeId());
+            if (target == null || !target.isEnabled()) return null;
+            if (target.getNodeType() == TransferNode.NodeType.CHEST
+                    || target.getNodeType() == TransferNode.NodeType.PLAYER_INVENTORY) {
+                return target;
+            }
+            if (target.getNodeType() == TransferNode.NodeType.JUMP_INPUT) {
+                cursor = linkedJumpOutput(graph, target);
+            } else if (target.getNodeType() == TransferNode.NodeType.REROUTE
+                    || target.getNodeType() == TransferNode.NodeType.LIMIT_GATE
+                    || target.getNodeType() == TransferNode.NodeType.JUMP_OUTPUT) {
+                cursor = target;
+            } else {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static TransferEdge singleOutgoingForScope(TransferGraph graph, String nodeId, String scopePort) {
+        TransferEdge result = null;
+        for (TransferEdge edge : graph.outgoing(nodeId)) {
+            if (!edge.isEnabled() || intersectPorts(scopePort, edge.getFromPortKey()) == null) continue;
+            if (result != null) return null;
+            result = edge;
+        }
+        return result;
+    }
+
+    private static TransferNode linkedJumpOutput(TransferGraph graph, TransferNode input) {
+        if (input == null || input.getNodeType() != TransferNode.NodeType.JUMP_INPUT) return null;
+        TransferNode direct = graph.getNode(input.getLinkedNodeId());
+        if (direct != null && direct.getNodeType() == TransferNode.NodeType.JUMP_OUTPUT
+                && input.getId().equals(direct.getLinkedNodeId())) return direct;
+        for (TransferNode node : graph.getNodes()) {
+            if (node.getNodeType() == TransferNode.NodeType.JUMP_OUTPUT && input.getId().equals(node.getLinkedNodeId())) return node;
+        }
+        return null;
+    }
+
+    private static int destinationResourceAmount(Context ctx, TransferNode destination, String resourceId) {
+        if (destination.getNodeType() == TransferNode.NodeType.PLAYER_INVENTORY) return playerResourceAmount(ctx, destination, resourceId);
+        if (destination.getNodeType() != TransferNode.NodeType.CHEST) return -1;
+        BaseChestBlockEntity loaded = loadedChest(ctx.server(), destination);
+        if (loaded != null && !loaded.isRemoved() && TransferGraphAccess.chestMatchesGraph(loaded, ctx.graph().getKey())) {
+            return loadedResourceAmount(loaded, resourceId);
+        }
+        OfflineChestSnapshotStorage.Snapshot snapshot = snapshotTarget(ctx, destination);
+        return snapshot == null ? -1 : snapshotResourceAmount(snapshot, resourceId, ctx.gameTime());
+    }
+
+    private static int loadedResourceAmount(BaseChestBlockEntity chest, String resourceId) {
+        if (resourceId.startsWith(TransferEdge.ITEM_PREFIX)) {
+            String itemId = resourceId.substring(TransferEdge.ITEM_PREFIX.length());
+            int total = 0;
+            for (StoredItemStack stored : chest.getStoredItems()) {
+                ResourceLocation id = BuiltInRegistries.ITEM.getKey(stored.item());
+                if (id != null && id.toString().equals(itemId)) total += stored.count();
+            }
+            return total;
+        }
+        if (resourceId.startsWith(TransferEdge.FLUID_PREFIX)) {
+            Fluid fluid = resolveFluid(resourceId.substring(TransferEdge.FLUID_PREFIX.length()));
+            return fluid == Fluids.EMPTY ? -1 : chest.getAllFluids().getOrDefault(fluid, 0);
+        }
+        if (TransferEdge.ENERGY_FE.equals(resourceId)) return chest.getEnergyStored();
+        if (TransferEdge.STRESS_SU.equals(resourceId)) {
+            HomesteadStressEndpoint endpoint = stressEndpoint(chest);
+            return endpoint == null ? 0 : Math.max(0, Math.round(endpoint.graphStressCapacity()));
+        }
+        return -1;
+    }
+
+    private static int snapshotResourceAmount(OfflineChestSnapshotStorage.Snapshot snapshot, String resourceId, long gameTime) {
+        if (resourceId.startsWith(TransferEdge.ITEM_PREFIX)) {
+            String itemId = resourceId.substring(TransferEdge.ITEM_PREFIX.length());
+            int total = 0;
+            for (StoredItemStack stored : snapshot.items()) {
+                ResourceLocation id = BuiltInRegistries.ITEM.getKey(stored.item());
+                if (id != null && id.toString().equals(itemId)) total += stored.count();
+            }
+            return total;
+        }
+        if (resourceId.startsWith(TransferEdge.FLUID_PREFIX)) {
+            return snapshot.fluids().getOrDefault(resourceId.substring(TransferEdge.FLUID_PREFIX.length()), 0);
+        }
+        if (TransferEdge.ENERGY_FE.equals(resourceId)) return snapshot.energyStored();
+        if (TransferEdge.STRESS_SU.equals(resourceId)) return Math.max(0, Math.round(snapshot.graphStressCapacity(gameTime)));
+        return -1;
+    }
+
+    private static int playerResourceAmount(Context ctx, TransferNode destination, String resourceId) {
+        if (destination.getTargetPlayerId() == null || !resourceId.startsWith(TransferEdge.ITEM_PREFIX)) return -1;
+        ServerPlayer player = ctx.server().getPlayerList().getPlayer(destination.getTargetPlayerId());
+        Item item = resolveItem(resourceId.substring(TransferEdge.ITEM_PREFIX.length()));
+        return player == null || item == Items.AIR ? -1 : countPlayerMainInventory(player, item);
+    }
+
+    private static String exactGateResource(String scopePort) {
+        if (scopePort == null || scopePort.isBlank() || TransferEdge.PORT_ALL.equals(scopePort) || TransferEdge.FLUID_ALL.equals(scopePort)) return null;
+        if (scopePort.startsWith(TransferEdge.ITEM_PREFIX) || scopePort.startsWith(TransferEdge.FLUID_PREFIX)
+                || TransferEdge.ENERGY_FE.equals(scopePort) || TransferEdge.STRESS_SU.equals(scopePort)) return scopePort;
+        return null;
     }
 
     private static HomesteadStressEndpoint stressEndpoint(BaseChestBlockEntity chest) {
@@ -855,6 +1005,13 @@ public final class OfflineGraphTransferExecutor {
         if (id == null) return Fluids.EMPTY;
         Fluid fluid = BuiltInRegistries.FLUID.get(id);
         return fluid == null ? Fluids.EMPTY : fluid;
+    }
+
+    private static Item resolveItem(String idValue) {
+        ResourceLocation id = ResourceLocation.tryParse(idValue);
+        if (id == null) return Items.AIR;
+        Item item = BuiltInRegistries.ITEM.get(id);
+        return item == null ? Items.AIR : item;
     }
 
     private static List<Map.Entry<String, Integer>> fluidEntries(OfflineChestSnapshotStorage.Snapshot source) {

@@ -5,8 +5,9 @@
   "item.pockethomestead.storage_upgrade": "存储升级",
   "item.pockethomestead.fluid_upgrade": "流体升级",
   "item.pockethomestead.network_upgrade": "网络升级",
-  "item.pockethomestead.energy_transfer_upgrade": "电力传输升级",
+  "item.pockethomestead.energy_transfer_upgrade": "电力升级",
   "item.pockethomestead.stress_upgrade": "应力升级",
+  "item.pockethomestead.suite_upgrade": "套件升级",
   "item.pockethomestead.homestead_chest": "传输箱",
 
   "block.pockethomestead.homestead_chest": "传输箱",
@@ -112,6 +113,11 @@
   "pockethomestead.chest.side_config": "面配置",
 
   "pockethomestead.team.delete.not_empty": "团队下的传输图不为空，请先清空节点与连线后再删除",
+  "pockethomestead.team.invite.received": "%s 邀请你加入团队「%s」",
+  "pockethomestead.team.invite.accepted": "已加入团队「%s」",
+  "pockethomestead.team.invite.declined": "已拒绝团队「%s」的邀请",
+  "pockethomestead.team.invite.accepted_notice": "%s 已接受团队「%s」的邀请",
+  "pockethomestead.team.invite.declined_notice": "%s 已拒绝团队「%s」的邀请",
 
   "pockethomestead.space.create.limit_exceeded": "已达空间数量上限 (%s)",
   "pockethomestead.space.create.insufficient_exp": "经验不足，需要 %s 点经验"

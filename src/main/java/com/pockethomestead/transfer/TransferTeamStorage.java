@@ -36,7 +36,7 @@ public class TransferTeamStorage extends SavedData {
     public List<TransferTeam> teamsVisibleTo(UUID playerId) {
         List<TransferTeam> result = new ArrayList<>();
         for (TransferTeam team : teams.values()) {
-            if (team.can(playerId, SpacePermission.AccessLevel.VIEW)) result.add(team);
+            if (team.can(playerId, SpacePermission.AccessLevel.VIEW) || team.hasInvite(playerId)) result.add(team);
         }
         result.sort(Comparator.comparing(TransferTeam::name, String.CASE_INSENSITIVE_ORDER));
         return result;

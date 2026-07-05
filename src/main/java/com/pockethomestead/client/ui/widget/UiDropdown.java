@@ -111,7 +111,7 @@ public class UiDropdown {
         HomesteadTabletGuiTextures.shadow(g, x, top, w, popH);
         HomesteadTabletGuiTextures.panel(g, x, top, w, popH);
 
-        g.enableScissor(x + 1, top + 1, x + w - 1, top + popH - 1);
+        Theme.enableScissor(g, x + 1, top + 1, x + w - 1, top + popH - 1);
         int first = (int) (scroll / ROW_H);
         int offset = (int) (scroll % ROW_H);
         for (int vis = 0; vis <= rows; vis++) {

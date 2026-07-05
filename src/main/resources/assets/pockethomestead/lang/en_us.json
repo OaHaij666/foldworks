@@ -5,8 +5,9 @@
   "item.pockethomestead.storage_upgrade": "Storage Upgrade",
   "item.pockethomestead.fluid_upgrade": "Fluid Upgrade",
   "item.pockethomestead.network_upgrade": "Network Upgrade",
-  "item.pockethomestead.energy_transfer_upgrade": "Energy Transfer Upgrade",
+  "item.pockethomestead.energy_transfer_upgrade": "Energy Upgrade",
   "item.pockethomestead.stress_upgrade": "Stress Upgrade",
+  "item.pockethomestead.suite_upgrade": "Suite Upgrade",
   "item.pockethomestead.homestead_chest": "Homestead Chest",
 
   "block.pockethomestead.homestead_chest": "Homestead Chest",
@@ -112,6 +113,11 @@
   "pockethomestead.chest.side_config": "Side Config",
 
   "pockethomestead.team.delete.not_empty": "Transfer graph under this team is not empty. Remove all nodes and edges before deleting.",
+  "pockethomestead.team.invite.received": "%s invited you to join team \"%s\"",
+  "pockethomestead.team.invite.accepted": "Joined team \"%s\"",
+  "pockethomestead.team.invite.declined": "Declined the invite to team \"%s\"",
+  "pockethomestead.team.invite.accepted_notice": "%s accepted the invite to team \"%s\"",
+  "pockethomestead.team.invite.declined_notice": "%s declined the invite to team \"%s\"",
 
   "pockethomestead.space.create.limit_exceeded": "Space count limit reached (%s)",
   "pockethomestead.space.create.insufficient_exp": "Insufficient experience, requires %s XP"

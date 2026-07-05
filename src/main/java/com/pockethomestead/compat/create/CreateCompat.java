@@ -8,11 +8,14 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.BlockState;
+import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModList;
 
 public final class CreateCompat {
     private static final String CREATE_CHEST_BLOCK = "com.pockethomestead.compat.create.CreateHomesteadChestBlock";
     private static final String CREATE_CHEST_BE = "com.pockethomestead.compat.create.CreateHomesteadChestBlockEntity";
+    private static final String CREATE_MOVEMENT_COMPAT = "com.pockethomestead.compat.create.CreateMovementCompat";
+    private static final String CREATE_MOVEMENT_REGISTRIES = "com.pockethomestead.compat.create.CreateMovementRegistries";
 
     private CreateCompat() {
     }
@@ -43,5 +46,23 @@ public final class CreateCompat {
             }
         }
         return new HomesteadChestBlockEntity(pos, state);
+    }
+
+    public static void registerEarlyMovementCompatibility(IEventBus modEventBus) {
+        if (!isCreateLoaded()) return;
+        try {
+            Class.forName(CREATE_MOVEMENT_REGISTRIES).getMethod("register", IEventBus.class).invoke(null, modEventBus);
+        } catch (ReflectiveOperationException | LinkageError ex) {
+            PocketHomestead.LOGGER.warn("Create early movement compatibility failed; moving homestead chest storage may not mount", ex);
+        }
+    }
+
+    public static void registerMovementCompatibility() {
+        if (!isCreateLoaded()) return;
+        try {
+            Class.forName(CREATE_MOVEMENT_COMPAT).getMethod("register").invoke(null);
+        } catch (ReflectiveOperationException | LinkageError ex) {
+            PocketHomestead.LOGGER.warn("Create movement compatibility failed; homestead chests may stay immovable on contraptions", ex);
+        }
     }
 }

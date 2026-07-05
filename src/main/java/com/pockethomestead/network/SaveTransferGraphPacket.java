@@ -147,7 +147,8 @@ public record SaveTransferGraphPacket(
             }
         }
         TransferNode transferNode = new TransferNode(node.id(), node.pageId(), type, node.chestId(), node.dimensionKey(), BlockPos.of(node.pos()),
-                node.x(), node.y(), node.expanded(), node.enabled(), node.filterItemIds(), node.receiveFilterIds(), targetPlayerId, rules);
+                node.x(), node.y(), node.expanded(), node.enabled(), node.filterItemIds(), node.receiveFilterIds(), targetPlayerId, rules,
+                node.label(), node.linkedNodeId(), node.gateMin(), node.gateMax(), node.gateCheckSource());
         if (previous != null) transferNode.copyFlowStatsFrom(previous);
         return transferNode;
     }

@@ -1,0 +1,6 @@
+{
+  "parent": "pockethomestead:item/upgrade_card",
+  "textures": {
+    "layer0": "pockethomestead:item/suite_upgrade"
+  }
+}

@@ -135,11 +135,11 @@ public final class HomesteadTabletGuiTextures {
 
     private static void blit(GuiGraphics g, int x, int y, int w, int h, int u, int v, int uw, int vh) {
         if (w <= 0 || h <= 0 || uw <= 0 || vh <= 0) return;
-        g.blit(TEXTURE, x, y, w, h, (float) u, (float) v, uw, vh, TEX_W, TEX_H);
+        tintedBlit(g, x, y, w, h, u, v, uw, vh, Theme.uiColor(0xFFFFFFFF));
     }
 
     private static void fill(GuiGraphics g, int x, int y, int w, int h, int color) {
-        tintedBlit(g, x, y, w, h, WHITE_PIXEL.u, WHITE_PIXEL.v, WHITE_PIXEL.w, WHITE_PIXEL.h, color);
+        tintedBlit(g, x, y, w, h, WHITE_PIXEL.u, WHITE_PIXEL.v, WHITE_PIXEL.w, WHITE_PIXEL.h, Theme.uiColor(color));
     }
 
     private static void tintedBlit(GuiGraphics g, int x, int y, int w, int h, int u, int v, int uw, int vh, int color) {

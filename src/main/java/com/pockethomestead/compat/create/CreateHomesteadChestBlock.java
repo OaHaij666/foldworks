@@ -75,7 +75,7 @@ public class CreateHomesteadChestBlock extends KineticBlock implements EntityBlo
         if (!level.isClientSide) {
             BlockEntity be = level.getBlockEntity(pos);
             BaseChestBlockEntity chest = HomesteadChestAccess.resolve(be);
-            if (chest != null && player instanceof ServerPlayer serverPlayer && !AccessControl.canUseChest(serverPlayer, chest)) {
+            if (chest != null && player instanceof ServerPlayer serverPlayer && !AccessControl.canViewChest(serverPlayer, chest)) {
                 AccessControl.deny(serverPlayer);
                 return InteractionResult.SUCCESS;
             }
@@ -118,6 +118,7 @@ public class CreateHomesteadChestBlock extends KineticBlock implements EntityBlo
         if (chest != null) {
             ItemStack packed = new ItemStack(asItem());
             chest.saveToItem(packed, params.getLevel().registryAccess());
+            chest.applyDroppedItemName(packed);
             return List.of(packed);
         }
         return super.getDrops(state, params);

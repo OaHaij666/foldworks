@@ -45,6 +45,8 @@ public class ProductionStatsPage extends Page {
     private static final String[] COMPACT_SUFFIXES = {"", "K", "M", "B", "T", "P", "E"};
 
     private String selectedGroupId = ProductionStatsStorage.DEFAULT_GROUP_ID;
+    private String selectedScopeKind = ProductionStatsStorage.PRIVATE_SCOPE;
+    private String selectedScopeId = "";
     private int rangeIndex = 2;
     private int sortMode;
     private int rowScroll;
@@ -80,7 +82,7 @@ public class ProductionStatsPage extends Page {
 
     @Override
     public void onEnter() {
-        PacketDistributor.sendToServer(new RequestProductionStatsPacket());
+        requestSelectedStats();
     }
 
     @Override
@@ -95,7 +97,7 @@ public class ProductionStatsPage extends Page {
         syncTicker++;
         if (syncTicker >= 60) {
             syncTicker = 0;
-            PacketDistributor.sendToServer(new RequestProductionStatsPacket());
+            requestSelectedStats();
         }
     }
 
@@ -116,6 +118,15 @@ public class ProductionStatsPage extends Page {
     private void renderToolbar(GuiGraphics g, int mx, int my) {
         int toolbarY = y + 3;
         if (w >= 300) Theme.text(g, font, "产率统计", x + 11, toolbarY + 4, Theme.TEXT);
+
+        syncSelectedScopeFromCache();
+        int scopeX = scopeButtonX();
+        int scopeY = groupButtonY();
+        int scopeW = scopeButtonWidth();
+        boolean scopeHover = Theme.inside(mx, my, scopeX, scopeY, scopeW, 16);
+        pill(g, scopeX, scopeY, scopeW, 16, selectedScopeName(),
+                scopeHover ? Theme.PRIMARY_SOFT : Theme.SURFACE_ALT,
+                scopeHover ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED);
 
         int groupX = groupButtonX();
         int groupY = groupButtonY();
@@ -438,6 +449,12 @@ public class ProductionStatsPage extends Page {
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
         if (button != 0) return false;
+        if (Theme.inside(mx, my, scopeButtonX(), groupButtonY(), scopeButtonWidth(), 16)) {
+            cycleScope();
+            searchFocused = false;
+            groupDropdownOpen = false;
+            return true;
+        }
         if (Theme.inside(mx, my, groupButtonX(), groupButtonY(), groupButtonWidth(), 16)) {
             groupDropdownOpen = !groupDropdownOpen;
             searchFocused = false;
@@ -493,7 +510,7 @@ public class ProductionStatsPage extends Page {
             if (Theme.inside(mx, my, innerX + 3, rowY + 5, 20, 20)) {
                 String id = rows.get(i + rowScroll).itemId();
                 ClientProductionStatsCache.setFavoriteResourceLocal(id, !ClientProductionStatsCache.isFavoriteResource(id));
-                PacketDistributor.sendToServer(new UpdateProductionStatsPacket("TOGGLE_FAVORITE_RESOURCE", List.of(id)));
+                PacketDistributor.sendToServer(statsPacket("TOGGLE_FAVORITE_RESOURCE", List.of(id)));
                 rowScroll = 0;
                 return true;
             }
@@ -531,7 +548,7 @@ public class ProductionStatsPage extends Page {
                 List<String> values = new ArrayList<>();
                 values.add("新大组");
                 values.addAll(mergeSelection);
-                PacketDistributor.sendToServer(new UpdateProductionStatsPacket("MERGE_GROUPS", values));
+                PacketDistributor.sendToServer(statsPacket("MERGE_GROUPS", values));
                 mergeSelection.clear();
             }
             return true;
@@ -543,7 +560,7 @@ public class ProductionStatsPage extends Page {
         }
         if (Theme.inside(mx, my, deleteX, buttonY, 36, 17)) {
             if (!ProductionStatsStorage.DEFAULT_GROUP_ID.equals(selectedGroupId)) {
-                PacketDistributor.sendToServer(new UpdateProductionStatsPacket("DELETE_GROUP", List.of(selectedGroupId)));
+                PacketDistributor.sendToServer(statsPacket("DELETE_GROUP", List.of(selectedGroupId)));
                 selectedGroupId = ProductionStatsStorage.DEFAULT_GROUP_ID;
                 groupDropdownOpen = false;
             }
@@ -711,9 +728,9 @@ public class ProductionStatsPage extends Page {
         String value = inputValue.trim();
         if (value.isEmpty()) value = "新分组";
         if (inputMode == InputMode.CREATE_GROUP) {
-            PacketDistributor.sendToServer(new UpdateProductionStatsPacket("CREATE_GROUP", List.of(value, "false")));
+            PacketDistributor.sendToServer(statsPacket("CREATE_GROUP", List.of(value, "false")));
         } else if (inputMode == InputMode.RENAME && !inputTargetGroupId.isBlank()) {
-            PacketDistributor.sendToServer(new UpdateProductionStatsPacket("RENAME_GROUP", List.of(inputTargetGroupId, value)));
+            PacketDistributor.sendToServer(statsPacket("RENAME_GROUP", List.of(inputTargetGroupId, value)));
         }
         inputMode = InputMode.NONE;
     }
@@ -746,8 +763,62 @@ public class ProductionStatsPage extends Page {
         if (ClientProductionStatsCache.group(selectedGroupId) == null) selectedGroupId = ClientProductionStatsCache.firstGroupId();
     }
 
-    private int groupButtonX() {
+    private void requestSelectedStats() {
+        PacketDistributor.sendToServer(new RequestProductionStatsPacket(selectedScopeKind, selectedScopeId));
+    }
+
+    private UpdateProductionStatsPacket statsPacket(String action, List<String> values) {
+        return new UpdateProductionStatsPacket(selectedScopeKind, selectedScopeId, action, values);
+    }
+
+    private void syncSelectedScopeFromCache() {
+        String kind = ClientProductionStatsCache.scopeKind();
+        String id = ClientProductionStatsCache.scopeId();
+        if (kind != null && !kind.isBlank()) selectedScopeKind = kind;
+        selectedScopeId = id == null ? "" : id;
+    }
+
+    private void cycleScope() {
+        List<ProductionStatsSyncPacket.ScopeData> options = ClientProductionStatsCache.scopeOptions();
+        if (options.isEmpty()) return;
+        int current = 0;
+        for (int i = 0; i < options.size(); i++) {
+            ProductionStatsSyncPacket.ScopeData option = options.get(i);
+            if (option.kind().equals(selectedScopeKind) && option.id().equals(selectedScopeId)) {
+                current = i;
+                break;
+            }
+        }
+        ProductionStatsSyncPacket.ScopeData next = options.get((current + 1) % options.size());
+        selectedScopeKind = next.kind();
+        selectedScopeId = next.id();
+        selectedGroupId = ProductionStatsStorage.DEFAULT_GROUP_ID;
+        rowScroll = 0;
+        groupScroll = 0;
+        requestSelectedStats();
+    }
+
+    private String selectedScopeName() {
+        for (ProductionStatsSyncPacket.ScopeData option : ClientProductionStatsCache.scopeOptions()) {
+            if (option.kind().equals(selectedScopeKind) && option.id().equals(selectedScopeId)) {
+                return option.label();
+            }
+        }
+        return "个人";
+    }
+
+    private int scopeButtonX() {
         return w < 300 ? x + 10 : x + 73;
+    }
+
+    private int scopeButtonWidth() {
+        int rightLimit = rangeButtonX() - 8;
+        int max = Math.max(58, rightLimit - scopeButtonX());
+        return Math.max(58, Math.min(Math.min(104, max), Theme.styledWidth(font, selectedScopeName()) + 20));
+    }
+
+    private int groupButtonX() {
+        return scopeButtonX() + scopeButtonWidth() + 6;
     }
 
     private int groupButtonY() {

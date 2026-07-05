@@ -61,6 +61,12 @@ public class ModMessages {
         );
 
         registrar.playToServer(
+                UpdateSpaceChunkLoadingPayload.TYPE,
+                UpdateSpaceChunkLoadingPayload.STREAM_CODEC,
+                UpdateSpaceChunkLoadingPayload::handleOnServer
+        );
+
+        registrar.playToServer(
                 PermissionMemberPayload.TYPE,
                 PermissionMemberPayload.STREAM_CODEC,
                 PermissionMemberPayload::handleOnServer

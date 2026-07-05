@@ -14,6 +14,9 @@ import java.util.List;
 
 public record ProductionStatsSyncPacket(
         long serverGameTime,
+        String scopeKind,
+        String scopeId,
+        List<ScopeData> scopeOptions,
         List<GroupData> groups,
         List<BucketData> buckets,
         List<InventoryData> inventories,
@@ -23,12 +26,14 @@ public record ProductionStatsSyncPacket(
     public static final Type<ProductionStatsSyncPacket> TYPE = new Type<>(
             ResourceLocation.fromNamespaceAndPath("pockethomestead", "production_stats_sync"));
 
+    public record ScopeData(String kind, String id, String label, boolean writable) {}
     public record GroupData(String id, String name, boolean aggregate, List<String> childIds, int order) {}
     public record BucketData(String groupId, String itemId, long bucketStart, int input, int output) {}
     public record InventoryData(String groupId, String itemId, int count) {}
     public record MemberData(String chestKey, String groupId) {}
 
     private static final int MAX_GROUPS = 256;
+    private static final int MAX_SCOPES = 256;
     private static final int MAX_BUCKETS = 4096;
     private static final int MAX_INVENTORIES = 4096;
     private static final int MAX_MEMBERS = 1024;
@@ -38,6 +43,18 @@ public record ProductionStatsSyncPacket(
         @Override
         public ProductionStatsSyncPacket decode(ByteBuf buf) {
             long gameTime = buf.readLong();
+            String scopeKind = ByteBufCodecs.STRING_UTF8.decode(buf);
+            String scopeId = ByteBufCodecs.STRING_UTF8.decode(buf);
+            List<ScopeData> scopeOptions = new ArrayList<>();
+            int scopeCount = checkCount(ByteBufCodecs.VAR_INT.decode(buf), MAX_SCOPES);
+            for (int i = 0; i < scopeCount; i++) {
+                scopeOptions.add(new ScopeData(
+                        ByteBufCodecs.STRING_UTF8.decode(buf),
+                        ByteBufCodecs.STRING_UTF8.decode(buf),
+                        ByteBufCodecs.STRING_UTF8.decode(buf),
+                        buf.readBoolean()
+                ));
+            }
             List<GroupData> groups = new ArrayList<>();
             int groupCount = checkCount(ByteBufCodecs.VAR_INT.decode(buf), MAX_GROUPS);
             for (int i = 0; i < groupCount; i++) {
@@ -75,12 +92,21 @@ public record ProductionStatsSyncPacket(
                 members.add(new MemberData(ByteBufCodecs.STRING_UTF8.decode(buf), ByteBufCodecs.STRING_UTF8.decode(buf)));
             }
             List<String> favoriteResources = decodeStrings(buf);
-            return new ProductionStatsSyncPacket(gameTime, groups, buckets, inventories, members, favoriteResources);
+            return new ProductionStatsSyncPacket(gameTime, scopeKind, scopeId, scopeOptions, groups, buckets, inventories, members, favoriteResources);
         }
 
         @Override
         public void encode(ByteBuf buf, ProductionStatsSyncPacket pkt) {
             buf.writeLong(pkt.serverGameTime);
+            ByteBufCodecs.STRING_UTF8.encode(buf, pkt.scopeKind);
+            ByteBufCodecs.STRING_UTF8.encode(buf, pkt.scopeId);
+            ByteBufCodecs.VAR_INT.encode(buf, pkt.scopeOptions.size());
+            for (ScopeData scope : pkt.scopeOptions) {
+                ByteBufCodecs.STRING_UTF8.encode(buf, scope.kind);
+                ByteBufCodecs.STRING_UTF8.encode(buf, scope.id);
+                ByteBufCodecs.STRING_UTF8.encode(buf, scope.label);
+                buf.writeBoolean(scope.writable);
+            }
             ByteBufCodecs.VAR_INT.encode(buf, pkt.groups.size());
             for (GroupData group : pkt.groups) {
                 ByteBufCodecs.STRING_UTF8.encode(buf, group.id);
@@ -115,7 +141,8 @@ public record ProductionStatsSyncPacket(
     @Override
     public Type<? extends CustomPacketPayload> type() { return TYPE; }
 
-    public static ProductionStatsSyncPacket from(ProductionStatsStorage.PlayerStats stats, long gameTime) {
+    public static ProductionStatsSyncPacket from(String scopeKind, String scopeId, List<ScopeData> scopeOptions,
+                                                 ProductionStatsStorage.PlayerStats stats, long gameTime) {
         List<GroupData> groups = new ArrayList<>();
         for (ProductionStatsStorage.GroupSnapshot group : stats.groups()) {
             groups.add(new GroupData(group.id(), group.name(), group.aggregate(), group.childIds(), group.order()));
@@ -133,7 +160,8 @@ public record ProductionStatsSyncPacket(
             members.add(new MemberData(member.chestKey(), member.groupId()));
         }
         List<String> favoriteResources = new ArrayList<>(stats.favoriteResources());
-        return new ProductionStatsSyncPacket(gameTime, groups, buckets, inventories, members, favoriteResources);
+        return new ProductionStatsSyncPacket(gameTime, scopeKind, scopeId, List.copyOf(scopeOptions),
+                groups, buckets, inventories, members, favoriteResources);
     }
 
     public static void handle(ProductionStatsSyncPacket packet, IPayloadContext context) {

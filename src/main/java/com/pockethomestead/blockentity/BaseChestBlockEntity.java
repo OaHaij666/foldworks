@@ -2,19 +2,23 @@ package com.pockethomestead.blockentity;
 
 import com.pockethomestead.block.AbstractHomesteadBlock;
 import com.pockethomestead.config.ModConfig;
+import com.pockethomestead.moving.MovingChestRegistry;
 import com.pockethomestead.offline.OfflineChestSnapshotStorage;
 import com.pockethomestead.production.ProductionStatsStorage;
 import com.pockethomestead.registration.ModItems;
 import com.pockethomestead.registry.ChestRegistryManager;
 import com.pockethomestead.space.SpaceData;
 import com.pockethomestead.space.SpaceManager;
+import com.pockethomestead.suite.SuiteOrderSystem;
 import com.pockethomestead.transfer.TransferEdge;
 import com.pockethomestead.transfer.GraphKey;
 import com.pockethomestead.transfer.TransferGraph;
 import com.pockethomestead.transfer.TransferGraphStorage;
+import com.pockethomestead.transfer.TransferNode;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
+import net.minecraft.core.NonNullList;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -22,6 +26,7 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.network.Connection;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -29,10 +34,19 @@ import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.CustomData;
+import net.minecraft.world.item.crafting.AbstractCookingRecipe;
+import net.minecraft.world.item.crafting.BlastingRecipe;
+import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.item.crafting.SingleRecipeInput;
+import net.minecraft.world.item.crafting.SmeltingRecipe;
+import net.minecraft.world.item.crafting.SmokingRecipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.Fluids;
@@ -51,6 +65,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     public static final int NETWORK_UPGRADE_SLOT = 2;
     public static final int ENERGY_UPGRADE_SLOT = 3;
     public static final int STRESS_UPGRADE_SLOT = 4;
+    public static final int SUITE_UPGRADE_SLOT = 5;
 
     private enum TransferBlockReason { NONE, SOURCE, RECEIVER }
     private record TransferResult(Map<String, Integer> movedByItem, TransferBlockReason reason, String blockItemId) {
@@ -110,6 +125,17 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
             new com.pockethomestead.compat.fluid.HomesteadChestFluidHandler(this);
     private final com.pockethomestead.compat.energy.HomesteadChestEnergyStorage energyHandler =
             new com.pockethomestead.compat.energy.HomesteadChestEnergyStorage(this);
+
+    private final NonNullList<ItemStack> suiteFurnaceItems = NonNullList.withSize(3, ItemStack.EMPTY);
+    private int suiteFurnaceLitTime;
+    private int suiteFurnaceLitDuration;
+    private int suiteFurnaceCookingProgress;
+    private int suiteFurnaceCookingTotalTime;
+    private int suiteFurnaceMode;
+    private final SuiteOrderSystem suiteOrders = new SuiteOrderSystem(this);
+
+    private record SuiteCookingMatch(RecipeHolder<? extends AbstractCookingRecipe> recipe, int mode) {
+    }
 
     // 箱子ID（玩家自定义，用于传输图节点识别）
     protected String chestId = "";
@@ -226,7 +252,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
             // 4. 生产统计 chestKey 迁移
             String oldChestKey = ProductionStatsStorage.chestKey(oldDimKey, oldPos);
             String newChestKey = ProductionStatsStorage.chestKey(newDimKey, newPos);
-            ProductionStatsStorage.get(server).relocateChest(ownerUUID, oldChestKey, newChestKey);
+            ProductionStatsStorage.get(server).relocateChest(productionStatsScopeKey(), oldChestKey, newChestKey);
         }
 
         // 更新保存值为当前坐标，避免下次 onLoad 重复触发迁移
@@ -257,15 +283,19 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         if (isRemoved()) return;
         // 服务端卸载时从全局管理器注销
         if (level != null && !level.isClientSide && ownerUUID != null && !chestId.isEmpty()) {
+            boolean moving = false;
             if (level instanceof ServerLevel serverLevel) {
                 OfflineChestSnapshotStorage storage = OfflineChestSnapshotStorage.get(serverLevel.getServer());
-                if (destroyedForOfflineSnapshot) storage.deleteSnapshot(level.dimension().location().toString(), worldPosition);
+                String dimKey = level.dimension().location().toString();
+                moving = MovingChestRegistry.isMoving(dimKey, worldPosition, chestId);
+                if (destroyedForOfflineSnapshot) storage.deleteSnapshot(dimKey, worldPosition);
+                else if (moving) storage.captureMoving(this, serverLevel.getGameTime());
                 else storage.captureUnloaded(this, serverLevel.getGameTime());
             }
-            if (registered) {
+            if (registered && !moving) {
                 ChestRegistryManager.getInstance().unregisterChest(ownerUUID, chestId, level, worldPosition);
+                registered = false;
             }
-            registered = false;
         }
         super.setRemoved();
     }
@@ -305,6 +335,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
             case NETWORK_UPGRADE_SLOT -> ModItems.NETWORK_UPGRADE.get();
             case ENERGY_UPGRADE_SLOT -> ModItems.ENERGY_TRANSFER_UPGRADE.get();
             case STRESS_UPGRADE_SLOT -> ModItems.STRESS_UPGRADE.get();
+            case SUITE_UPGRADE_SLOT -> ModItems.SUITE_UPGRADE.get();
             default -> null;
         };
     }
@@ -349,6 +380,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
             case STORAGE_UPGRADE_SLOT -> projectedMaxItemCapacity(remainingUpgrades) >= getUsedCapacity();
             case FLUID_UPGRADE_SLOT -> canFitFluidsWithUpgradeCount(remainingUpgrades);
             case ENERGY_UPGRADE_SLOT -> projectedMaxEnergyStored(remainingUpgrades) >= energyStored;
+            case SUITE_UPGRADE_SLOT -> !hasSuiteFurnaceContent() && !suiteOrders.hasContent();
             default -> true;
         };
     }
@@ -393,6 +425,45 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
 
     public boolean hasStressUpgrade() {
         return getUpgradeCount(STRESS_UPGRADE_SLOT) > 0;
+    }
+
+    public boolean hasSuiteUpgrade() {
+        return getUpgradeCount(SUITE_UPGRADE_SLOT) > 0;
+    }
+
+    public NonNullList<ItemStack> getSuiteFurnaceItems() {
+        return suiteFurnaceItems;
+    }
+
+    public List<ItemStack> getSuiteFurnaceItemsForSync() {
+        List<ItemStack> copy = new ArrayList<>();
+        for (ItemStack stack : suiteFurnaceItems) copy.add(stack.copy());
+        return copy;
+    }
+
+    public int getSuiteFurnaceLitTime() { return suiteFurnaceLitTime; }
+    public int getSuiteFurnaceLitDuration() { return suiteFurnaceLitDuration; }
+    public int getSuiteFurnaceCookingProgress() { return suiteFurnaceCookingProgress; }
+    public int getSuiteFurnaceCookingTotalTime() { return suiteFurnaceCookingTotalTime; }
+    public int getSuiteFurnaceMode() { return suiteFurnaceMode; }
+
+    public void refreshSuiteFurnaceRecipe() {
+        Optional<SuiteCookingMatch> match = findSuiteCookingRecipe(suiteFurnaceItems.get(0));
+        suiteFurnaceMode = match.map(SuiteCookingMatch::mode).orElse(0);
+        suiteFurnaceCookingTotalTime = match.map(value -> Math.max(1, value.recipe().value().getCookingTime())).orElse(0);
+        if (suiteFurnaceCookingTotalTime == 0) suiteFurnaceCookingProgress = 0;
+        setChanged();
+    }
+
+    public boolean hasSuiteFurnaceContent() {
+        for (ItemStack stack : suiteFurnaceItems) {
+            if (!stack.isEmpty()) return true;
+        }
+        return suiteFurnaceLitTime > 0 || suiteFurnaceCookingProgress > 0;
+    }
+
+    public SuiteOrderSystem getSuiteOrders() {
+        return suiteOrders;
     }
 
     public int getNetworkBandwidthCapacity() {
@@ -784,9 +855,11 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         if (itemId == null) return;
         ProductionStatsStorage storage = ProductionStatsStorage.get(serverLevel.getServer());
         String key = productionChestKey();
+        String scopeKey = productionStatsScopeKey();
+        if (scopeKey.isBlank()) return;
         String resourceKey = TransferEdge.ITEM_PREFIX + itemId;
-        if (input) storage.recordInput(ownerUUID, key, resourceKey, amount, serverLevel.getGameTime());
-        else storage.recordOutput(ownerUUID, key, resourceKey, amount, serverLevel.getGameTime());
+        if (input) storage.recordInput(scopeKey, key, resourceKey, amount, serverLevel.getGameTime());
+        else storage.recordOutput(scopeKey, key, resourceKey, amount, serverLevel.getGameTime());
         if (offlineExternalStatsSuppressionDepth <= 0) {
             OfflineChestSnapshotStorage.get(serverLevel.getServer())
                     .recordExternalChange(this, resourceKey, amount, input, serverLevel.getGameTime());
@@ -801,9 +874,11 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         if (fluidId == null) return;
         ProductionStatsStorage storage = ProductionStatsStorage.get(serverLevel.getServer());
         String key = productionChestKey();
+        String scopeKey = productionStatsScopeKey();
+        if (scopeKey.isBlank()) return;
         String resourceKey = TransferEdge.FLUID_PREFIX + fluidId;
-        if (input) storage.recordInput(ownerUUID, key, resourceKey, amount, serverLevel.getGameTime());
-        else storage.recordOutput(ownerUUID, key, resourceKey, amount, serverLevel.getGameTime());
+        if (input) storage.recordInput(scopeKey, key, resourceKey, amount, serverLevel.getGameTime());
+        else storage.recordOutput(scopeKey, key, resourceKey, amount, serverLevel.getGameTime());
         if (offlineExternalStatsSuppressionDepth <= 0) {
             OfflineChestSnapshotStorage.get(serverLevel.getServer())
                     .recordExternalChange(this, resourceKey, amount, input, serverLevel.getGameTime());
@@ -816,8 +891,10 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         if (!(level instanceof ServerLevel serverLevel)) return;
         ProductionStatsStorage storage = ProductionStatsStorage.get(serverLevel.getServer());
         String key = productionChestKey();
-        if (input) storage.recordInput(ownerUUID, key, TransferEdge.ENERGY_FE, amount, serverLevel.getGameTime());
-        else storage.recordOutput(ownerUUID, key, TransferEdge.ENERGY_FE, amount, serverLevel.getGameTime());
+        String scopeKey = productionStatsScopeKey();
+        if (scopeKey.isBlank()) return;
+        if (input) storage.recordInput(scopeKey, key, TransferEdge.ENERGY_FE, amount, serverLevel.getGameTime());
+        else storage.recordOutput(scopeKey, key, TransferEdge.ENERGY_FE, amount, serverLevel.getGameTime());
         if (offlineExternalStatsSuppressionDepth <= 0) {
             OfflineChestSnapshotStorage.get(serverLevel.getServer())
                     .recordExternalChange(this, TransferEdge.ENERGY_FE, amount, input, serverLevel.getGameTime());
@@ -827,12 +904,27 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     private void refreshProductionInventorySnapshot() {
         if (level == null || level.isClientSide || ownerUUID == null) return;
         if (!(level instanceof ServerLevel serverLevel)) return;
-        ProductionStatsStorage.get(serverLevel.getServer()).refreshChestInventory(ownerUUID, productionChestKey(), productionResourceSnapshot());
+        String scopeKey = productionStatsScopeKey();
+        if (scopeKey.isBlank()) return;
+        ProductionStatsStorage.get(serverLevel.getServer()).refreshChestInventory(scopeKey, productionChestKey(), productionResourceSnapshot());
     }
 
     public String productionChestKey() {
         if (level == null) return "";
         return ProductionStatsStorage.chestKey(level.dimension().location().toString(), worldPosition);
+    }
+
+    public String productionStatsScopeKey() {
+        if (ownerUUID == null) return "";
+        return switch (graphKind) {
+            case PUBLIC -> "";
+            case PRIVATE -> ProductionStatsStorage.privateScope(ownerUUID);
+            case PROTECTED -> graphTeamId == null ? "" : ProductionStatsStorage.teamScope(graphTeamId);
+            case SPACE -> {
+                SpaceData space = getContainingSpace();
+                yield space == null ? "" : ProductionStatsStorage.spaceScope(space.getSpaceId());
+            }
+        };
     }
 
     public Map<String, Integer> productionItemSnapshot() {
@@ -1204,6 +1296,8 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     }
 
     public void setGraphAccess(GraphKey.Kind kind, UUID teamId) {
+        String oldProductionScope = productionStatsScopeKey();
+        String chestKey = productionChestKey();
         GraphKey.Kind next = kind == null ? GraphKey.Kind.PRIVATE : kind;
         if (next == GraphKey.Kind.SPACE
                 && (level == null || SpaceManager.getInstance().getSpaceByDimension(level.dimension().location()) == null)) {
@@ -1211,6 +1305,11 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         }
         this.graphKind = next;
         this.graphTeamId = this.graphKind == GraphKey.Kind.PROTECTED ? teamId : null;
+        String newProductionScope = productionStatsScopeKey();
+        if (!oldProductionScope.isBlank() && !oldProductionScope.equals(newProductionScope)
+                && level instanceof ServerLevel serverLevel && !chestKey.isBlank()) {
+            ProductionStatsStorage.get(serverLevel.getServer()).clearChestGroup(oldProductionScope, chestKey);
+        }
         setChanged();
     }
 
@@ -1282,6 +1381,8 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
      */
     protected void doTick() {
         if (level == null || level.isClientSide) return;
+        tickSuiteFurnace();
+        if (level instanceof ServerLevel serverLevel) suiteOrders.tick(serverLevel);
         // 兜底：确保箱子已注册（新放置时 onLoad 早于 setPlacedBy）
         registerIfReady();
         if (ownerUUID == null) return;
@@ -1294,6 +1395,111 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         if ((tickCounter + offset) % interval != 0) return;
 
         doTransferTick();
+    }
+
+    private void tickSuiteFurnace() {
+        if (!(level instanceof ServerLevel)) return;
+        if (!hasSuiteUpgrade() && !hasSuiteFurnaceContent()) return;
+
+        SuiteCookingMatch match = findSuiteCookingRecipe(suiteFurnaceItems.get(0)).orElse(null);
+        if (match == null) {
+            suiteFurnaceMode = 0;
+            suiteFurnaceCookingTotalTime = 0;
+            suiteFurnaceCookingProgress = 0;
+            if (suiteFurnaceLitTime > 0) {
+                suiteFurnaceLitTime--;
+                setChanged();
+            }
+            return;
+        }
+
+        suiteFurnaceMode = match.mode();
+        suiteFurnaceCookingTotalTime = Math.max(1, match.recipe().value().getCookingTime());
+        ItemStack result = match.recipe().value().assemble(new SingleRecipeInput(suiteFurnaceItems.get(0)), level.registryAccess());
+        if (result.isEmpty() || !result.isItemEnabled(level.enabledFeatures()) || !canSuiteFurnaceOutputAccept(result)) {
+            suiteFurnaceCookingProgress = 0;
+            if (suiteFurnaceLitTime > 0) suiteFurnaceLitTime--;
+            setChanged();
+            return;
+        }
+
+        if (suiteFurnaceLitTime <= 0) {
+            int burn = suiteFuelBurnDuration(suiteFurnaceItems.get(1));
+            if (burn <= 0) {
+                if (suiteFurnaceCookingProgress > 0) {
+                    suiteFurnaceCookingProgress = Math.max(0, suiteFurnaceCookingProgress - 2);
+                    setChanged();
+                }
+                return;
+            }
+            suiteFurnaceLitTime = burn;
+            suiteFurnaceLitDuration = burn;
+            consumeSuiteFurnaceFuel();
+        }
+
+        suiteFurnaceLitTime--;
+        suiteFurnaceCookingProgress++;
+        if (suiteFurnaceCookingProgress >= suiteFurnaceCookingTotalTime) {
+            suiteFurnaceCookingProgress = 0;
+            finishSuiteFurnaceRecipe(result);
+            refreshSuiteFurnaceRecipe();
+        }
+        setChanged();
+    }
+
+    private void finishSuiteFurnaceRecipe(ItemStack result) {
+        ItemStack output = suiteFurnaceItems.get(2);
+        if (output.isEmpty()) {
+            suiteFurnaceItems.set(2, result.copy());
+        } else if (ItemStack.isSameItemSameComponents(output, result)) {
+            output.grow(result.getCount());
+        }
+        ItemStack input = suiteFurnaceItems.get(0);
+        input.shrink(1);
+        if (input.isEmpty()) suiteFurnaceItems.set(0, ItemStack.EMPTY);
+    }
+
+    private void consumeSuiteFurnaceFuel() {
+        ItemStack fuel = suiteFurnaceItems.get(1);
+        if (fuel.isEmpty()) return;
+        Item remainderItem = fuel.getItem().getCraftingRemainingItem();
+        fuel.shrink(1);
+        if (fuel.isEmpty()) suiteFurnaceItems.set(1, ItemStack.EMPTY);
+        if (remainderItem != null && remainderItem != Items.AIR) {
+            ItemStack remainder = new ItemStack(remainderItem);
+            if (suiteFurnaceItems.get(1).isEmpty()) {
+                suiteFurnaceItems.set(1, remainder);
+            } else {
+                int added = addItem(remainder, remainder.getCount());
+                remainder.shrink(added);
+                if (!remainder.isEmpty() && level instanceof ServerLevel serverLevel) {
+                    net.minecraft.world.Containers.dropItemStack(serverLevel, worldPosition.getX() + 0.5, worldPosition.getY() + 0.5, worldPosition.getZ() + 0.5, remainder);
+                }
+            }
+        }
+    }
+
+    private boolean canSuiteFurnaceOutputAccept(ItemStack result) {
+        ItemStack output = suiteFurnaceItems.get(2);
+        if (output.isEmpty()) return true;
+        return ItemStack.isSameItemSameComponents(output, result)
+                && output.getCount() + result.getCount() <= output.getMaxStackSize();
+    }
+
+    private int suiteFuelBurnDuration(ItemStack stack) {
+        if (stack.isEmpty()) return 0;
+        return AbstractFurnaceBlockEntity.getFuel().getOrDefault(stack.getItem(), 0);
+    }
+
+    private Optional<SuiteCookingMatch> findSuiteCookingRecipe(ItemStack input) {
+        if (level == null || input.isEmpty()) return Optional.empty();
+        SingleRecipeInput recipeInput = new SingleRecipeInput(input);
+        Optional<RecipeHolder<BlastingRecipe>> blasting = level.getRecipeManager().getRecipeFor(RecipeType.BLASTING, recipeInput, level);
+        if (blasting.isPresent()) return Optional.of(new SuiteCookingMatch(blasting.get(), 1));
+        Optional<RecipeHolder<SmokingRecipe>> smoking = level.getRecipeManager().getRecipeFor(RecipeType.SMOKING, recipeInput, level);
+        if (smoking.isPresent()) return Optional.of(new SuiteCookingMatch(smoking.get(), 2));
+        Optional<RecipeHolder<SmeltingRecipe>> smelting = level.getRecipeManager().getRecipeFor(RecipeType.SMELTING, recipeInput, level);
+        return smelting.map(recipe -> new SuiteCookingMatch(recipe, 3));
     }
 
     /**
@@ -1369,6 +1575,24 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
 
         List<TransferEdge> nextPath = new ArrayList<>(path);
         nextPath.add(edge);
+
+        if (targetNode.getNodeType() == TransferNode.NodeType.LIMIT_GATE) {
+            int gateBudget = limitGateBudget(graph, serverLevel, pageId, targetNode, scopePort, routeBudget);
+            if (gateBudget <= 0) {
+                recordTransferResult(graph, serverLevel, nextPath, gameTime,
+                        new TransferResult(Map.of(), TransferBlockReason.RECEIVER, firstMatchingResourceId(scopePort)));
+                return 0;
+            }
+            return followOutgoingEdges(graph, serverLevel, pageId, targetNode.getId(), scopePort, scopePort,
+                    nextPath, visitedNodes, canVoid, gateBudget, bandwidth);
+        }
+
+        if (targetNode.getNodeType() == TransferNode.NodeType.JUMP_INPUT) {
+            TransferNode output = linkedJumpOutput(graph, targetNode);
+            if (output == null || !output.isEnabled() || !visitedNodes.add(output.getId())) return 0;
+            return followOutgoingEdges(graph, serverLevel, pageId, output.getId(), scopePort, scopePort,
+                    nextPath, visitedNodes, canVoid, routeBudget, bandwidth);
+        }
 
         if (targetNode.getNodeType() == com.pockethomestead.transfer.TransferNode.NodeType.REROUTE) {
             return followOutgoingEdges(graph, serverLevel, pageId, targetNode.getId(), scopePort, scopePort,
@@ -2275,16 +2499,158 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
                 && be.hasNetworkUpgrade()) {
             return be;
         }
-        return null;
+        return MovingChestRegistry.findChest(node.getDimensionKey(), node.getPos(), node.getChestId());
     }
 
     private OfflineChestSnapshotStorage.Snapshot findNodeSnapshot(com.pockethomestead.transfer.TransferNode node, ServerLevel currentLevel, GraphKey graphKey) {
         if (node == null || graphKey == null || !graphKey.isValid()) return null;
         OfflineChestSnapshotStorage.Snapshot snapshot = OfflineChestSnapshotStorage.get(currentLevel.getServer())
                 .findSnapshot(node.getDimensionKey(), node.getPos(), node.getChestId());
-        if (snapshot == null || snapshot.loaded() || !snapshot.hasNetworkUpgrade()) return null;
+        if (snapshot == null || snapshot.loaded() || snapshot.moving() || !snapshot.hasNetworkUpgrade()) return null;
         if (!snapshot.matchesGraph(graphKey) || !snapshot.shouldSimulate(currentLevel.getServer())) return null;
         return snapshot;
+    }
+
+    private int limitGateBudget(TransferGraph graph, ServerLevel currentLevel, String pageId, TransferNode gate,
+                                String scopePort, int routeBudget) {
+        if (gate == null || gate.getNodeType() != TransferNode.NodeType.LIMIT_GATE || routeBudget <= 0) return 0;
+        String resourceId = exactGateResource(scopePort);
+        if (resourceId == null) return 0;
+        if (gate.isGateCheckSource()) {
+            int amount = loadedResourceAmount(this, resourceId);
+            return gate.sourceGateBudgetWithinPassRange(amount, routeBudget);
+        }
+        TransferNode destination = resolveGateDestination(graph, pageId, gate, scopePort, new HashSet<>());
+        if (destination == null) return 0;
+        int amount = destinationResourceAmount(graph, currentLevel, destination, resourceId);
+        return gate.gateBudgetWithinPassRange(amount, routeBudget);
+    }
+
+    private TransferNode resolveGateDestination(TransferGraph graph, String pageId, TransferNode start,
+                                                String scopePort, Set<String> visited) {
+        TransferNode cursor = start;
+        String currentScope = scopePort;
+        for (int i = 0; i < 32 && cursor != null && visited.add(cursor.getId()); i++) {
+            if (!cursor.isEnabled() || !cursor.getPageId().equals(pageId)) return null;
+            TransferEdge edge = singleOutgoingForScope(graph, cursor.getId(), currentScope);
+            if (edge == null || !edge.getPageId().equals(pageId)) return null;
+            currentScope = intersectPorts(currentScope, edge.getFromPortKey());
+            if (currentScope == null) return null;
+            TransferNode target = graph.getNode(edge.getToNodeId());
+            if (target == null || !target.isEnabled()) return null;
+            if (target.getNodeType() == TransferNode.NodeType.CHEST
+                    || target.getNodeType() == TransferNode.NodeType.PLAYER_INVENTORY) {
+                return target;
+            }
+            if (target.getNodeType() == TransferNode.NodeType.JUMP_INPUT) {
+                cursor = linkedJumpOutput(graph, target);
+            } else if (target.getNodeType() == TransferNode.NodeType.REROUTE
+                    || target.getNodeType() == TransferNode.NodeType.LIMIT_GATE
+                    || target.getNodeType() == TransferNode.NodeType.JUMP_OUTPUT) {
+                cursor = target;
+            } else {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private TransferEdge singleOutgoingForScope(TransferGraph graph, String nodeId, String scopePort) {
+        TransferEdge result = null;
+        for (TransferEdge edge : graph.outgoing(nodeId)) {
+            if (!edge.isEnabled() || intersectPorts(scopePort, edge.getFromPortKey()) == null) continue;
+            if (result != null) return null;
+            result = edge;
+        }
+        return result;
+    }
+
+    private TransferNode linkedJumpOutput(TransferGraph graph, TransferNode input) {
+        if (input == null || input.getNodeType() != TransferNode.NodeType.JUMP_INPUT) return null;
+        TransferNode direct = graph.getNode(input.getLinkedNodeId());
+        if (direct != null && direct.getNodeType() == TransferNode.NodeType.JUMP_OUTPUT
+                && input.getId().equals(direct.getLinkedNodeId())) return direct;
+        for (TransferNode node : graph.getNodes()) {
+            if (node.getNodeType() == TransferNode.NodeType.JUMP_OUTPUT && input.getId().equals(node.getLinkedNodeId())) return node;
+        }
+        return null;
+    }
+
+    private int destinationResourceAmount(TransferGraph graph, ServerLevel currentLevel, TransferNode destination, String resourceId) {
+        if (destination.getNodeType() == TransferNode.NodeType.PLAYER_INVENTORY) return playerResourceAmount(currentLevel, destination, resourceId);
+        if (destination.getNodeType() != TransferNode.NodeType.CHEST) return -1;
+        BaseChestBlockEntity loaded = findNodeChest(destination, currentLevel);
+        if (loaded != null && !loaded.isRemoved() && com.pockethomestead.transfer.TransferGraphAccess.chestMatchesGraph(loaded, graph.getKey())) {
+            return loadedResourceAmount(loaded, resourceId);
+        }
+        OfflineChestSnapshotStorage.Snapshot snapshot = findNodeSnapshot(destination, currentLevel, graph.getKey());
+        return snapshot == null ? -1 : snapshotResourceAmount(snapshot, resourceId, currentLevel.getGameTime());
+    }
+
+    private int loadedResourceAmount(BaseChestBlockEntity chest, String resourceId) {
+        if (resourceId.startsWith(TransferEdge.ITEM_PREFIX)) {
+            String itemId = resourceId.substring(TransferEdge.ITEM_PREFIX.length());
+            int total = 0;
+            for (StoredItemStack stored : chest.getStoredItems()) {
+                ResourceLocation id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stored.item());
+                if (id != null && id.toString().equals(itemId)) total += stored.count();
+            }
+            return total;
+        }
+        if (resourceId.startsWith(TransferEdge.FLUID_PREFIX)) {
+            Fluid fluid = resolveFluidResource(resourceId);
+            return fluid == Fluids.EMPTY ? -1 : chest.getAllFluids().getOrDefault(fluid, 0);
+        }
+        if (TransferEdge.ENERGY_FE.equals(resourceId)) return chest.getEnergyStored();
+        if (TransferEdge.STRESS_SU.equals(resourceId)) {
+            HomesteadStressEndpoint endpoint = stressEndpoint(chest);
+            return endpoint == null ? 0 : Math.max(0, Math.round(endpoint.graphStressCapacity()));
+        }
+        return -1;
+    }
+
+    private int snapshotResourceAmount(OfflineChestSnapshotStorage.Snapshot snapshot, String resourceId, long gameTime) {
+        if (resourceId.startsWith(TransferEdge.ITEM_PREFIX)) {
+            String itemId = resourceId.substring(TransferEdge.ITEM_PREFIX.length());
+            int total = 0;
+            for (StoredItemStack stored : snapshot.items()) {
+                ResourceLocation id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stored.item());
+                if (id != null && id.toString().equals(itemId)) total += stored.count();
+            }
+            return total;
+        }
+        if (resourceId.startsWith(TransferEdge.FLUID_PREFIX)) {
+            return snapshot.fluids().getOrDefault(resourceId.substring(TransferEdge.FLUID_PREFIX.length()), 0);
+        }
+        if (TransferEdge.ENERGY_FE.equals(resourceId)) return snapshot.energyStored();
+        if (TransferEdge.STRESS_SU.equals(resourceId)) return Math.max(0, Math.round(snapshot.graphStressCapacity(gameTime)));
+        return -1;
+    }
+
+    private int playerResourceAmount(ServerLevel currentLevel, TransferNode destination, String resourceId) {
+        if (destination.getTargetPlayerId() == null || !resourceId.startsWith(TransferEdge.ITEM_PREFIX)) return -1;
+        ServerPlayer player = currentLevel.getServer().getPlayerList().getPlayer(destination.getTargetPlayerId());
+        Item item = resolveItemResource(resourceId);
+        return player == null || item == Items.AIR ? -1 : countPlayerMainInventory(player, item);
+    }
+
+    private String exactGateResource(String scopePort) {
+        if (scopePort == null || scopePort.isBlank() || TransferEdge.PORT_ALL.equals(scopePort) || TransferEdge.FLUID_ALL.equals(scopePort)) return null;
+        if (scopePort.startsWith(TransferEdge.ITEM_PREFIX) || scopePort.startsWith(TransferEdge.FLUID_PREFIX)
+                || TransferEdge.ENERGY_FE.equals(scopePort) || TransferEdge.STRESS_SU.equals(scopePort)) return scopePort;
+        return null;
+    }
+
+    private Item resolveItemResource(String resourceId) {
+        if (resourceId == null || !resourceId.startsWith(TransferEdge.ITEM_PREFIX)) return Items.AIR;
+        ResourceLocation id = ResourceLocation.tryParse(resourceId.substring(TransferEdge.ITEM_PREFIX.length()));
+        return id == null ? Items.AIR : net.minecraft.core.registries.BuiltInRegistries.ITEM.get(id);
+    }
+
+    private Fluid resolveFluidResource(String resourceId) {
+        if (resourceId == null || !resourceId.startsWith(TransferEdge.FLUID_PREFIX)) return Fluids.EMPTY;
+        ResourceLocation id = ResourceLocation.tryParse(resourceId.substring(TransferEdge.FLUID_PREFIX.length()));
+        return id == null ? Fluids.EMPTY : net.minecraft.core.registries.BuiltInRegistries.FLUID.get(id);
     }
 
     private boolean hasGraphOutgoingEdges() {
@@ -2309,6 +2675,11 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         CompoundTag root = data.copyTag();
         root.put(ITEM_DATA_ROOT, chestTag);
         stack.set(DataComponents.CUSTOM_DATA, CustomData.of(root));
+    }
+
+    public void applyDroppedItemName(ItemStack stack) {
+        if (stack == null || stack.isEmpty() || chestId == null || chestId.isBlank()) return;
+        stack.set(DataComponents.ITEM_NAME, Component.translatable(stack.getDescriptionId()).append(" (" + chestId + ")"));
     }
 
     public boolean loadFromItem(ItemStack stack, HolderLookup.Provider reg) {
@@ -2365,6 +2736,28 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         tag.putInt("EnergyStored", getEnergyStored());
         tag.putInt("StressOutputSpeedRpm", stressOutputSpeedRpm);
         tag.putBoolean("StressOutputReversed", stressOutputReversed);
+
+        CompoundTag furnaceTag = new CompoundTag();
+        ListTag furnaceItems = new ListTag();
+        for (int i = 0; i < suiteFurnaceItems.size(); i++) {
+            ItemStack stack = suiteFurnaceItems.get(i);
+            if (stack.isEmpty()) continue;
+            CompoundTag slotTag = new CompoundTag();
+            slotTag.putInt("Slot", i);
+            slotTag.put("Stack", stack.saveOptional(reg));
+            furnaceItems.add(slotTag);
+        }
+        furnaceTag.put("Items", furnaceItems);
+        furnaceTag.putInt("LitTime", suiteFurnaceLitTime);
+        furnaceTag.putInt("LitDuration", suiteFurnaceLitDuration);
+        furnaceTag.putInt("CookingProgress", suiteFurnaceCookingProgress);
+        furnaceTag.putInt("CookingTotalTime", suiteFurnaceCookingTotalTime);
+        furnaceTag.putInt("Mode", suiteFurnaceMode);
+        tag.put("SuiteFurnace", furnaceTag);
+
+        CompoundTag suiteOrderTag = new CompoundTag();
+        suiteOrders.save(suiteOrderTag, reg);
+        tag.put("SuiteOrders", suiteOrderTag);
 
         ListTag sideList = new ListTag();
         for (ResourceKind kind : ResourceKind.values()) {
@@ -2462,6 +2855,29 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         energyStored = Math.max(0, Math.min(tag.getInt("EnergyStored"), getMaxEnergyStored()));
         stressOutputSpeedRpm = normalizeStressOutputSpeed(tag.getInt("StressOutputSpeedRpm"));
         stressOutputReversed = tag.getBoolean("StressOutputReversed");
+
+        for (int i = 0; i < suiteFurnaceItems.size(); i++) suiteFurnaceItems.set(i, ItemStack.EMPTY);
+        suiteFurnaceLitTime = 0;
+        suiteFurnaceLitDuration = 0;
+        suiteFurnaceCookingProgress = 0;
+        suiteFurnaceCookingTotalTime = 0;
+        suiteFurnaceMode = 0;
+        CompoundTag furnaceTag = tag.getCompound("SuiteFurnace");
+        ListTag furnaceItems = furnaceTag.getList("Items", Tag.TAG_COMPOUND);
+        for (Tag t : furnaceItems) {
+            CompoundTag slotTag = (CompoundTag) t;
+            int slot = slotTag.getInt("Slot");
+            if (slot < 0 || slot >= suiteFurnaceItems.size()) continue;
+            ItemStack stack = ItemStack.parseOptional(reg, slotTag.getCompound("Stack"));
+            suiteFurnaceItems.set(slot, stack);
+        }
+        suiteFurnaceLitTime = Math.max(0, furnaceTag.getInt("LitTime"));
+        suiteFurnaceLitDuration = Math.max(0, furnaceTag.getInt("LitDuration"));
+        suiteFurnaceCookingProgress = Math.max(0, furnaceTag.getInt("CookingProgress"));
+        suiteFurnaceCookingTotalTime = Math.max(0, furnaceTag.getInt("CookingTotalTime"));
+        suiteFurnaceMode = Math.max(0, furnaceTag.getInt("Mode"));
+
+        suiteOrders.load(tag.getCompound("SuiteOrders"), reg);
 
         resetDefaultSideConfig();
         ListTag sideList = tag.getList("SideConfig", Tag.TAG_COMPOUND);

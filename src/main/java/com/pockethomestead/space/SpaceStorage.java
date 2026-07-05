@@ -73,6 +73,7 @@ public class SpaceStorage extends SavedData {
         t.putFloat("TerrainAmplitude", s.getTerrainAmplitude());
         t.putString("Name", s.getName());
         t.putBoolean("OfflineSimulationEnabled", s.isOfflineSimulationEnabled());
+        t.putBoolean("ChunkLoadingEnabled", s.isChunkLoadingEnabled());
         t.putString("PermMode", s.getPermission().getMode().name());
         t.putString("ProtectedLevel", s.getPermission().getProtectedLevel().name());
         t.putString("PublicLevel", s.getPermission().getPublicLevel().name());
@@ -149,6 +150,9 @@ public class SpaceStorage extends SavedData {
             if (t.contains("Name")) sd.setName(t.getString("Name"));
             loadPermission(t, sd.getPermission());
             sd.setOfflineSimulationEnabled(t.getBoolean("OfflineSimulationEnabled"));
+            boolean chunkLoadingEnabled = t.getBoolean("ChunkLoadingEnabled");
+            sd.setChunkLoadingEnabled(chunkLoadingEnabled);
+            if (chunkLoadingEnabled && !sd.isChunkLoadingEnabled()) markDirty();
             return sd;
         } catch (Exception e) { PocketHomestead.LOGGER.error("反序列化空间数据失败", e); return null; }
     }

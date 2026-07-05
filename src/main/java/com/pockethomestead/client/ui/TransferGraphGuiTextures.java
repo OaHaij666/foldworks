@@ -53,6 +53,9 @@ public final class TransferGraphGuiTextures {
     private static final Sprite ICON_REROUTE = new Sprite(22, 120, 18, 18, 0);
     private static final Sprite ICON_BACKPACK = new Sprite(46, 120, 18, 18, 0);
     private static final Sprite ICON_TRASH = new Sprite(70, 120, 18, 18, 0);
+    private static final Sprite ICON_LIMIT_GATE = new Sprite(94, 120, 18, 18, 0);
+    private static final Sprite ICON_JUMP_IN = new Sprite(118, 120, 18, 18, 0);
+    private static final Sprite ICON_JUMP_OUT = new Sprite(142, 120, 18, 18, 0);
     private static final Sprite ICON_ITEM = new Sprite(0, 144, 18, 20, 0);
     private static final Sprite ICON_FLUID = new Sprite(22, 144, 18, 20, 0);
     private static final Sprite ICON_ENERGY = new Sprite(44, 144, 18, 20, 0);
@@ -97,6 +100,9 @@ public final class TransferGraphGuiTextures {
         REROUTE,
         BACKPACK,
         TRASH,
+        LIMIT_GATE,
+        JUMP_IN,
+        JUMP_OUT,
         ITEM,
         FLUID,
         ENERGY,
@@ -158,6 +164,9 @@ public final class TransferGraphGuiTextures {
             case REROUTE -> ICON_REROUTE;
             case BACKPACK -> ICON_BACKPACK;
             case TRASH -> ICON_TRASH;
+            case LIMIT_GATE -> ICON_LIMIT_GATE;
+            case JUMP_IN -> ICON_JUMP_IN;
+            case JUMP_OUT -> ICON_JUMP_OUT;
             case ITEM -> ICON_ITEM;
             case FLUID -> ICON_FLUID;
             case ENERGY -> ICON_ENERGY;
@@ -180,6 +189,9 @@ public final class TransferGraphGuiTextures {
             case REROUTE -> ICON_REROUTE;
             case BACKPACK -> ICON_BACKPACK;
             case TRASH -> ICON_TRASH;
+            case LIMIT_GATE -> ICON_LIMIT_GATE;
+            case JUMP_IN -> ICON_JUMP_IN;
+            case JUMP_OUT -> ICON_JUMP_OUT;
             case ITEM -> ICON_ITEM;
             case FLUID -> ICON_FLUID;
             case ENERGY -> ICON_ENERGY;
@@ -249,11 +261,11 @@ public final class TransferGraphGuiTextures {
 
     private static void blit(GuiGraphics g, int x, int y, int w, int h, int u, int v, int uw, int vh) {
         if (w <= 0 || h <= 0 || uw <= 0 || vh <= 0) return;
-        g.blit(TEXTURE, x, y, w, h, (float) (u * TEX_SCALE), (float) (v * TEX_SCALE), uw * TEX_SCALE, vh * TEX_SCALE, TEX_W, TEX_H);
+        tintedBlit(g, x, y, w, h, u, v, uw, vh, Theme.uiColor(0xFFFFFFFF));
     }
 
     private static void fill(GuiGraphics g, int x, int y, int w, int h, int color) {
-        tintedBlit(g, x, y, w, h, WHITE_PIXEL.u, WHITE_PIXEL.v, WHITE_PIXEL.w, WHITE_PIXEL.h, color);
+        tintedBlit(g, x, y, w, h, WHITE_PIXEL.u, WHITE_PIXEL.v, WHITE_PIXEL.w, WHITE_PIXEL.h, Theme.uiColor(color));
     }
 
     private static void tintedBlit(GuiGraphics g, int x, int y, int w, int h, int u, int v, int uw, int vh, int color) {

@@ -289,8 +289,12 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         addWidget(chestIdEdit);
         syncChestIdEdit(true);
 
-        PacketDistributor.sendToServer(new RequestProductionStatsPacket());
+        requestProductionStatsForChest();
         rebuildPageWidgets();
+    }
+
+    private void requestProductionStatsForChest() {
+        PacketDistributor.sendToServer(new RequestProductionStatsPacket(cacheGraphKind, cacheGraphTeamId));
     }
 
     /** 切换页面 */
@@ -316,7 +320,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         updatePageButtonLabel();
 
         if (isSettingsPage()) {
-            PacketDistributor.sendToServer(new RequestProductionStatsPacket());
+            requestProductionStatsForChest();
             int cardX = leftPos + BaseChestMenu.PANEL_PADDING;
             int cardY = topPos + BaseChestMenu.HEADER_HEIGHT + 8;
             int cardW = panelW - BaseChestMenu.PANEL_PADDING * 2;
@@ -335,7 +339,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
 
     private void toggleProductionStats() {
         String groupId = cacheProductionStatsEnabled ? "" : selectedProductionGroupId();
-        PacketDistributor.sendToServer(new UpdateProductionStatsPacket("SET_CURRENT_CHEST_GROUP", List.of(groupId)));
+        PacketDistributor.sendToServer(new UpdateProductionStatsPacket(cacheGraphKind, cacheGraphTeamId, "SET_CURRENT_CHEST_GROUP", List.of(groupId)));
     }
 
     private void syncChestIdEdit(boolean force) {
@@ -458,6 +462,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
                     int count = entry.count();
 
                     g.renderItem(stack, slotX, slotY);
+                    g.renderItemDecorations(font, stack, slotX, slotY, null);
                     renderCountText(g, BaseChestMenu.formatCount(count), slotX, slotY);
 
                     if (hovered) {
@@ -499,7 +504,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         resourceScroll = Math.max(0, Math.min(maxResourceScroll(), resourceScroll));
         ChestGuiTextures.panelLighter(g, x, y, w, h);
 
-        g.enableScissor(x + 1, viewportTop, x + w - 1, viewportBottom);
+        Theme.enableScissor(g, x + 1, viewportTop, x + w - 1, viewportBottom);
         int cardY = contentY;
 
         if (cacheCreateLoaded) {
@@ -638,7 +643,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         settingsScroll = Math.max(0, Math.min(maxSettingsScroll(), settingsScroll));
         int graphY = viewportTop + 4 - settingsScroll;
 
-        g.enableScissor(leftPos + 1, viewportTop, leftPos + panelW - 1, viewportBottom);
+        Theme.enableScissor(g, leftPos + 1, viewportTop, leftPos + panelW - 1, viewportBottom);
         ChestGuiTextures.panelLighterCompact(g, cardX, graphY, cardW, graphH);
         Theme.text(g, font, "可视化节点", cardX + 10, graphY + 7, Theme.TEXT);
         Theme.text(g, font, "编辑连线与过滤", cardX + 10, graphY + 20, Theme.TEXT_MUTED);
@@ -811,6 +816,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             case BaseChestBlockEntity.NETWORK_UPGRADE_SLOT -> ChestGuiTextures.UpgradeGlyph.NETWORK;
             case BaseChestBlockEntity.ENERGY_UPGRADE_SLOT -> ChestGuiTextures.UpgradeGlyph.ENERGY;
             case BaseChestBlockEntity.STRESS_UPGRADE_SLOT -> ChestGuiTextures.UpgradeGlyph.STRESS;
+            case BaseChestBlockEntity.SUITE_UPGRADE_SLOT -> ChestGuiTextures.UpgradeGlyph.SUITE;
             default -> ChestGuiTextures.UpgradeGlyph.STORAGE;
         };
     }
@@ -835,6 +841,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             case BaseChestBlockEntity.NETWORK_UPGRADE_SLOT -> new ItemStack(ModItems.NETWORK_UPGRADE.get());
             case BaseChestBlockEntity.ENERGY_UPGRADE_SLOT -> new ItemStack(ModItems.ENERGY_TRANSFER_UPGRADE.get());
             case BaseChestBlockEntity.STRESS_UPGRADE_SLOT -> new ItemStack(ModItems.STRESS_UPGRADE.get());
+            case BaseChestBlockEntity.SUITE_UPGRADE_SLOT -> new ItemStack(ModItems.SUITE_UPGRADE.get());
             default -> ItemStack.EMPTY;
         };
     }
@@ -844,8 +851,9 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             case BaseChestBlockEntity.STORAGE_UPGRADE_SLOT -> "存储升级";
             case BaseChestBlockEntity.FLUID_UPGRADE_SLOT -> "流体升级";
             case BaseChestBlockEntity.NETWORK_UPGRADE_SLOT -> "网络升级";
-            case BaseChestBlockEntity.ENERGY_UPGRADE_SLOT -> "电力传输升级";
+            case BaseChestBlockEntity.ENERGY_UPGRADE_SLOT -> "电力升级";
             case BaseChestBlockEntity.STRESS_UPGRADE_SLOT -> "应力升级";
+            case BaseChestBlockEntity.SUITE_UPGRADE_SLOT -> "套件升级";
             default -> "预留";
         };
     }
@@ -947,6 +955,8 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
                 lines.add(Component.literal("电力: " + cacheEnergyStored + " / " + cacheMaxEnergyStored + " FE，单次 " + cacheEnergyTransferLimit + " FE").withStyle(ChatFormatting.DARK_GRAY));
             } else if (hoveredUpgradeSlot == BaseChestBlockEntity.STRESS_UPGRADE_SLOT) {
                 lines.add(Component.literal(cacheCreateLoaded ? "启用 Create 应力端口" : "Create 未安装时不生效").withStyle(ChatFormatting.DARK_GRAY));
+            } else if (hoveredUpgradeSlot == BaseChestBlockEntity.SUITE_UPGRADE_SLOT) {
+                lines.add(Component.literal("为尘歌玉盘仓库启用右侧套件区").withStyle(ChatFormatting.DARK_GRAY));
             }
             if (!stack.isEmpty()) lines.add(Component.literal("左键放入/取一组 · 右键放入/取一个").withStyle(ChatFormatting.DARK_GRAY));
             g.renderComponentTooltip(font, lines, mx, my);
@@ -1131,6 +1141,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             send(21, "PRIVATE|");
             cacheGraphKind = "PRIVATE";
             cacheGraphTeamId = "";
+            requestProductionStatsForChest();
             return true;
         }
         if (Theme.inside(mx, my, graphTierButtonX(cardX, cardW, 1), accessY + 23, graphTierButtonW(cardW, 1), 16)) {
@@ -1139,6 +1150,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
                 send(21, "PROTECTED|" + teamId);
                 cacheGraphKind = "PROTECTED";
                 cacheGraphTeamId = teamId;
+                requestProductionStatsForChest();
             }
             return true;
         }
@@ -1146,11 +1158,13 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             send(21, "PUBLIC|");
             cacheGraphKind = "PUBLIC";
             cacheGraphTeamId = "";
+            requestProductionStatsForChest();
             return true;
         }
         if (Theme.inside(mx, my, graphTierButtonX(cardX, cardW, 3), accessY + 23, graphTierButtonW(cardW, 3), 16)) {
             send(21, "SPACE|");
             cacheGraphKind = "SPACE";
+            requestProductionStatsForChest();
             return true;
         }
 
@@ -1169,7 +1183,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
             for (int i = 0; i < visible; i++) {
                 int rowY = listY + 3 + i * rowH;
                 if (Theme.inside(mx, my, selectorX + 3, rowY, selectorW - 6, rowH)) {
-                    PacketDistributor.sendToServer(new UpdateProductionStatsPacket("SET_CURRENT_CHEST_GROUP", List.of(groups.get(i).id())));
+                    PacketDistributor.sendToServer(new UpdateProductionStatsPacket(cacheGraphKind, cacheGraphTeamId, "SET_CURRENT_CHEST_GROUP", List.of(groups.get(i).id())));
                     statsGroupDropdownOpen = false;
                     return true;
                 }
@@ -1184,7 +1198,7 @@ public abstract class BaseChestScreen<T extends BaseChestMenu> extends AbstractC
         }
         if (Theme.inside(mx, my, selectorX, selectorY, selectorW, 18)) {
             statsGroupDropdownOpen = !statsGroupDropdownOpen;
-            if (ClientProductionStatsCache.atomicGroups().isEmpty()) PacketDistributor.sendToServer(new RequestProductionStatsPacket());
+            if (ClientProductionStatsCache.atomicGroups().isEmpty()) requestProductionStatsForChest();
             return true;
         }
         return true;

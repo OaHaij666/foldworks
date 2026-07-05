@@ -191,7 +191,7 @@ public class CreatePage extends Page {
         int formTop = y + pad;
         int formBottom = y + h - footerH;
 
-        g.enableScissor(x, formTop, x + w, formBottom);
+        Theme.enableScissor(g, x, formTop, x + w, formBottom);
         int cy = formTop - (int) formScroll;
 
         // 空间类型：平坦 / 自然 / 无限
@@ -252,19 +252,25 @@ public class CreatePage extends Page {
         int cancelW = 96;
         cancelBtn.bounds(x + w - pad - cancelW, btnY, cancelW, 28);
         int createW = w - pad * 2 - cancelW - Theme.GAP;
-        createBtn.label(status.isEmpty()
-                        ? Component.translatable("pockethomestead.space.create_and_enter").getString()
-                        : status)
+        String createLabel = status.isEmpty()
+                ? Component.translatable("pockethomestead.space.create_and_enter").getString()
+                : status;
+        createBtn.label(createLabel)
                 .bounds(formX, btnY, createW, 28)
                 .render(g, mouseX, mouseY, partialTick);
-        // 经验预估：在创建按钮正下方一行小字，仅显示数字
         if (status.isEmpty()) {
             int expCost = estimateExpCost();
             String expText = String.valueOf(expCost);
-            int expW = Theme.styledWidth(font, expText);
-            int expX = formX + createW - expW;
-            int expY = btnY + 30;
-            g.drawString(font, Theme.styled(expText), expX, expY, Theme.TEXT_FAINT, false);
+            int labelW = Theme.styledWidth(font, createLabel);
+            int expTextW = Math.round(font.width(expText) * 0.75f);
+            int expX = Math.min(formX + createW - expTextW - 10, formX + (createW + labelW) / 2 + 5);
+            int expY = btnY + 10;
+            Theme.fillRound(g, expX, expY + 2, 5, 5, 3, 0xFF63C85E);
+            g.pose().pushPose();
+            g.pose().translate(expX + 8, expY + 1, 0);
+            g.pose().scale(0.75f, 0.75f, 1.0f);
+            g.drawString(font, Theme.styled(expText), 0, 0, 0xFF43A047, false);
+            g.pose().popPose();
         }
         cancelBtn.render(g, mouseX, mouseY, partialTick);
     }

@@ -97,6 +97,23 @@ public class OfflineChestSnapshotStorage extends SavedData {
         setDirty();
     }
 
+    public void captureMoving(BaseChestBlockEntity chest, long gameTime) {
+        if (!validChest(chest)) return;
+        Snapshot snapshot = snapshotFrom(chest, false, gameTime);
+        Snapshot previous = findSnapshot(snapshot.dimensionKey, snapshot.pos(), snapshot.chestId);
+        if (previous != null) {
+            snapshot.sampledStressSpeed = previous.sampledStressSpeed;
+            snapshot.sampledStressCapacity = previous.sampledStressCapacity;
+            snapshot.stressLeases.putAll(previous.copyStressLeases());
+            snapshot.lastSimulatedGameTime = Math.max(gameTime, previous.lastSimulatedGameTime);
+        }
+        snapshot.moving = true;
+        snapshot.status = SnapshotStatus.MOVING;
+        snapshot.statusMessage = "运动中";
+        snapshots.put(snapshot.key(), snapshot);
+        setDirty();
+    }
+
     /**
      * 将离线快照合并到刚加载的箱子。
      *
@@ -108,6 +125,7 @@ public class OfflineChestSnapshotStorage extends SavedData {
         if (!validChest(chest)) return;
         Snapshot snapshot = findSnapshot(chest.getLevel().dimension().location().toString(), chest.getBlockPos(), chest.getChestId());
         if (snapshot != null
+                && !snapshot.moving()
                 && snapshot.owner != null
                 && snapshot.owner.equals(chest.getOwnerUUID())
                 && snapshot.lastSimulatedGameTime > snapshot.lastLoadedGameTime) {
@@ -206,6 +224,7 @@ public class OfflineChestSnapshotStorage extends SavedData {
         for (Snapshot snapshot : tickSortBuffer) {
             if (processed >= budget) break;
             if (snapshot.loaded) continue;
+            if (snapshot.moving) continue;
             processed++;
             tickSnapshot(server, snapshot, gameTime);
         }
@@ -284,19 +303,33 @@ public class OfflineChestSnapshotStorage extends SavedData {
         if (server == null || snapshot.owner == null || resourceKey == null || amount <= 0) return;
         ProductionStatsStorage stats = ProductionStatsStorage.get(server);
         String chestKey = ProductionStatsStorage.chestKey(snapshot.dimensionKey, snapshot.pos());
-        if (input) stats.recordInput(snapshot.owner, chestKey, resourceKey, amount, gameTime);
-        else stats.recordOutput(snapshot.owner, chestKey, resourceKey, amount, gameTime);
+        String scopeKey = productionStatsScopeKey(snapshot);
+        if (scopeKey.isBlank()) return;
+        if (input) stats.recordInput(scopeKey, chestKey, resourceKey, amount, gameTime);
+        else stats.recordOutput(scopeKey, chestKey, resourceKey, amount, gameTime);
         refreshProductionInventory(server, snapshot);
         setDirty();
     }
 
     private void refreshProductionInventory(MinecraftServer server, Snapshot snapshot) {
         if (server == null || snapshot.owner == null) return;
+        String scopeKey = productionStatsScopeKey(snapshot);
+        if (scopeKey.isBlank()) return;
         ProductionStatsStorage.get(server).refreshChestInventory(
-                snapshot.owner,
+                scopeKey,
                 ProductionStatsStorage.chestKey(snapshot.dimensionKey, snapshot.pos()),
                 snapshot.productionResourceSnapshot()
         );
+    }
+
+    private static String productionStatsScopeKey(Snapshot snapshot) {
+        if (snapshot == null || snapshot.owner == null) return "";
+        return switch (snapshot.graphKind) {
+            case PUBLIC -> "";
+            case PRIVATE -> ProductionStatsStorage.privateScope(snapshot.owner);
+            case PROTECTED -> snapshot.graphTeamId == null ? "" : ProductionStatsStorage.teamScope(snapshot.graphTeamId);
+            case SPACE -> snapshot.spaceId == null ? "" : ProductionStatsStorage.spaceScope(snapshot.spaceId);
+        };
     }
 
     private Snapshot snapshotFrom(BaseChestBlockEntity chest, boolean loaded, long gameTime) {
@@ -309,6 +342,7 @@ public class OfflineChestSnapshotStorage extends SavedData {
         snapshot.owner = chest.getOwnerUUID();
         snapshot.spaceId = space == null ? null : space.getSpaceId();
         snapshot.loaded = loaded;
+        snapshot.moving = false;
         snapshot.lastLoadedGameTime = gameTime;
         snapshot.lastSimulatedGameTime = loaded ? gameTime : Math.max(gameTime, snapshot.lastSimulatedGameTime);
         snapshot.chestOfflineEnabled = chest.isOfflineSnapshotEnabled();
@@ -431,6 +465,7 @@ public class OfflineChestSnapshotStorage extends SavedData {
 
     public enum SnapshotStatus {
         LOADED,
+        MOVING,
         OFFLINE_SIMULATED,
         OFFLINE_DISABLED,
         MISSING
@@ -443,6 +478,7 @@ public class OfflineChestSnapshotStorage extends SavedData {
         private UUID owner;
         private UUID spaceId;
         private boolean loaded;
+        private boolean moving;
         private boolean chestOfflineEnabled;
         private boolean hasNetworkUpgrade;
         private boolean voidModeEnabled;
@@ -486,6 +522,7 @@ public class OfflineChestSnapshotStorage extends SavedData {
         public UUID owner() { return owner; }
         public UUID spaceId() { return spaceId; }
         public boolean loaded() { return loaded; }
+        public boolean moving() { return moving; }
         public boolean chestOfflineEnabled() { return chestOfflineEnabled; }
         public boolean hasNetworkUpgrade() { return hasNetworkUpgrade; }
         public boolean voidModeEnabled() { return voidModeEnabled; }
@@ -519,6 +556,7 @@ public class OfflineChestSnapshotStorage extends SavedData {
         }
 
         public boolean shouldSimulate(MinecraftServer server) {
+            if (moving) return false;
             if (chestOfflineEnabled) return true;
             if (spaceId == null) return false;
             SpaceData space = SpaceManager.getInstance().getSpace(spaceId);
@@ -809,6 +847,7 @@ public class OfflineChestSnapshotStorage extends SavedData {
             if (owner != null) tag.putUUID("Owner", owner);
             if (spaceId != null) tag.putUUID("SpaceId", spaceId);
             tag.putBoolean("Loaded", loaded);
+            tag.putBoolean("Moving", moving);
             tag.putBoolean("ChestOfflineEnabled", chestOfflineEnabled);
             tag.putBoolean("HasNetworkUpgrade", hasNetworkUpgrade);
             tag.putBoolean("VoidModeEnabled", voidModeEnabled);
@@ -885,6 +924,7 @@ public class OfflineChestSnapshotStorage extends SavedData {
             snapshot.owner = tag.hasUUID("Owner") ? tag.getUUID("Owner") : null;
             snapshot.spaceId = tag.hasUUID("SpaceId") ? tag.getUUID("SpaceId") : null;
             snapshot.loaded = tag.getBoolean("Loaded");
+            snapshot.moving = tag.getBoolean("Moving");
             snapshot.chestOfflineEnabled = tag.getBoolean("ChestOfflineEnabled");
             snapshot.hasNetworkUpgrade = tag.getBoolean("HasNetworkUpgrade");
             snapshot.voidModeEnabled = tag.getBoolean("VoidModeEnabled");

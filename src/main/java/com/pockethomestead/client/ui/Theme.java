@@ -19,6 +19,8 @@ import org.joml.Matrix4f;
  */
 public final class Theme {
     private Theme() {}
+    public static final float UI_BRIGHTNESS = 0.80f;
+    private static float scissorScale = 1.0f;
 
     // ---------------------------------------------------------------------
     // 抗锯齿圆角纹理（运行时生成）
@@ -150,6 +152,7 @@ public final class Theme {
      *  半径会被夹紧到 [0, min(w,h)/2]。 */
     public static void fillRound(GuiGraphics g, int x, int y, int w, int h, int radius, int color) {
         if (w <= 0 || h <= 0) return;
+        color = uiColor(color);
         int r = Math.max(0, Math.min(radius, Math.min(w, h) / 2));
         if (r == 0) {
             g.fill(x, y, x + w, y + h, color);
@@ -209,6 +212,7 @@ public final class Theme {
     /** 仅描边（不填充内部，用于高亮选中态外圈）。绘制4条1px边框条近似圆角描边。 */
     public static void outlineRound(GuiGraphics g, int x, int y, int w, int h, int radius, int border) {
         if (w <= 0 || h <= 0) return;
+        border = uiColor(border);
         int r = Math.max(0, Math.min(radius, Math.min(w, h) / 2));
         // 上边
         for (int i = 0; i < r; i++) {
@@ -251,20 +255,20 @@ public final class Theme {
     // ---------------------------------------------------------------------
 
     public static void text(GuiGraphics g, Font font, String s, int x, int y, int color) {
-        g.drawString(font, styled(s), x, y, color, false);
+        g.drawString(font, styled(s), x, y, uiColor(color), false);
     }
 
     public static void textCentered(GuiGraphics g, Font font, String s, int cx, int y, int color) {
-        g.drawString(font, styled(s), cx - styledWidth(font, s) / 2, y, color, false);
+        g.drawString(font, styled(s), cx - styledWidth(font, s) / 2, y, uiColor(color), false);
     }
 
     public static void textRight(GuiGraphics g, Font font, String s, int rx, int y, int color) {
-        g.drawString(font, styled(s), rx - styledWidth(font, s), y, color, false);
+        g.drawString(font, styled(s), rx - styledWidth(font, s), y, uiColor(color), false);
     }
 
     /** 居中（含垂直居中）到给定矩形。 */
     public static void textInBox(GuiGraphics g, Font font, String s, int x, int y, int w, int h, int color) {
-        g.drawString(font, styled(s), x + (w - styledWidth(font, s)) / 2, y + (h - font.lineHeight) / 2 + 1, color, false);
+        g.drawString(font, styled(s), x + (w - styledWidth(font, s)) / 2, y + (h - font.lineHeight) / 2 + 1, uiColor(color), false);
     }
 
     /** 截断到最大宽度，超出加省略号。 */
@@ -290,11 +294,11 @@ public final class Theme {
     // ---------------------------------------------------------------------
 
     public static void hLine(GuiGraphics g, int x, int y, int w, int color) {
-        g.fill(x, y, x + w, y + 1, color);
+        g.fill(x, y, x + w, y + 1, uiColor(color));
     }
 
     public static void vLine(GuiGraphics g, int x, int y, int h, int color) {
-        g.fill(x, y, x + 1, y + h, color);
+        g.fill(x, y, x + 1, y + h, uiColor(color));
     }
 
     public static void line(GuiGraphics g, float x1, float y1, float x2, float y2, float thickness, int color) {
@@ -302,6 +306,7 @@ public final class Theme {
         float dy = y2 - y1;
         float len = (float) Math.sqrt(dx * dx + dy * dy);
         if (len <= 0.001f || thickness <= 0f) return;
+        color = uiColor(color);
 
         float nx = -dy / len * thickness / 2f;
         float ny = dx / len * thickness / 2f;
@@ -364,6 +369,30 @@ public final class Theme {
 
     public static boolean inside(double mx, double my, int x, int y, int w, int h) {
         return mx >= x && mx < x + w && my >= y && my < y + h;
+    }
+
+    public static void scissorScale(float scale) {
+        scissorScale = Math.max(0.01f, scale);
+    }
+
+    public static void resetScissorScale() {
+        scissorScale = 1.0f;
+    }
+
+    public static void enableScissor(GuiGraphics g, int minX, int minY, int maxX, int maxY) {
+        g.enableScissor(
+                Math.round(minX * scissorScale),
+                Math.round(minY * scissorScale),
+                Math.round(maxX * scissorScale),
+                Math.round(maxY * scissorScale));
+    }
+
+    public static int uiColor(int color) {
+        int a = color & 0xFF000000;
+        int r = Math.round(((color >> 16) & 0xFF) * UI_BRIGHTNESS);
+        int g = Math.round(((color >> 8) & 0xFF) * UI_BRIGHTNESS);
+        int b = Math.round((color & 0xFF) * UI_BRIGHTNESS);
+        return a | (Math.min(255, r) << 16) | (Math.min(255, g) << 8) | Math.min(255, b);
     }
 
     /** 颜色按比例线性插值（用于 hover 过渡），t∈[0,1]。 */

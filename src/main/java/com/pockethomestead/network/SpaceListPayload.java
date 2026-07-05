@@ -16,7 +16,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import java.util.ArrayList;
 import java.util.List;
 
-public record SpaceListPayload(List<SpaceInfo> spaces) implements CustomPacketPayload {
+public record SpaceListPayload(List<SpaceInfo> spaces, SpaceInfo ownerPermission) implements CustomPacketPayload {
     public static final CustomPacketPayload.Type<SpaceListPayload> TYPE =
             new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(PocketHomestead.MODID, "space_list"));
 
@@ -25,14 +25,20 @@ public record SpaceListPayload(List<SpaceInfo> spaces) implements CustomPacketPa
             var list = p.spaces();
             ByteBufCodecs.VAR_INT.encode(buf, list.size());
             for (SpaceInfo s : list) SpaceInfo.STREAM_CODEC.encode(buf, s);
+            SpaceInfo.STREAM_CODEC.encode(buf, p.ownerPermission());
         },
         buf -> {
             int n = ByteBufCodecs.VAR_INT.decode(buf);
             List<SpaceInfo> list = new ArrayList<>(n);
             for (int i = 0; i < n; i++) list.add(SpaceInfo.STREAM_CODEC.decode(buf));
-            return new SpaceListPayload(List.copyOf(list));
+            SpaceInfo ownerPermission = SpaceInfo.STREAM_CODEC.decode(buf);
+            return new SpaceListPayload(List.copyOf(list), ownerPermission);
         }
     );
+
+    public SpaceListPayload(List<SpaceInfo> spaces) {
+        this(spaces, null);
+    }
 
     @Override
     public Type<? extends CustomPacketPayload> type() { return TYPE; }
@@ -42,7 +48,9 @@ public record SpaceListPayload(List<SpaceInfo> spaces) implements CustomPacketPa
         List<SpaceInfo> infos = SpaceManager.getInstance()
                 .getAccessibleSpaces(player.getUUID())
                 .stream().map(s -> SpaceInfo.from(player.server, s)).toList();
-        PacketDistributor.sendToPlayer(player, new SpaceListPayload(infos));
+        SpaceInfo ownerPermission = SpaceInfo.ownerPermission(player.server, player.getUUID(),
+                SpaceManager.getInstance().ownerPermission(player.getUUID()));
+        PacketDistributor.sendToPlayer(player, new SpaceListPayload(infos, ownerPermission));
     }
 
     /** 服务端便捷方法：向所有在线玩家广播各自可访问的空间列表。
@@ -55,6 +63,6 @@ public record SpaceListPayload(List<SpaceInfo> spaces) implements CustomPacketPa
     }
 
     public static void handleOnClient(SpaceListPayload payload, IPayloadContext context) {
-        context.enqueueWork(() -> ClientSpaceCache.update(payload.spaces()));
+        context.enqueueWork(() -> ClientSpaceCache.update(payload.spaces(), payload.ownerPermission()));
     }
 }

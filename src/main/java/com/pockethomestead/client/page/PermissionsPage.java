@@ -35,9 +35,7 @@ public class PermissionsPage extends Page {
     };
     private static final SpacePermission.AccessLevel[] TEAM_LEVELS = {
             SpacePermission.AccessLevel.VIEW,
-            SpacePermission.AccessLevel.USE,
-            SpacePermission.AccessLevel.WRITE,
-            SpacePermission.AccessLevel.MANAGE
+            SpacePermission.AccessLevel.WRITE
     };
 
     private final List<SpaceInfo> spaces = new ArrayList<>();
@@ -50,7 +48,7 @@ public class PermissionsPage extends Page {
     private EditBox teamNameInput;
     private EditBox teamMemberInput;
     private EditBox privateMemberInput;
-    private SpacePermission.AccessLevel teamAddLevel = SpacePermission.AccessLevel.WRITE;
+    private SpacePermission.AccessLevel teamAddLevel = SpacePermission.AccessLevel.VIEW;
     private SpacePermission.AccessLevel privateAddLevel = SpacePermission.AccessLevel.USE;
     private long lastSeenSpaceVersion = -1;
     private boolean teamHelpOpen;
@@ -165,12 +163,13 @@ public class PermissionsPage extends Page {
             return;
         }
         syncTeamNameInput(team);
-        boolean canManage = levelFromName(team.selfLevel()).allows(SpacePermission.AccessLevel.MANAGE);
+        boolean canManage = isSelf(team.ownerId());
+        boolean invited = team.invited();
         boolean owner = isSelf(team.ownerId());
         Theme.text(g, font, Theme.ellipsize(font, team.name(), Math.max(40, dw - 96)), dx + 10, dy + 9, Theme.TEXT);
         renderTeamHelpButton(g, mx, my, dx + 72, dy + 7);
-        Theme.textRight(g, font, owner ? "所有者" : levelLabel(levelFromName(team.selfLevel())), dx + dw - 10, dy + 9,
-                owner ? Theme.SUCCESS : Theme.TEXT_MUTED);
+        Theme.textRight(g, font, owner ? "团长" : invited ? "待确认" : teamLevelLabel(levelFromName(team.selfLevel())), dx + dw - 10, dy + 9,
+                owner ? Theme.SUCCESS : invited ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED);
 
         int curY = dy + 28;
         if (teamHelpOpen) {
@@ -182,6 +181,11 @@ public class PermissionsPage extends Page {
             button(g, dx + dw - 116, curY, 52, 20, "重命名", true, mx, my);
             button(g, dx + dw - 58, curY, 48, 20, "解散", owner, mx, my);
             curY += 30;
+        } else if (invited) {
+            Theme.text(g, font, "团队邀请", dx + 10, curY + 6, Theme.TEXT_MUTED);
+            button(g, dx + dw - 116, curY, 52, 20, "接受", true, mx, my);
+            button(g, dx + dw - 58, curY, 48, 20, "拒绝", true, mx, my);
+            curY += 30;
         }
 
         if (canManage) {
@@ -189,7 +193,7 @@ public class PermissionsPage extends Page {
             int levelW = 52;
             int inputW = Math.max(76, dw - 20 - addW - levelW - 8);
             renderPlayerInput(g, teamMemberInput, dx + 10, curY, inputW, 20, "玩家名或 UUID", PlayerPicker.TEAM, mx, my, pt, true);
-            chip(g, dx + 14 + inputW, curY, levelW, 20, levelLabel(teamAddLevel), true, mx, my);
+            chip(g, dx + 14 + inputW, curY, levelW, 20, teamLevelLabel(teamAddLevel), true, mx, my);
             button(g, dx + 18 + inputW + levelW, curY, addW, 20, "添加", true, mx, my);
             curY += 28;
         }
@@ -227,13 +231,18 @@ public class PermissionsPage extends Page {
             TransferGraphSyncPacket.TeamMemberData member = members.get(i + teamMemberScroll);
             int ry = rowTop + i * rowH;
             boolean ownerRow = member.id().equals(team.ownerId());
+            boolean pending = member.pending();
             Theme.panel(g, lx, ry, lw, rowH - 3, 4, Theme.SURFACE_ALT, Theme.DIVIDER);
             int deleteW = canManage && !ownerRow ? 17 : 0;
             int levelW = 52;
             int nameW = Math.max(48, lw - levelW - deleteW - 18);
             String displayName = member.name() == null || member.name().isBlank() ? shortId(member.id()) : member.name();
-            Theme.text(g, font, Theme.ellipsize(font, displayName + (ownerRow ? "  所有者" : ""), nameW), lx + 6, ry + 5, Theme.TEXT);
-            chip(g, lx + nameW + 6, ry + 2, levelW, 15, levelLabel(levelFromName(member.level())), canManage && !ownerRow, mx, my);
+            String suffix = ownerRow ? "  团长" : pending ? "  待确认" : "";
+            Theme.text(g, font, Theme.ellipsize(font, displayName + suffix, nameW), lx + 6, ry + 5,
+                    pending ? Theme.TEXT_MUTED : Theme.TEXT);
+            chip(g, lx + nameW + 6, ry + 2, levelW, 15,
+                    pending ? "邀请" : teamLevelLabel(levelFromName(member.level())),
+                    canManage && !ownerRow && !pending, mx, my);
             if (deleteW > 0) {
                 Theme.textInBox(g, font, "×", lx + lw - 18, ry + 1, 17, 17,
                         Theme.inside(mx, my, lx + lw - 18, ry + 1, 17, 17) ? Theme.DANGER : Theme.TEXT_FAINT);
@@ -243,27 +252,20 @@ public class PermissionsPage extends Page {
 
     private void renderPrivateRules(GuiGraphics g, int mx, int my, float pt, int dx, int dy, int dw, int dh) {
         Theme.panel(g, dx, dy, dw, dh, Theme.RADIUS, 0xFFF8FCFF, Theme.DIVIDER);
-        List<SpaceInfo> owned = ownedSpaces();
+        SpaceInfo profile = privatePermissionProfile();
         Theme.text(g, font, "我的私有权限", dx + 10, dy + 8, Theme.TEXT);
-        Theme.textRight(g, font, owned.size() + " 个家园", dx + dw - 10, dy + 8, owned.isEmpty() ? Theme.TEXT_FAINT : Theme.TEXT_MUTED);
-        if (owned.isEmpty()) {
-            Theme.textCentered(g, font, "创建家园后可配置默认访问规则", dx + dw / 2, dy + dh / 2 - 4, Theme.TEXT_FAINT);
-            return;
-        }
 
-        boolean mixed = privateRulesMixed(owned);
         int rowY = dy + 28;
         Theme.text(g, font, "默认权限", dx + 10, rowY + 5, Theme.TEXT_MUTED);
         int chipX = dx + 70;
         int chipW = Math.max(38, Math.min(56, (dw - 86) / PRIVATE_DEFAULT_LEVELS.length));
-        SpacePermission.AccessLevel active = privateDefaultLevel(owned.get(0));
+        SpacePermission.AccessLevel active = privateDefaultLevel(profile);
         for (int i = 0; i < PRIVATE_DEFAULT_LEVELS.length; i++) {
             SpacePermission.AccessLevel level = PRIVATE_DEFAULT_LEVELS[i];
             drawLevelChip(g, chipX + i * (chipW + 4), rowY, chipW, 20, level, active == level, mx, my);
         }
-        if (mixed) Theme.text(g, font, "规则不一致，修改后会同步全部", dx + 10, rowY + 23, Theme.TEXT_FAINT);
 
-        int addY = rowY + (mixed ? 40 : 28);
+        int addY = rowY + 28;
         int addW = 44;
         int levelW = 52;
         int inputW = Math.max(76, dw - 20 - addW - levelW - 8);
@@ -273,7 +275,7 @@ public class PermissionsPage extends Page {
 
         int listY = addY + 28;
         Theme.hLine(g, dx + 10, listY - 4, dw - 20, Theme.DIVIDER);
-        renderPrivateMembers(g, mx, my, owned.get(0), dx + 10, listY, dw - 20, dy + dh - listY - 8);
+        renderPrivateMembers(g, mx, my, profile, dx + 10, listY, dw - 20, dy + dh - listY - 8);
     }
 
     private void renderPrivateMembers(GuiGraphics g, int mx, int my, SpaceInfo space, int lx, int ly, int lw, int lh) {
@@ -355,7 +357,8 @@ public class PermissionsPage extends Page {
     }
 
     private boolean handleTeamDetailClick(double mx, double my, TransferGraphSyncPacket.TeamData team, int dx, int dy, int dw, int dh) {
-        boolean canManage = levelFromName(team.selfLevel()).allows(SpacePermission.AccessLevel.MANAGE);
+        boolean canManage = isSelf(team.ownerId());
+        boolean invited = team.invited();
         boolean owner = isSelf(team.ownerId());
         int curY = dy + 28;
         if (teamHelpOpen) curY += 48;
@@ -396,6 +399,17 @@ public class PermissionsPage extends Page {
                 return true;
             }
             curY += 28;
+        } else if (invited) {
+            if (Theme.inside(mx, my, dx + dw - 116, curY, 52, 20)) {
+                PacketDistributor.sendToServer(new TransferTeamPacket("ACCEPT_INVITE", team.id(), ""));
+                return true;
+            }
+            if (Theme.inside(mx, my, dx + dw - 58, curY, 48, 20)) {
+                PacketDistributor.sendToServer(new TransferTeamPacket("DECLINE_INVITE", team.id(), ""));
+                selectedTeamId = "";
+                return true;
+            }
+            curY += 30;
         }
         return handleTeamMemberClick(mx, my, team, dx + 10, curY, dw - 20, dy + dh - curY - 8, canManage);
     }
@@ -450,10 +464,11 @@ public class PermissionsPage extends Page {
         for (int i = 0; i < maxRows && i + teamMemberScroll < members.size(); i++) {
             TransferGraphSyncPacket.TeamMemberData member = members.get(i + teamMemberScroll);
             if (member.id().equals(team.ownerId())) continue;
+            boolean pending = member.pending();
             int ry = rowTop + i * rowH;
             int levelW = 52;
             int nameW = Math.max(48, lw - levelW - 17 - 18);
-            if (Theme.inside(mx, my, lx + nameW + 6, ry + 2, levelW, 15)) {
+            if (!pending && Theme.inside(mx, my, lx + nameW + 6, ry + 2, levelW, 15)) {
                 setTeamMember(team, member.id(), nextTeamLevel(levelFromName(member.level())));
                 return true;
             }
@@ -466,18 +481,18 @@ public class PermissionsPage extends Page {
     }
 
     private void handlePrivateClick(double mx, double my, int dx, int dy, int dw, int dh) {
-        List<SpaceInfo> owned = ownedSpaces();
-        if (owned.isEmpty()) return;
+        SpaceInfo profile = privatePermissionProfile();
+        if (profile == null) return;
         int rowY = dy + 28;
         int chipX = dx + 70;
         int chipW = Math.max(38, Math.min(56, (dw - 86) / PRIVATE_DEFAULT_LEVELS.length));
         for (int i = 0; i < PRIVATE_DEFAULT_LEVELS.length; i++) {
             if (Theme.inside(mx, my, chipX + i * (chipW + 4), rowY, chipW, 20)) {
-                setPrivateDefault(owned, PRIVATE_DEFAULT_LEVELS[i]);
+                setPrivateDefault(profile, PRIVATE_DEFAULT_LEVELS[i]);
                 return;
             }
         }
-        int addY = rowY + (privateRulesMixed(owned) ? 40 : 28);
+        int addY = rowY + 28;
         int addW = 44;
         int levelW = 52;
         int inputW = Math.max(76, dw - 20 - addW - levelW - 8);
@@ -495,14 +510,13 @@ public class PermissionsPage extends Page {
             return;
         }
         if (Theme.inside(mx, my, dx + 18 + inputW + levelW, addY, addW, 20)) {
-            addPrivateMember(owned);
+            addPrivateMember(profile);
             return;
         }
-        handlePrivateMemberClick(mx, my, owned, dx + 10, addY + 28, dw - 20, dy + dh - (addY + 28) - 8);
+        handlePrivateMemberClick(mx, my, profile, dx + 10, addY + 28, dw - 20, dy + dh - (addY + 28) - 8);
     }
 
-    private boolean handlePrivateMemberClick(double mx, double my, List<SpaceInfo> owned, int lx, int ly, int lw, int lh) {
-        SpaceInfo space = owned.get(0);
+    private boolean handlePrivateMemberClick(double mx, double my, SpaceInfo space, int lx, int ly, int lw, int lh) {
         List<SpaceInfo.Member> members = space.members();
         int rowTop = ly + 15;
         int rowH = 22;
@@ -514,11 +528,11 @@ public class PermissionsPage extends Page {
             int levelW = 52;
             int nameW = Math.max(48, lw - levelW - 35);
             if (Theme.inside(mx, my, lx + nameW + 8, ry + 2, levelW, 15)) {
-                setPrivateMember(owned, member.id(), nextPrivateLevel(effectiveMemberLevel(space, member)));
+                setPrivateMember(space, member.id(), nextPrivateLevel(effectiveMemberLevel(space, member)));
                 return true;
             }
             if (Theme.inside(mx, my, lx + lw - 18, ry + 1, 17, 17)) {
-                PacketDistributor.sendToServer(PermissionMemberPayload.remove(owned.get(0).spaceId(), member.id()));
+                PacketDistributor.sendToServer(PermissionMemberPayload.remove(space.spaceId(), member.id()));
                 return true;
             }
         }
@@ -553,8 +567,8 @@ public class PermissionsPage extends Page {
             int count = team == null ? 0 : team.members().size();
             teamMemberScroll = clamp(teamMemberScroll - delta, 0, Math.max(0, count - 1));
         } else {
-            SpaceInfo owned = ownedSpaces().isEmpty() ? null : ownedSpaces().get(0);
-            int count = owned == null ? 0 : owned.members().size();
+            SpaceInfo profile = privatePermissionProfile();
+            int count = profile == null ? 0 : profile.members().size();
             privateMemberScroll = clamp(privateMemberScroll - delta, 0, Math.max(0, count - 1));
         }
         return true;
@@ -580,7 +594,7 @@ public class PermissionsPage extends Page {
         }
         if (privateMemberInput != null && privateMemberInput.isFocused()) {
             if (keyCode == 257 || keyCode == 335) {
-                addPrivateMember(ownedSpaces());
+                addPrivateMember(privatePermissionProfile());
                 return true;
             }
             return privateMemberInput.keyPressed(keyCode, scanCode, modifiers) || true;
@@ -648,7 +662,7 @@ public class PermissionsPage extends Page {
         String visible = visibleTail(input.getValue(), iw - 10 - rightPadding);
         int tx = ix + 6;
         int ty = iy + (ih - 8) / 2;
-        g.enableScissor(ix + 4, iy + 2, ix + iw - rightPadding, iy + ih - 2);
+        Theme.enableScissor(g, ix + 4, iy + 2, ix + iw - rightPadding, iy + ih - 2);
         g.drawString(font, visible, tx, ty, enabled ? Theme.TEXT : Theme.TEXT_FAINT, false);
         if (input.isFocused() && ((System.currentTimeMillis() / 500L) & 1L) == 0L) {
             int cx = Math.min(ix + iw - rightPadding - 1, tx + font.width(visible) + 1);
@@ -797,23 +811,33 @@ public class PermissionsPage extends Page {
         return owned;
     }
 
-    private void setPrivateDefault(List<SpaceInfo> owned, SpacePermission.AccessLevel level) {
+    private SpaceInfo privatePermissionProfile() {
+        SpaceInfo synced = ClientSpaceCache.ownerPermission();
+        if (synced != null) return synced;
+        List<SpaceInfo> owned = ownedSpaces();
+        if (!owned.isEmpty()) return owned.get(0);
+        UUID self = selfId();
+        SpacePermission permission = new SpacePermission();
+        return new SpaceInfo(SpaceInfo.OWNER_PERMISSION_ID, self == null ? SpaceInfo.OWNER_PERMISSION_ID : self,
+                "我的私有权限", 0, 0, "", com.pockethomestead.space.SpaceData.TerrainType.FLAT, "",
+                false, 0.0f, permission.getMode(), permission.getProtectedLevel(), permission.getPublicLevel(),
+                false, false, false, List.of());
+    }
+
+    private void setPrivateDefault(SpaceInfo profile, SpacePermission.AccessLevel level) {
         SpacePermission.AccessMode mode = level == SpacePermission.AccessLevel.NONE
                 ? SpacePermission.AccessMode.PRIVATE
                 : SpacePermission.AccessMode.PUBLIC;
         SpacePermission.AccessLevel publicLevel = level == SpacePermission.AccessLevel.NONE
                 ? SpacePermission.AccessLevel.VIEW
                 : level;
-        if (!owned.isEmpty()) {
-            PacketDistributor.sendToServer(new UpdatePermissionPayload(owned.get(0).spaceId(), mode, SpacePermission.AccessLevel.USE, publicLevel));
-        }
+        if (profile != null) PacketDistributor.sendToServer(new UpdatePermissionPayload(profile.spaceId(), mode, SpacePermission.AccessLevel.USE, publicLevel));
     }
 
-    private void addPrivateMember(List<SpaceInfo> owned) {
+    private void addPrivateMember(SpaceInfo space) {
         String value = privateMemberInput == null ? "" : privateMemberInput.getValue().trim();
-        if (value.isEmpty() || owned.isEmpty()) return;
+        if (value.isEmpty() || space == null) return;
         UUID id = resolveInputPlayerId(value);
-        SpaceInfo space = owned.get(0);
         if (id != null && privateHasMember(space, id)) {
             notifyClient("该玩家已有单人权限规则");
             return;
@@ -832,22 +856,8 @@ public class PermissionsPage extends Page {
         privateMemberInput.setValue("");
     }
 
-    private void setPrivateMember(List<SpaceInfo> owned, UUID memberId, SpacePermission.AccessLevel level) {
-        if (!owned.isEmpty()) {
-            PacketDistributor.sendToServer(PermissionMemberPayload.updateById(owned.get(0).spaceId(), memberId, roleFor(level), level));
-        }
-    }
-
-    private boolean privateRulesMixed(List<SpaceInfo> owned) {
-        if (owned.size() < 2) return false;
-        SpaceInfo first = owned.get(0);
-        SpacePermission.AccessLevel level = privateDefaultLevel(first);
-        int members = first.members().size();
-        for (int i = 1; i < owned.size(); i++) {
-            SpaceInfo space = owned.get(i);
-            if (privateDefaultLevel(space) != level || space.members().size() != members) return true;
-        }
-        return false;
+    private void setPrivateMember(SpaceInfo space, UUID memberId, SpacePermission.AccessLevel level) {
+        if (space != null) PacketDistributor.sendToServer(PermissionMemberPayload.updateById(space.spaceId(), memberId, roleFor(level), level));
     }
 
     private SpacePermission.AccessLevel privateDefaultLevel(SpaceInfo space) {
@@ -894,8 +904,19 @@ public class PermissionsPage extends Page {
     }
 
     private String teamSubLabel(TransferGraphSyncPacket.TeamData team) {
-        if (isSelf(team.ownerId())) return "我创建 · " + team.members().size() + " 人";
-        return levelLabel(levelFromName(team.selfLevel())) + " · " + team.members().size() + " 人";
+        if (isSelf(team.ownerId())) return "我创建 · " + acceptedTeamMemberCount(team) + " 人";
+        if (team.invited()) return "待确认 · " + teamLevelLabel(levelFromName(team.selfLevel()));
+        return teamLevelLabel(levelFromName(team.selfLevel())) + " · " + acceptedTeamMemberCount(team) + " 人";
+    }
+
+    private int acceptedTeamMemberCount(TransferGraphSyncPacket.TeamData team) {
+        int count = 0;
+        for (TransferGraphSyncPacket.TeamMemberData member : team.members()) if (!member.pending()) count++;
+        return count;
+    }
+
+    private String teamLevelLabel(SpacePermission.AccessLevel level) {
+        return level != null && level.allows(SpacePermission.AccessLevel.WRITE) ? "管理员" : "成员";
     }
 
     private String levelLabel(SpacePermission.AccessLevel level) {

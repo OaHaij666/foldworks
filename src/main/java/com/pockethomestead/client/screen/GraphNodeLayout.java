@@ -12,6 +12,10 @@ public final class GraphNodeLayout {
     public static final int NODE_W = 202;
     public static final int REROUTE_W = 278;
     public static final int TRASH_W = 184;
+    public static final int GATE_W = 184;
+    public static final int JUMP_W = 126;
+    public static final int MINI_NODE_H = 46;
+    public static final int JUMP_H = 38;
     public static final int REROUTE_ROW_Y = 49;
 
     // 端口 X 坐标
@@ -36,6 +40,10 @@ public final class GraphNodeLayout {
         if (type.equals("TRASH")) {
             return expanded ? 88 : 74;
         }
+        if (type.equals("LIMIT_GATE")) {
+            return MINI_NODE_H;
+        }
+        if (type.equals("JUMP_INPUT") || type.equals("JUMP_OUTPUT")) return JUMP_H;
         if (type.equals("PLAYER_INVENTORY")) {
             if (!expanded) return 78;
             return 74 + Math.max(1, replenishCount) * 18 + 8;
@@ -48,6 +56,8 @@ public final class GraphNodeLayout {
 
     public static int nodeWidth(String type) {
         if (type.equals("REROUTE")) return REROUTE_W;
+        if (type.equals("LIMIT_GATE")) return GATE_W;
+        if (type.equals("JUMP_INPUT") || type.equals("JUMP_OUTPUT")) return JUMP_W;
         if (type.equals("TRASH") || type.equals("PLAYER_INVENTORY")) return TRASH_W;
         return NODE_W;
     }

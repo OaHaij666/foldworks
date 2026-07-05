@@ -18,6 +18,9 @@ public final class ClientProductionStatsCache {
                                 List<Integer> trendNet) {}
 
     private static long serverGameTime;
+    private static String scopeKind = ProductionStatsStorage.PRIVATE_SCOPE;
+    private static String scopeId = "";
+    private static List<ProductionStatsSyncPacket.ScopeData> scopeOptions = List.of();
     private static List<ProductionStatsSyncPacket.GroupData> groups = List.of();
     private static List<ProductionStatsSyncPacket.BucketData> buckets = List.of();
     private static List<ProductionStatsSyncPacket.InventoryData> inventories = List.of();
@@ -32,6 +35,9 @@ public final class ClientProductionStatsCache {
 
     public static void update(ProductionStatsSyncPacket packet) {
         serverGameTime = packet.serverGameTime();
+        scopeKind = packet.scopeKind();
+        scopeId = packet.scopeId();
+        scopeOptions = List.copyOf(packet.scopeOptions());
         groups = List.copyOf(packet.groups());
         buckets = List.copyOf(packet.buckets());
         inventories = List.copyOf(packet.inventories());
@@ -41,6 +47,9 @@ public final class ClientProductionStatsCache {
     }
 
     public static long serverGameTime() { return serverGameTime; }
+    public static String scopeKind() { return scopeKind; }
+    public static String scopeId() { return scopeId; }
+    public static List<ProductionStatsSyncPacket.ScopeData> scopeOptions() { return scopeOptions; }
     public static List<ProductionStatsSyncPacket.GroupData> groups() { return groups; }
     public static List<ProductionStatsSyncPacket.BucketData> buckets() { return buckets; }
     public static List<ProductionStatsSyncPacket.InventoryData> inventories() { return inventories; }

@@ -31,14 +31,15 @@ public record TransferGraphSyncPacket(
             ResourceLocation.fromNamespaceAndPath("pockethomestead", "transfer_graph_sync"));
 
     public record GraphOptionData(String kind, String id, String label, boolean writable) {}
-    public record TeamMemberData(String id, String name, String level) {}
-    public record TeamData(String id, String name, String ownerId, String selfLevel, List<TeamMemberData> members) {}
+    public record TeamMemberData(String id, String name, String level, boolean pending) {}
+    public record TeamData(String id, String name, String ownerId, String selfLevel, boolean invited, List<TeamMemberData> members) {}
     public record PageData(String id, String name, boolean enabled, int order) {}
     public record NodeFlowData(String itemId, int inputRatePerMinute, int outputRatePerMinute, long inputTotal, long outputTotal) {}
     public record ReplenishRuleData(String itemId, int targetCount) {}
     public record NodeData(String id, String pageId, String type, String chestId, String dimensionKey, long pos, int x, int y,
                            boolean expanded, boolean enabled, List<String> filterItemIds, List<String> receiveFilterIds,
-                           String targetPlayerId, List<ReplenishRuleData> replenishRules, List<NodeFlowData> flowStats) {}
+                           String targetPlayerId, List<ReplenishRuleData> replenishRules, List<NodeFlowData> flowStats,
+                           String label, String linkedNodeId, int gateMin, int gateMax, boolean gateCheckSource) {}
     public record EdgeItemRateData(String itemId, boolean rateLimitEnabled, int rateLimitSeconds, int rateLimitItems,
                                    String health, int actualRatePerMinute, boolean configured) {}
     public record EdgeData(String id, String pageId, String fromNodeId, String toNodeId, String fromPortKey, String toPortKey,
@@ -132,7 +133,12 @@ public record TransferGraphSyncPacket(
                 decodeStrings(buf),
                 ByteBufCodecs.STRING_UTF8.decode(buf),
                 decodeReplenishRules(buf),
-                decodeNodeFlowStats(buf)
+                decodeNodeFlowStats(buf),
+                ByteBufCodecs.STRING_UTF8.decode(buf),
+                ByteBufCodecs.STRING_UTF8.decode(buf),
+                ByteBufCodecs.VAR_INT.decode(buf),
+                ByteBufCodecs.VAR_INT.decode(buf),
+                buf.readBoolean()
         );
     }
 
@@ -152,6 +158,11 @@ public record TransferGraphSyncPacket(
         ByteBufCodecs.STRING_UTF8.encode(buf, node.targetPlayerId == null ? "" : node.targetPlayerId);
         encodeReplenishRules(buf, node.replenishRules);
         encodeNodeFlowStats(buf, node.flowStats);
+        ByteBufCodecs.STRING_UTF8.encode(buf, node.label == null ? "" : node.label);
+        ByteBufCodecs.STRING_UTF8.encode(buf, node.linkedNodeId == null ? "" : node.linkedNodeId);
+        ByteBufCodecs.VAR_INT.encode(buf, node.gateMin);
+        ByteBufCodecs.VAR_INT.encode(buf, node.gateMax);
+        buf.writeBoolean(node.gateCheckSource);
     }
 
     public static EdgeData decodeEdge(ByteBuf buf) {
@@ -227,6 +238,7 @@ public record TransferGraphSyncPacket(
                     ByteBufCodecs.STRING_UTF8.decode(buf),
                     ByteBufCodecs.STRING_UTF8.decode(buf),
                     ByteBufCodecs.STRING_UTF8.decode(buf),
+                    buf.readBoolean(),
                     decodeTeamMembers(buf)
             ));
         }
@@ -240,6 +252,7 @@ public record TransferGraphSyncPacket(
             ByteBufCodecs.STRING_UTF8.encode(buf, row.name);
             ByteBufCodecs.STRING_UTF8.encode(buf, row.ownerId);
             ByteBufCodecs.STRING_UTF8.encode(buf, row.selfLevel);
+            buf.writeBoolean(row.invited);
             encodeTeamMembers(buf, row.members);
         }
     }
@@ -251,7 +264,8 @@ public record TransferGraphSyncPacket(
             rows.add(new TeamMemberData(
                     ByteBufCodecs.STRING_UTF8.decode(buf),
                     ByteBufCodecs.STRING_UTF8.decode(buf),
-                    ByteBufCodecs.STRING_UTF8.decode(buf)
+                    ByteBufCodecs.STRING_UTF8.decode(buf),
+                    buf.readBoolean()
             ));
         }
         return rows;
@@ -264,6 +278,7 @@ public record TransferGraphSyncPacket(
             ByteBufCodecs.STRING_UTF8.encode(buf, row.id);
             ByteBufCodecs.STRING_UTF8.encode(buf, row.name);
             ByteBufCodecs.STRING_UTF8.encode(buf, row.level);
+            buf.writeBoolean(row.pending);
         }
     }
 
@@ -395,7 +410,8 @@ public record TransferGraphSyncPacket(
             nodes.add(new NodeData(node.getId(), node.getPageId(), node.getNodeType().name(), node.getChestId(), node.getDimensionKey(),
                     node.getPos().asLong(), node.getX(), node.getY(), node.isExpanded(), node.isEnabled(),
                     List.copyOf(node.getFilterItemIds()), List.copyOf(node.getReceiveFilterIds()),
-                    node.getTargetPlayerId() == null ? "" : node.getTargetPlayerId().toString(), replenish, flows));
+                    node.getTargetPlayerId() == null ? "" : node.getTargetPlayerId().toString(), replenish, flows,
+                    node.getLabel(), node.getLinkedNodeId(), node.getGateMin(), node.getGateMax(), node.isGateCheckSource()));
         }
         List<EdgeData> edges = new ArrayList<>();
         for (TransferEdge edge : graph.getEdges()) {

@@ -25,5 +25,6 @@ public class ModCreativeTabs {
                         output.accept(ModItems.NETWORK_UPGRADE.get());
                         output.accept(ModItems.ENERGY_TRANSFER_UPGRADE.get());
                         if (CreateCompat.isCreateLoaded()) output.accept(ModItems.STRESS_UPGRADE.get());
+                        output.accept(ModItems.SUITE_UPGRADE.get());
                     }).build());
 }

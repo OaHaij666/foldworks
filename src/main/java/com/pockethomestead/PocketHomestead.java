@@ -14,6 +14,7 @@ import com.pockethomestead.dimension.SpaceDimensionService;
 
 import com.pockethomestead.registration.*;
 import com.pockethomestead.space.SpaceData;
+import com.pockethomestead.space.SpaceChunkLoadingManager;
 import com.pockethomestead.space.SpaceManager;
 import com.pockethomestead.space.SpaceStorage;
 import dev.galacticraft.dynamicdimensions.api.event.DimensionAddedCallback;
@@ -26,7 +27,9 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.config.ModConfigEvent;
+import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
+import net.neoforged.neoforge.server.ServerLifecycleHooks;
 import org.slf4j.Logger;
 import com.mojang.logging.LogUtils;
 
@@ -43,13 +46,20 @@ public class PocketHomestead {
         ModMenuTypes.MENU_TYPES.register(modEventBus);
         ModCreativeTabs.CREATIVE_MODE_TABS.register(modEventBus);
         ModDimensions.CHUNK_GENERATORS.register(modEventBus);
+        com.pockethomestead.compat.create.CreateCompat.registerEarlyMovementCompatibility(modEventBus);
 
         // 注册配置
         modContainer.registerConfig(net.neoforged.fml.config.ModConfig.Type.COMMON, ModConfig.SPEC);
+        modEventBus.addListener(SpaceChunkLoadingManager::registerTicketControllers);
+        modEventBus.addListener(PocketHomestead::onCommonSetup);
 
         // 配置热更新：管理员通过 /config 修改调度参数后立即生效，无需重启服务器
         modEventBus.addListener(ModConfigEvent.Reloading.class, event -> {
             com.pockethomestead.scheduler.SpaceScheduler.getInstance().reloadBudget();
+            MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+            if (server != null) {
+                server.execute(() -> SpaceChunkLoadingManager.getInstance().reconcile(server));
+            }
         });
 
         // 网络包注册统一在 ModMessages 中处理
@@ -68,6 +78,10 @@ public class PocketHomestead {
         // 对照 TeamGalacticraft/DynamicDimensions Issue #10 与 PR #9。
         DimensionAddedCallback.register((key, level) -> level.getServer().markWorldsDirty());
         DimensionRemovedCallback.register((key, level) -> level.getServer().markWorldsDirty());
+    }
+
+    private static void onCommonSetup(FMLCommonSetupEvent event) {
+        event.enqueueWork(com.pockethomestead.compat.create.CreateCompat::registerMovementCompatibility);
     }
 
     private static void loadSavedSpaceDimensions(MinecraftServer server,

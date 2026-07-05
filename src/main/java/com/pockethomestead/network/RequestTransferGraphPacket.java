@@ -2,6 +2,7 @@ package com.pockethomestead.network;
 
 import com.pockethomestead.blockentity.BaseChestBlockEntity;
 import com.pockethomestead.blockentity.HomesteadChestAccess;
+import com.pockethomestead.moving.MovingChestRegistry;
 import com.pockethomestead.offline.OfflineChestSnapshotStorage;
 import com.pockethomestead.registry.ChestRegistryManager;
 import com.pockethomestead.space.SpaceData;
@@ -105,14 +106,27 @@ public record RequestTransferGraphPacket(String graphKind, String graphId) imple
                 members.add(new TransferGraphSyncPacket.TeamMemberData(
                         entry.getKey().toString(),
                         resolveName(player.server, entry.getKey()),
-                        entry.getValue().name()));
+                        entry.getValue().name(),
+                        false));
+            }
+            for (var entry : team.invitations().entrySet()) {
+                members.add(new TransferGraphSyncPacket.TeamMemberData(
+                        entry.getKey().toString(),
+                        resolveName(player.server, entry.getKey()),
+                        entry.getValue().name(),
+                        true));
             }
             members.sort((a, b) -> {
+                if (a.pending() != b.pending()) return a.pending() ? 1 : -1;
                 int c = a.name().compareToIgnoreCase(b.name());
                 return c != 0 ? c : a.id().compareToIgnoreCase(b.id());
             });
             result.add(new TransferGraphSyncPacket.TeamData(team.id().toString(), team.name(),
-                    team.owner() == null ? "" : team.owner().toString(), level.name(), members));
+                    team.owner() == null ? "" : team.owner().toString(),
+                    level == SpacePermission.AccessLevel.NONE && team.hasInvite(player.getUUID())
+                            ? team.invitedLevelFor(player.getUUID()).name()
+                            : level.name(),
+                    team.hasInvite(player.getUUID()), members));
         }
         return result;
     }
@@ -123,8 +137,9 @@ public record RequestTransferGraphPacket(String graphKind, String graphId) imple
         int chestLimit = 512;
         for (ChestRegistryManager.RegisteredChest registered : ChestRegistryManager.getInstance().getAllRegisteredChests()) {
             if (byLocation.size() >= chestLimit) break;
-            BaseChestBlockEntity be = loadedChest(player, registered.location().dimensionKey, registered.location().pos);
+            BaseChestBlockEntity be = loadedChest(player, registered.location().dimensionKey, registered.location().pos, registered.chestId());
             if (be == null || !be.hasNetworkUpgrade() || !TransferGraphAccess.chestMatchesGraph(be, key)) continue;
+            boolean moving = MovingChestRegistry.isMoving(registered.location().dimensionKey, registered.location().pos, registered.chestId());
             GraphKey chestKey = be.getGraphKey();
             TransferGraphSyncPacket.ChestData data = new TransferGraphSyncPacket.ChestData(
                     registered.chestId(),
@@ -135,9 +150,9 @@ public record RequestTransferGraphPacket(String graphKind, String graphId) imple
                     be.getRemainingTransferBandwidth(),
                     chestKey == null ? "" : chestKey.kind().name(),
                     chestKey == null || chestKey.id() == null ? "" : chestKey.id().toString(),
-                    "LOADED",
+                    moving ? "MOVING" : "LOADED",
                     gameTime,
-                    "已加载",
+                    moving ? "运动中" : "已加载",
                     be.isOfflineSnapshotEnabled()
             );
             byLocation.put(chestDataKey(data), data);
@@ -148,6 +163,7 @@ public record RequestTransferGraphPacket(String graphKind, String graphId) imple
             if (byLocation.size() >= chestLimit) break;
             if (!snapshot.hasNetworkUpgrade() || !snapshot.matchesGraph(key)) continue;
             String snapshotStatus = snapshot.loaded() ? "LOADED"
+                    : snapshot.moving() ? "MOVING"
                     : snapshot.shouldSimulate(player.server) ? "OFFLINE_SIMULATED" : "OFFLINE_DISABLED";
             int stressUsed = snapshot.graphStressBandwidthUsed(gameTime);
             GraphKey chestKey = snapshot.graphKey();
@@ -192,13 +208,14 @@ public record RequestTransferGraphPacket(String graphKind, String graphId) imple
         }
     }
 
-    private static BaseChestBlockEntity loadedChest(ServerPlayer player, String dimensionKey, net.minecraft.core.BlockPos pos) {
+    private static BaseChestBlockEntity loadedChest(ServerPlayer player, String dimensionKey, net.minecraft.core.BlockPos pos, String chestId) {
         ResourceLocation dimLoc = ResourceLocation.tryParse(dimensionKey);
         if (dimLoc == null) return null;
         ServerLevel level = player.server.getLevel(net.minecraft.resources.ResourceKey.create(
                 net.minecraft.core.registries.Registries.DIMENSION,
                 dimLoc
         ));
-        return level == null ? null : HomesteadChestAccess.resolve(level.getBlockEntity(pos));
+        BaseChestBlockEntity chest = level == null ? null : HomesteadChestAccess.resolve(level.getBlockEntity(pos));
+        return chest != null ? chest : MovingChestRegistry.findChest(dimensionKey, pos, chestId);
     }
 }

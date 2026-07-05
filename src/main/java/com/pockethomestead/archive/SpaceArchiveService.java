@@ -270,7 +270,11 @@ public final class SpaceArchiveService {
             if (node.getNodeType() == TransferNode.NodeType.CHEST && dimension.equals(node.getDimensionKey())) {
                 include.add(node.getId());
                 pageIds.add(node.getPageId());
-            } else if (node.getNodeType() == TransferNode.NodeType.REROUTE || node.getNodeType() == TransferNode.NodeType.TRASH) {
+            } else if (node.getNodeType() == TransferNode.NodeType.REROUTE
+                    || node.getNodeType() == TransferNode.NodeType.LIMIT_GATE
+                    || node.getNodeType() == TransferNode.NodeType.JUMP_INPUT
+                    || node.getNodeType() == TransferNode.NodeType.JUMP_OUTPUT
+                    || node.getNodeType() == TransferNode.NodeType.TRASH) {
                 include.add(node.getId());
                 pageIds.add(node.getPageId());
             }
@@ -328,14 +332,21 @@ public final class SpaceArchiveService {
                 if (newChestId == null || newChestId.isBlank()) continue;
                 copy = new TransferNode(UUID.randomUUID().toString(), newPage, TransferNode.NodeType.CHEST,
                         newChestId, newDimension.toString(), old.getPos(), old.getX(), old.getY(),
-                        old.isExpanded(), old.isEnabled(), old.getFilterItemIds(), old.getReceiveFilterIds(), null, List.of());
+                        old.isExpanded(), old.isEnabled(), old.getFilterItemIds(), old.getReceiveFilterIds(), null, List.of(),
+                        old.getLabel(), old.getLinkedNodeId(), old.getGateMin(), old.getGateMax());
             } else {
                 copy = new TransferNode(UUID.randomUUID().toString(), newPage, old.getNodeType(),
                         "", "", BlockPos.ZERO, old.getX(), old.getY(),
-                        old.isExpanded(), old.isEnabled(), old.getFilterItemIds(), old.getReceiveFilterIds(), null, List.of());
+                        old.isExpanded(), old.isEnabled(), old.getFilterItemIds(), old.getReceiveFilterIds(), null, List.of(),
+                        old.getLabel(), old.getLinkedNodeId(), old.getGateMin(), old.getGateMax());
             }
             nodeMap.put(old.getId(), copy.getId());
             target.putNode(copy);
+        }
+
+        for (TransferNode node : target.getNodes()) {
+            if (node.getLinkedNodeId() == null || node.getLinkedNodeId().isBlank()) continue;
+            node.setLinkedNodeId(nodeMap.getOrDefault(node.getLinkedNodeId(), ""));
         }
 
         int importedEdges = 0;

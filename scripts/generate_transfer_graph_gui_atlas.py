@@ -197,6 +197,19 @@ def icon_node(d: ImageDraw.ImageDraw, kind: str, x: int, y: int, color: tuple[in
         d.rectangle((x + 2, y + 3, x + 17, y + 5), fill=color)
         d.line((x + 6, y + 8, x + 13, y + 15), fill=WHITE, width=2)
         d.line((x + 13, y + 8, x + 6, y + 15), fill=WHITE, width=2)
+    elif kind == "limit":
+        rounded(d, x + 2, y + 3, 14, 12, 4, mix(color, WHITE, 0.18), color)
+        d.line((x + 5, y + 12, x + 13, y + 5), fill=WHITE, width=2)
+        d.line((x + 5, y + 6, x + 13, y + 13), fill=WHITE, width=2)
+        d.line((x + 4, y + 16, x + 15, y + 16), fill=color, width=2)
+    elif kind == "jump_in":
+        d.ellipse((x + 4, y + 3, x + 16, y + 15), fill=mix(color, WHITE, 0.2), outline=color, width=2)
+        d.polygon(((x + 1, y + 9), (x + 8, y + 5), (x + 8, y + 13)), fill=color)
+        d.line((x + 1, y + 9, x + 12, y + 9), fill=color, width=2)
+    elif kind == "jump_out":
+        d.ellipse((x + 2, y + 3, x + 14, y + 15), fill=mix(color, WHITE, 0.2), outline=color, width=2)
+        d.polygon(((x + 17, y + 9), (x + 10, y + 5), (x + 10, y + 13)), fill=color)
+        d.line((x + 6, y + 9, x + 17, y + 9), fill=color, width=2)
 
 
 def draw_atlas() -> Image.Image:
@@ -235,13 +248,16 @@ def draw_atlas() -> Image.Image:
     icon_node(d, "reroute", 22, 120, CYAN)
     icon_node(d, "backpack", 46, 120, BLUE)
     icon_node(d, "trash", 70, 120, PINK)
+    icon_node(d, "limit", 94, 120, GOLD)
+    icon_node(d, "jump_in", 118, 120, CYAN)
+    icon_node(d, "jump_out", 142, 120, CYAN)
     icon_resource(d, "item", 0, 144, GREEN)
     icon_resource(d, "fluid", 22, 144, CYAN)
     icon_resource(d, "energy", 44, 144, GOLD)
     icon_resource(d, "stress", 66, 144, PURPLE)
 
     for i, color in enumerate((GREEN, CYAN, GOLD, PURPLE, BLUE)):
-        x = 104 + i * 14
+        x = 176 + i * 14
         d.ellipse((x + 2, 122, x + 12, 132), fill=mix(color, WHITE, 0.25), outline=color)
         d.ellipse((x + 5, 125, x + 9, 129), fill=WHITE)
 

@@ -142,6 +142,7 @@ def paste_icon(image: Image.Image, x: int, y: int, kind: str) -> None:
         "network": GREEN[:3],
         "energy": GOLD[:3],
         "stress": BRASS[:3],
+        "suite": PINK[:3],
     }[kind]
     icon, d = icon_image(base)
     if kind == "storage":
@@ -163,6 +164,12 @@ def paste_icon(image: Image.Image, x: int, y: int, kind: str) -> None:
         d.line((64, 34, 64, 94), BRASS, 13)
         d.ellipse((45, 45, 83, 83), BRASS)
         d.ellipse((56, 56, 72, 72), WHITE)
+    elif kind == "suite":
+        d.line((43, 84, 84, 43), PINK, 13)
+        d.line((47, 88, 88, 47), INK, 4)
+        d.polygon(((31, 36), (42, 25), (55, 38), (48, 45), (42, 39), (38, 43)), PINK)
+        d.ellipse((72, 72, 96, 96), PINK)
+        d.ellipse((78, 78, 90, 90), WHITE)
     icon = icon.resize((32 * SCALE, 32 * SCALE), Image.Resampling.LANCZOS)
     image.alpha_composite(icon, (x * SCALE, y * SCALE))
 
@@ -205,6 +212,7 @@ def draw_atlas() -> Image.Image:
     paste_icon(image, 64, 128, "network")
     paste_icon(image, 96, 128, "energy")
     paste_icon(image, 128, 128, "stress")
+    paste_icon(image, 160, 128, "suite")
 
     # Larger 32x32 nine-slice sources for panels. The old 16x16 panel tiles
     # are intentionally left in place for compatibility, but large windows and

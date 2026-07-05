@@ -30,6 +30,7 @@ public class SpaceData {
     private SpacePermission permission;
     private String name;
     private boolean offlineSimulationEnabled;
+    private boolean chunkLoadingEnabled;
     // 标记空间已被删除：SpaceManager.deleteSpace 时置位，BaseChestBlockEntity 的缓存据此失效
     private volatile boolean deleted = false;
 
@@ -78,6 +79,7 @@ public class SpaceData {
     public SpacePermission getPermission() { return permission; }
     public String getName() { return name; }
     public boolean isOfflineSimulationEnabled() { return offlineSimulationEnabled; }
+    public boolean isChunkLoadingEnabled() { return chunkLoadingEnabled; }
 
     public void setName(String name) { this.name = name; }
     public boolean canEnableOfflineSimulation() {
@@ -86,6 +88,12 @@ public class SpaceData {
     }
     public void setOfflineSimulationEnabled(boolean enabled) {
         this.offlineSimulationEnabled = enabled && canEnableOfflineSimulation();
+    }
+    public boolean canEnableChunkLoading() {
+        return SpaceChunkLoadingManager.canEnable(this);
+    }
+    public void setChunkLoadingEnabled(boolean enabled) {
+        this.chunkLoadingEnabled = enabled && canEnableChunkLoading();
     }
     public boolean isOwner(UUID playerId) { return ownerId.equals(playerId); }
     public boolean canAccess(UUID playerId) { return can(playerId, SpacePermission.AccessLevel.USE); }

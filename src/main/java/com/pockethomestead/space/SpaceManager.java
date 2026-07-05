@@ -102,6 +102,8 @@ public class SpaceManager {
             }
         }
 
+        SpaceChunkLoadingManager.getInstance().remove(server, space);
+        space.setChunkLoadingEnabled(false);
         SpaceDimensionService.getInstance().delete(server, space);
         // 标记删除使 BaseChestBlockEntity 的缓存失效，避免残留引用导致权限检查用过时数据
         space.markDeleted();
@@ -181,6 +183,38 @@ public class SpaceManager {
             if (!space.isOwner(ownerId)) continue;
             space.getPermission().copyFrom(permission);
             if (!space.canEnableOfflineSimulation()) space.setOfflineSimulationEnabled(false);
+        }
+    }
+
+    public boolean setChunkLoadingEnabled(MinecraftServer server, UUID spaceId, boolean enabled) {
+        SpaceData space = spaces.get(spaceId);
+        if (space == null) return false;
+
+        if (!enabled) {
+            space.setChunkLoadingEnabled(false);
+            SpaceChunkLoadingManager.getInstance().remove(server, space);
+            SpaceStorage.markDirty();
+            return true;
+        }
+
+        if (!space.canEnableChunkLoading()) {
+            space.setChunkLoadingEnabled(false);
+            SpaceChunkLoadingManager.getInstance().remove(server, space);
+            SpaceStorage.markDirty();
+            return false;
+        }
+
+        space.setChunkLoadingEnabled(true);
+        try {
+            SpaceChunkLoadingManager.getInstance().apply(server, space);
+            SpaceStorage.markDirty();
+            return true;
+        } catch (RuntimeException e) {
+            PocketHomestead.LOGGER.error("开启口袋空间常加载失败: {}", space.getDimensionId(), e);
+            space.setChunkLoadingEnabled(false);
+            SpaceChunkLoadingManager.getInstance().remove(server, space);
+            SpaceStorage.markDirty();
+            return false;
         }
     }
 

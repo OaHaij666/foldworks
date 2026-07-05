@@ -121,6 +121,34 @@ public class TransferGraph {
         return node;
     }
 
+    public TransferNode addLimitGateNode(String pageId, int x, int y) {
+        if (!pages.containsKey(pageId)) pageId = ensureDefaultPage().getId();
+        TransferNode node = new TransferNode(UUID.randomUUID().toString(), pageId, TransferNode.NodeType.LIMIT_GATE,
+                "", "", BlockPos.ZERO, x, y, false, true, List.of(), List.of(), null, List.of());
+        nodes.put(node.getId(), node);
+        return node;
+    }
+
+    public TransferNode addJumpInputNode(String pageId, String label, int x, int y) {
+        if (!pages.containsKey(pageId)) pageId = ensureDefaultPage().getId();
+        TransferNode node = new TransferNode(UUID.randomUUID().toString(), pageId, TransferNode.NodeType.JUMP_INPUT,
+                "", "", BlockPos.ZERO, x, y, false, true, List.of(), List.of(), null, List.of(),
+                label, "", TransferNode.DEFAULT_GATE_MIN, TransferNode.DEFAULT_GATE_MAX);
+        nodes.put(node.getId(), node);
+        return node;
+    }
+
+    public TransferNode addJumpOutputNode(String pageId, TransferNode inputNode, int x, int y) {
+        if (inputNode == null || inputNode.getNodeType() != TransferNode.NodeType.JUMP_INPUT) return null;
+        if (!pages.containsKey(pageId)) pageId = ensureDefaultPage().getId();
+        TransferNode node = new TransferNode(UUID.randomUUID().toString(), pageId, TransferNode.NodeType.JUMP_OUTPUT,
+                "", "", BlockPos.ZERO, x, y, false, true, List.of(), List.of(), null, List.of(),
+                inputNode.getLabel(), inputNode.getId(), TransferNode.DEFAULT_GATE_MIN, TransferNode.DEFAULT_GATE_MAX);
+        inputNode.setLinkedNodeId(node.getId());
+        nodes.put(node.getId(), node);
+        return node;
+    }
+
     public TransferNode addTrashNode(String pageId, int x, int y) {
         if (!pages.containsKey(pageId)) pageId = ensureDefaultPage().getId();
         TransferNode node = new TransferNode(UUID.randomUUID().toString(), pageId, TransferNode.NodeType.TRASH, "", "", BlockPos.ZERO, x, y, false, true, List.of());

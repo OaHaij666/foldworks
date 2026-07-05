@@ -58,3 +58,8 @@ docs/
 ### Logs ###
 *.log
 logs/
+build_error.txt
+
+### Python ###
+__pycache__/
+*.py[cod]

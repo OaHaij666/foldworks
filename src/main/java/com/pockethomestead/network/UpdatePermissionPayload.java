@@ -69,9 +69,11 @@ public record UpdatePermissionPayload(UUID spaceId, SpacePermission.AccessMode m
     public static void handleOnServer(UpdatePermissionPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer player)) return;
-            SpaceData space = SpaceManager.getInstance().getSpace(payload.spaceId());
-            if (space == null || !space.can(player.getUUID(), SpacePermission.AccessLevel.MANAGE)) return;
-            SpaceManager.getInstance().updateOwnerPermission(space.getOwnerId(), permission -> {
+            boolean globalOwnerRule = SpaceInfo.OWNER_PERMISSION_ID.equals(payload.spaceId());
+            SpaceData space = globalOwnerRule ? null : SpaceManager.getInstance().getSpace(payload.spaceId());
+            if (!globalOwnerRule && (space == null || !space.can(player.getUUID(), SpacePermission.AccessLevel.MANAGE))) return;
+            UUID ownerId = globalOwnerRule ? player.getUUID() : space.getOwnerId();
+            SpaceManager.getInstance().updateOwnerPermission(ownerId, permission -> {
                 permission.setMode(payload.mode());
                 permission.setProtectedLevel(payload.protectedLevel());
                 permission.setPublicLevel(payload.publicLevel());

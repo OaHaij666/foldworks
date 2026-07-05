@@ -50,9 +50,30 @@ public record TransferTeamPacket(String action, String teamId, String value) imp
                 return;
             }
             UUID teamId = parseUuid(packet.teamId);
-            if (teamId == null || !TransferGraphAccess.canManage(player, GraphKey.protectedGraph(teamId))) return;
+            if (teamId == null) return;
             TransferTeam team = storage.getTeam(teamId);
             if (team == null) return;
+
+            if ("ACCEPT_INVITE".equals(packet.action)) {
+                if (team.acceptInvite(player.getUUID())) {
+                    storage.setDirty();
+                    player.displayClientMessage(Component.translatable("pockethomestead.team.invite.accepted", team.name()), false);
+                    RequestTransferGraphPacket.sendGraphTo(player, GraphKey.protectedGraph(teamId));
+                    notifyTeamOwner(player, team, "pockethomestead.team.invite.accepted_notice", player.getName().getString(), team.name());
+                }
+                return;
+            }
+            if ("DECLINE_INVITE".equals(packet.action)) {
+                if (team.declineInvite(player.getUUID())) {
+                    storage.setDirty();
+                    player.displayClientMessage(Component.translatable("pockethomestead.team.invite.declined", team.name()), false);
+                    RequestTransferGraphPacket.sendGraphTo(player);
+                    notifyTeamOwner(player, team, "pockethomestead.team.invite.declined_notice", player.getName().getString(), team.name());
+                }
+                return;
+            }
+
+            if (!team.canManageMembers(player.getUUID())) return;
             if ("DELETE".equals(packet.action)) {
                 TransferGraph protectedGraph = TransferGraphStorage.get(player.server).getGraph(GraphKey.protectedGraph(teamId));
                 if (protectedGraph != null && (!protectedGraph.getNodes().isEmpty() || !protectedGraph.getEdges().isEmpty())) {
@@ -86,7 +107,13 @@ public record TransferTeamPacket(String action, String teamId, String value) imp
                     return;
                 }
                 if (memberId != null) {
-                    team.setMember(memberId, level);
+                    boolean alreadyMember = team.levelFor(memberId) != SpacePermission.AccessLevel.NONE;
+                    if (level == SpacePermission.AccessLevel.NONE || alreadyMember) {
+                        team.setMember(memberId, level);
+                    } else {
+                        team.inviteMember(memberId, level);
+                        notifyInvitee(player, memberId, team);
+                    }
                     storage.setDirty();
                 } else if (!parts[0].isBlank()) {
                     player.sendSystemMessage(Component.translatable("pockethomestead.permission.player_not_found", parts[0])
@@ -102,6 +129,23 @@ public record TransferTeamPacket(String action, String teamId, String value) imp
             return value == null || value.isBlank() ? null : UUID.fromString(value);
         } catch (IllegalArgumentException e) {
             return null;
+        }
+    }
+
+    private static void notifyInvitee(ServerPlayer actor, UUID inviteeId, TransferTeam team) {
+        ServerPlayer invitee = actor.server.getPlayerList().getPlayer(inviteeId);
+        if (invitee == null) return;
+        invitee.displayClientMessage(Component.translatable(
+                "pockethomestead.team.invite.received", actor.getName().getString(), team.name()), false);
+        RequestTransferGraphPacket.sendGraphTo(invitee);
+    }
+
+    private static void notifyTeamOwner(ServerPlayer actor, TransferTeam team, String key, Object... args) {
+        if (team.owner() == null || team.owner().equals(actor.getUUID())) return;
+        ServerPlayer owner = actor.server.getPlayerList().getPlayer(team.owner());
+        if (owner != null) {
+            owner.displayClientMessage(Component.translatable(key, args), false);
+            RequestTransferGraphPacket.sendGraphTo(owner, GraphKey.protectedGraph(team.id()));
         }
     }
 }

@@ -20,10 +20,13 @@ import java.util.UUID;
 public class ProductionStatsStorage extends SavedData {
     public static final String DATA_NAME = "pockethomestead_production_stats";
     public static final String DEFAULT_GROUP_ID = "default";
+    public static final String PRIVATE_SCOPE = "PRIVATE";
+    public static final String TEAM_SCOPE = "PROTECTED";
+    public static final String SPACE_SCOPE = "SPACE";
     public static final int BUCKET_TICKS = 20 * 10;
     public static final int RETENTION_TICKS = 20 * 60 * 60;
 
-    private final Map<UUID, PlayerStats> players = new LinkedHashMap<>();
+    private final Map<String, PlayerStats> scopes = new LinkedHashMap<>();
 
     public record GroupSnapshot(String id, String name, boolean aggregate, List<String> childIds, int order) {}
     public record BucketSnapshot(String groupId, String itemId, long bucketStart, int input, int output) {}
@@ -42,55 +45,106 @@ public class ProductionStatsStorage extends SavedData {
         return new SavedData.Factory<>(ProductionStatsStorage::new, ProductionStatsStorage::load);
     }
 
-    public PlayerStats statsFor(UUID owner) {
-        return players.computeIfAbsent(owner, id -> new PlayerStats());
+    public static String privateScope(UUID owner) {
+        return scopeKey(PRIVATE_SCOPE, owner);
     }
 
-    public boolean isChestEnabled(UUID owner, String chestKey) {
-        PlayerStats stats = players.get(owner);
+    public static String teamScope(UUID teamId) {
+        return scopeKey(TEAM_SCOPE, teamId);
+    }
+
+    public static String spaceScope(UUID spaceId) {
+        return scopeKey(SPACE_SCOPE, spaceId);
+    }
+
+    public static String scopeKey(String kind, UUID id) {
+        if (kind == null || id == null) return "";
+        return kind + ":" + id;
+    }
+
+    public static String scopeKind(String scopeKey) {
+        int split = scopeKey == null ? -1 : scopeKey.indexOf(':');
+        return split <= 0 ? PRIVATE_SCOPE : scopeKey.substring(0, split);
+    }
+
+    public static UUID scopeId(String scopeKey) {
+        int split = scopeKey == null ? -1 : scopeKey.indexOf(':');
+        if (split < 0 || split + 1 >= scopeKey.length()) return null;
+        try {
+            return UUID.fromString(scopeKey.substring(split + 1));
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    public PlayerStats statsFor(UUID owner) {
+        return statsFor(privateScope(owner));
+    }
+
+    public PlayerStats statsFor(String scopeKey) {
+        return scopes.computeIfAbsent(scopeKey, id -> new PlayerStats());
+    }
+
+    public PlayerStats getStats(String scopeKey) {
+        PlayerStats stats = scopes.get(scopeKey);
+        return stats == null ? new PlayerStats() : stats;
+    }
+
+    public boolean isChestEnabled(String scopeKey, String chestKey) {
+        PlayerStats stats = scopes.get(scopeKey);
         return stats != null && stats.chestGroups.containsKey(chestKey);
     }
 
-    public String chestGroup(UUID owner, String chestKey) {
-        PlayerStats stats = players.get(owner);
+    public String chestGroup(String scopeKey, String chestKey) {
+        PlayerStats stats = scopes.get(scopeKey);
         return stats == null ? "" : stats.chestGroups.getOrDefault(chestKey, "");
     }
 
-    public boolean setChestGroup(UUID owner, String chestKey, String groupId, Map<String, Integer> currentItems) {
-        boolean changed = statsFor(owner).setChestGroup(chestKey, groupId, currentItems);
+    public boolean setChestGroup(String scopeKey, String chestKey, String groupId, Map<String, Integer> currentItems) {
+        if (scopeKey == null || scopeKey.isBlank()) return false;
+        boolean changed = statsFor(scopeKey).setChestGroup(chestKey, groupId, currentItems);
         if (changed) setDirty();
         return changed;
     }
 
-    public void refreshChestInventory(UUID owner, String chestKey, Map<String, Integer> currentItems) {
-        if (owner == null || chestKey == null || chestKey.isBlank()) return;
-        PlayerStats stats = players.get(owner);
+    public boolean clearChestGroup(String scopeKey, String chestKey) {
+        if (scopeKey == null || scopeKey.isBlank() || chestKey == null || chestKey.isBlank()) return false;
+        PlayerStats stats = scopes.get(scopeKey);
+        if (stats == null) return false;
+        boolean changed = stats.setChestGroup(chestKey, "", Map.of());
+        if (changed) setDirty();
+        return changed;
+    }
+
+    public void refreshChestInventory(String scopeKey, String chestKey, Map<String, Integer> currentItems) {
+        if (scopeKey == null || scopeKey.isBlank() || chestKey == null || chestKey.isBlank()) return;
+        PlayerStats stats = scopes.get(scopeKey);
         if (stats == null) return;
         if (stats.refreshChestInventory(chestKey, currentItems)) setDirty();
     }
 
-    public void recordInput(UUID owner, String chestKey, String itemId, int amount, long gameTime) {
-        if (owner == null || chestKey == null || itemId == null || amount <= 0) return;
-        PlayerStats stats = players.get(owner);
+    public void recordInput(String scopeKey, String chestKey, String itemId, int amount, long gameTime) {
+        if (scopeKey == null || scopeKey.isBlank() || chestKey == null || itemId == null || amount <= 0) return;
+        PlayerStats stats = scopes.get(scopeKey);
         if (stats != null && stats.record(chestKey, itemId, amount, true, gameTime)) setDirty();
     }
 
-    public void recordOutput(UUID owner, String chestKey, String itemId, int amount, long gameTime) {
-        if (owner == null || chestKey == null || itemId == null || amount <= 0) return;
-        PlayerStats stats = players.get(owner);
+    public void recordOutput(String scopeKey, String chestKey, String itemId, int amount, long gameTime) {
+        if (scopeKey == null || scopeKey.isBlank() || chestKey == null || itemId == null || amount <= 0) return;
+        PlayerStats stats = scopes.get(scopeKey);
         if (stats != null && stats.record(chestKey, itemId, amount, false, gameTime)) setDirty();
     }
 
-    public String createGroup(UUID owner, String name, boolean aggregate) {
-        PlayerStats stats = statsFor(owner);
+    public String createGroup(String scopeKey, String name, boolean aggregate) {
+        PlayerStats stats = statsFor(scopeKey);
         String id = UUID.randomUUID().toString();
         stats.groups.put(id, new Group(id, sanitizeName(name, aggregate ? "新聚合组" : "新原子组"), aggregate, stats.groups.size()));
         setDirty();
         return id;
     }
 
-    public boolean renameGroup(UUID owner, String groupId, String name) {
-        PlayerStats stats = statsFor(owner);
+    public boolean renameGroup(String scopeKey, String groupId, String name) {
+        PlayerStats stats = statsFor(scopeKey);
         Group group = stats.groups.get(groupId);
         if (group == null) return false;
         group.name = sanitizeName(name, group.aggregate ? "聚合组" : "原子组");
@@ -98,17 +152,17 @@ public class ProductionStatsStorage extends SavedData {
         return true;
     }
 
-    public boolean deleteGroup(UUID owner, String groupId) {
+    public boolean deleteGroup(String scopeKey, String groupId) {
         if (DEFAULT_GROUP_ID.equals(groupId)) return false;
-        PlayerStats stats = statsFor(owner);
+        PlayerStats stats = statsFor(scopeKey);
         if (!stats.groups.containsKey(groupId)) return false;
         stats.deleteGroup(groupId);
         setDirty();
         return true;
     }
 
-    public boolean mergeGroups(UUID owner, String name, List<String> childIds) {
-        PlayerStats stats = statsFor(owner);
+    public boolean mergeGroups(String scopeKey, String name, List<String> childIds) {
+        PlayerStats stats = statsFor(scopeKey);
         if (stats.mergeGroups(name, childIds)) {
             setDirty();
             return true;
@@ -116,8 +170,8 @@ public class ProductionStatsStorage extends SavedData {
         return false;
     }
 
-    public boolean toggleChild(UUID owner, String parentId, String childId) {
-        PlayerStats stats = statsFor(owner);
+    public boolean toggleChild(String scopeKey, String parentId, String childId) {
+        PlayerStats stats = statsFor(scopeKey);
         if (stats.toggleChild(parentId, childId)) {
             setDirty();
             return true;
@@ -125,8 +179,8 @@ public class ProductionStatsStorage extends SavedData {
         return false;
     }
 
-    public boolean toggleFavoriteResource(UUID owner, String itemId) {
-        PlayerStats stats = statsFor(owner);
+    public boolean toggleFavoriteResource(String scopeKey, String itemId) {
+        PlayerStats stats = statsFor(scopeKey);
         if (stats.toggleFavoriteResource(itemId)) {
             setDirty();
             return true;
@@ -139,9 +193,9 @@ public class ProductionStatsStorage extends SavedData {
      * 迁移到 (newDimKey, newPos) 对应的 chestKey。buckets 按 groupId 聚合，不随箱子坐标变化，无需迁移。
      * 用于兼容 Mekanism Cardboard Box 等方块位置移动场景。
      */
-    public boolean relocateChest(UUID owner, String oldChestKey, String newChestKey) {
-        if (owner == null || oldChestKey == null || newChestKey == null || oldChestKey.equals(newChestKey)) return false;
-        PlayerStats stats = players.get(owner);
+    public boolean relocateChest(String scopeKey, String oldChestKey, String newChestKey) {
+        if (scopeKey == null || scopeKey.isBlank() || oldChestKey == null || newChestKey == null || oldChestKey.equals(newChestKey)) return false;
+        PlayerStats stats = scopes.get(scopeKey);
         if (stats == null) return false;
         boolean changed = stats.relocateChestKey(oldChestKey, newChestKey);
         if (changed) setDirty();
@@ -150,12 +204,22 @@ public class ProductionStatsStorage extends SavedData {
 
     public static ProductionStatsStorage load(CompoundTag tag, HolderLookup.Provider reg) {
         ProductionStatsStorage storage = new ProductionStatsStorage();
-        ListTag list = tag.getList("Players", Tag.TAG_COMPOUND);
-        for (int i = 0; i < list.size(); i++) {
-            CompoundTag playerTag = list.getCompound(i);
-            UUID owner = playerTag.getUUID("Owner");
-            PlayerStats stats = PlayerStats.load(playerTag);
-            storage.players.put(owner, stats);
+        if (tag.contains("Scopes", Tag.TAG_LIST)) {
+            ListTag list = tag.getList("Scopes", Tag.TAG_COMPOUND);
+            for (int i = 0; i < list.size(); i++) {
+                CompoundTag scopeTag = list.getCompound(i);
+                String scopeKey = scopeTag.getString("ScopeKey");
+                if (scopeKey.isBlank()) continue;
+                storage.scopes.put(scopeKey, PlayerStats.load(scopeTag));
+            }
+        } else {
+            ListTag list = tag.getList("Players", Tag.TAG_COMPOUND);
+            for (int i = 0; i < list.size(); i++) {
+                CompoundTag playerTag = list.getCompound(i);
+                UUID owner = playerTag.getUUID("Owner");
+                PlayerStats stats = PlayerStats.load(playerTag);
+                storage.scopes.put(privateScope(owner), stats);
+            }
         }
         return storage;
     }
@@ -163,12 +227,12 @@ public class ProductionStatsStorage extends SavedData {
     @Override
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider reg) {
         ListTag list = new ListTag();
-        for (Map.Entry<UUID, PlayerStats> entry : players.entrySet()) {
-            CompoundTag playerTag = entry.getValue().save();
-            playerTag.putUUID("Owner", entry.getKey());
-            list.add(playerTag);
+        for (Map.Entry<String, PlayerStats> entry : scopes.entrySet()) {
+            CompoundTag scopeTag = entry.getValue().save();
+            scopeTag.putString("ScopeKey", entry.getKey());
+            list.add(scopeTag);
         }
-        tag.put("Players", list);
+        tag.put("Scopes", list);
         return tag;
     }
 

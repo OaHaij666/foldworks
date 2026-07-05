@@ -13,6 +13,7 @@ import com.pockethomestead.network.SpaceActionPayload;
 import com.pockethomestead.network.SpaceInfo;
 import com.pockethomestead.network.UpdateOfflineSimulationPayload;
 import com.pockethomestead.network.UpdatePermissionPayload;
+import com.pockethomestead.network.UpdateSpaceChunkLoadingPayload;
 import com.pockethomestead.space.SpacePermission;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.gui.GuiGraphics;
@@ -55,6 +56,7 @@ public class ManagePage extends Page {
     private static final int PILL_W = 50;
     private static final int CUR_W = 54;
     private static final int OFFLINE_W = 36;
+    private static final int CHUNKLOAD_W = 36;
     private static final int PILL_H = 22;
     private static final int FILTER_H = 48;
     private static final SpacePermission.AccessMode[] MODES = SpacePermission.AccessMode.values();
@@ -75,7 +77,8 @@ public class ManagePage extends Page {
     private boolean hasDelete, hasSettings;
     private boolean hasRename;
     private boolean hasOfflineToggle;
-    private int delX, setX, renameX, offlineX, pillX, btnY, pillY;
+    private boolean hasChunkLoadToggle;
+    private int delX, setX, renameX, offlineX, chunkLoadX, pillX, btnY, pillY;
 
     @Override public String id() { return "manage"; }
     @Override public String navTitle() { return Component.translatable("pockethomestead.ui.nav.manage").getString(); }
@@ -223,10 +226,12 @@ public class ManagePage extends Page {
         hasSettings = owner;
         hasRename = owner;
         hasOfflineToggle = owner;
+        hasChunkLoadToggle = owner;
         if (hasDelete) { delX = rightEdge - BTN; rightEdge = delX - 6; }
         if (hasSettings) { setX = rightEdge - BTN; rightEdge = setX - 6; }
         if (hasRename) { renameX = rightEdge - BTN; rightEdge = renameX - 6; }
         if (hasOfflineToggle) { offlineX = rightEdge - OFFLINE_W; rightEdge = offlineX - 6; }
+        if (hasChunkLoadToggle) { chunkLoadX = rightEdge - CHUNKLOAD_W; rightEdge = chunkLoadX - 6; }
         pillX = rightEdge - (current ? CUR_W : PILL_W);
     }
 
@@ -282,6 +287,15 @@ public class ManagePage extends Page {
             Theme.panel(g, offlineX, btnY, OFFLINE_W, BTN, Theme.RADIUS, offlineFill, offlineBorder);
             Theme.textInBox(g, font, "离线", offlineX, btnY, OFFLINE_W, BTN, color);
         }
+        if (hasChunkLoadToggle) {
+            boolean allowed = space.chunkLoadingAllowed();
+            boolean ch = Theme.inside(mouseX, mouseY, chunkLoadX, btnY, CHUNKLOAD_W, BTN) && allowed;
+            int chunkFill = !allowed ? Theme.SURFACE_SUNK : space.chunkLoadingEnabled() ? Theme.PRIMARY_SOFT : (ch ? Theme.SURFACE_ALT : Theme.SURFACE_SUNK);
+            int chunkBorder = space.chunkLoadingEnabled() ? Theme.PRIMARY : Theme.BORDER;
+            int chunkColor = !allowed ? Theme.TEXT_FAINT : space.chunkLoadingEnabled() ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED;
+            Theme.panel(g, chunkLoadX, btnY, CHUNKLOAD_W, BTN, Theme.RADIUS, chunkFill, chunkBorder);
+            Theme.textInBox(g, font, "常载", chunkLoadX, btnY, CHUNKLOAD_W, BTN, chunkColor);
+        }
         // 删除 ✕
         if (hasDelete) {
             boolean dh = Theme.inside(mouseX, mouseY, delX, btnY, BTN, BTN);
@@ -302,6 +316,12 @@ public class ManagePage extends Page {
         if (hasOfflineToggle && Theme.inside(mx, my, offlineX, btnY, OFFLINE_W, BTN)) {
             if (offlineAllowed(space)) {
                 PacketDistributor.sendToServer(new UpdateOfflineSimulationPayload(space.spaceId(), !space.offlineSimulationEnabled()));
+            }
+            return true;
+        }
+        if (hasChunkLoadToggle && Theme.inside(mx, my, chunkLoadX, btnY, CHUNKLOAD_W, BTN)) {
+            if (space.chunkLoadingAllowed()) {
+                PacketDistributor.sendToServer(new UpdateSpaceChunkLoadingPayload(space.spaceId(), !space.chunkLoadingEnabled()));
             }
             return true;
         }
@@ -429,7 +449,7 @@ public class ManagePage extends Page {
         // 成员列表
         int memTop = inputY + 26;
         int memBottom = my + mh - 10;
-        g.enableScissor(mx + 12, memTop, mx + mw - 12, memBottom);
+        Theme.enableScissor(g, mx + 12, memTop, mx + mw - 12, memBottom);
         List<SpaceInfo.Member> members = target.members();
         if (members.isEmpty()) {
             Theme.textCentered(g, font, Component.translatable("pockethomestead.permission.empty").getString(), mx + mw / 2, memTop + 8, Theme.TEXT_FAINT);
@@ -488,7 +508,7 @@ public class ManagePage extends Page {
         String visible = visibleTail(value, iw - 16);
         int tx = ix + 6;
         int ty = iy + (ih - 8) / 2;
-        g.enableScissor(ix + 4, iy + 2, ix + iw - 4, iy + ih - 2);
+        Theme.enableScissor(g, ix + 4, iy + 2, ix + iw - 4, iy + ih - 2);
         g.drawString(font, visible, tx, ty, enabled ? Theme.TEXT : Theme.TEXT_FAINT, false);
         if (input.isFocused() && ((System.currentTimeMillis() / 500L) & 1L) == 0L) {
             int cx = Math.min(ix + iw - 7, tx + font.width(visible) + 1);
@@ -599,6 +619,7 @@ public class ManagePage extends Page {
                         target.biome(), target.terrain(), target.dimensionId(), target.infinite(), target.amplitude(),
                         MODES[i], target.protectedLevel(), target.publicLevel(),
                         target.offlineSimulationEnabled() && (MODES[i] == SpacePermission.AccessMode.PRIVATE || MODES[i] == SpacePermission.AccessMode.WHITELIST),
+                        target.chunkLoadingEnabled(), target.chunkLoadingAllowed(),
                         target.members());
                 return;
             }

@@ -2,18 +2,24 @@ package com.pockethomestead;
 
 import com.pockethomestead.command.PocketHomesteadCommand;
 import com.pockethomestead.archive.SpaceArchiveTransferManager;
+import com.pockethomestead.config.ModConfig;
 import com.pockethomestead.dimension.PocketDimensionManager;
+import com.pockethomestead.moving.MovingChestRegistry;
 import com.pockethomestead.offline.OfflineChestSnapshotStorage;
 import com.pockethomestead.permission.AccessControl;
 import com.pockethomestead.scheduler.SpaceScheduler;
 import com.pockethomestead.space.SpaceData;
+import com.pockethomestead.space.SpaceChunkLoadingManager;
 import com.pockethomestead.space.SpaceManager;
 import com.pockethomestead.space.SpacePermission;
 import com.pockethomestead.space.SpaceStorage;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.level.biome.MobSpawnSettings;
 import net.minecraft.world.level.Level;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -75,12 +81,15 @@ public class ModEvents {
                 "pockethomestead_spaces"
         );
         PocketHomestead.LOGGER.info("口袋空间数据已加载（{} 个空间）", SpaceManager.getInstance().getAllSpaces().size());
+        SpaceChunkLoadingManager.getInstance().reconcile(server);
     }
 
     @SubscribeEvent
     public static void onServerStopped(ServerStoppedEvent event) {
         SpaceArchiveTransferManager.reset();
         SpaceScheduler.getInstance().reset();
+        SpaceChunkLoadingManager.getInstance().reset();
+        MovingChestRegistry.clear();
         SpaceManager.getInstance().clearSpaces();
         PocketDimensionManager.getInstance().reset();
         SpaceStorage.clearInstance();
@@ -165,7 +174,24 @@ public class ModEvents {
 
         if (!space.isMobSpawning()) {
             event.setCanceled(true);
+            return;
         }
+
+        for (MobSpawnSettings.SpawnerData data : java.util.List.copyOf(event.getSpawnerDataList())) {
+            ResourceLocation entityId = BuiltInRegistries.ENTITY_TYPE.getKey(data.type);
+            if (entityId != null && isPocketSpawnBlacklisted(entityId)) {
+                event.removeSpawnerData(data);
+            }
+        }
+    }
+
+    private static boolean isPocketSpawnBlacklisted(ResourceLocation entityId) {
+        if (entityId == null) return false;
+        for (String value : ModConfig.POCKET_DIMENSION_ENTITY_SPAWN_BLACKLIST.get()) {
+            ResourceLocation blocked = ResourceLocation.tryParse(value);
+            if (entityId.equals(blocked)) return true;
+        }
+        return false;
     }
 
     private static boolean canModifySpace(ServerPlayer player, Level level) {

@@ -54,6 +54,7 @@ public final class ChestGuiTextures {
     private static final Sprite UPGRADE_NETWORK = new Sprite(64, 128, 32, 32, 0);
     private static final Sprite UPGRADE_ENERGY = new Sprite(96, 128, 32, 32, 0);
     private static final Sprite UPGRADE_STRESS = new Sprite(128, 128, 32, 32, 0);
+    private static final Sprite UPGRADE_SUITE = new Sprite(160, 128, 32, 32, 0);
     private static final Sprite WHITE_PIXEL = new Sprite(0, 100, 1, 1, 0);
 
     private ChestGuiTextures() {
@@ -82,12 +83,12 @@ public final class ChestGuiTextures {
 
     public static void hDivider(GuiGraphics g, int x, int y, int w) {
         if (w <= 0) return;
-        g.fill(x, y, x + w, y + 1, 0xFFEDF4FA);
+        g.fill(x, y, x + w, y + 1, Theme.uiColor(0xFFEDF4FA));
     }
 
     public static void vDivider(GuiGraphics g, int x, int y, int h) {
         if (h <= 0) return;
-        g.fill(x, y, x + 1, y + h, 0xFFEDF4FA);
+        g.fill(x, y, x + 1, y + h, Theme.uiColor(0xFFEDF4FA));
     }
 
     public static void panel(GuiGraphics g, int x, int y, int w, int h) {
@@ -200,6 +201,7 @@ public final class ChestGuiTextures {
             case NETWORK -> UPGRADE_NETWORK;
             case ENERGY -> UPGRADE_ENERGY;
             case STRESS -> UPGRADE_STRESS;
+            case SUITE -> UPGRADE_SUITE;
         };
         blit(g, x, y, UPGRADE_GLYPH_SIZE, UPGRADE_GLYPH_SIZE, sprite.u, sprite.v, sprite.w, sprite.h);
     }
@@ -209,7 +211,8 @@ public final class ChestGuiTextures {
         FLUID,
         NETWORK,
         ENERGY,
-        STRESS
+        STRESS,
+        SUITE
     }
 
     private static void nineSlice(GuiGraphics g, Sprite s, int x, int y, int w, int h) {
@@ -240,12 +243,12 @@ public final class ChestGuiTextures {
 
     private static void blit(GuiGraphics g, int x, int y, int w, int h, int u, int v, int uw, int vh) {
         if (w <= 0 || h <= 0 || uw <= 0 || vh <= 0) return;
-        g.blit(TEXTURE, x, y, w, h, (float) u, (float) v, uw, vh, TEX_W, TEX_H);
+        tintedBlit(g, x, y, w, h, u, v, uw, vh, Theme.uiColor(0xFFFFFFFF));
     }
 
     private static void fill(GuiGraphics g, int x, int y, int w, int h, int color) {
         if (w <= 0 || h <= 0) return;
-        g.fill(x, y, x + w, y + h, color);
+        g.fill(x, y, x + w, y + h, Theme.uiColor(color));
     }
 
     private static void tintedBlit(GuiGraphics g, int x, int y, int w, int h, int u, int v, int uw, int vh, int color) {

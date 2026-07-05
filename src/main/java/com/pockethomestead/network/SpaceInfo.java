@@ -1,6 +1,7 @@
 package com.pockethomestead.network;
 
 import com.pockethomestead.space.SpaceData;
+import com.pockethomestead.space.SpaceChunkLoadingManager;
 import com.pockethomestead.space.SpacePermission;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.core.UUIDUtil;
@@ -19,9 +20,12 @@ public record SpaceInfo(UUID spaceId, UUID ownerId, String name, int width, int 
                         boolean infinite, float amplitude,
                         SpacePermission.AccessMode mode,
                         SpacePermission.AccessLevel protectedLevel,
-                        SpacePermission.AccessLevel publicLevel,
-                        boolean offlineSimulationEnabled,
-                        List<Member> members) {
+        SpacePermission.AccessLevel publicLevel,
+        boolean offlineSimulationEnabled,
+        boolean chunkLoadingEnabled,
+        boolean chunkLoadingAllowed,
+        List<Member> members) {
+    public static final UUID OWNER_PERMISSION_ID = new UUID(0, 0);
 
     public record Member(UUID id, String name, SpacePermission.MemberRole role, SpacePermission.AccessLevel overrideLevel) {
         public SpacePermission.AccessLevel effectiveLevel() {
@@ -74,6 +78,8 @@ public record SpaceInfo(UUID spaceId, UUID ownerId, String name, int width, int 
             ByteBufCodecs.VAR_INT.encode(buf, s.protectedLevel().ordinal());
             ByteBufCodecs.VAR_INT.encode(buf, s.publicLevel().ordinal());
             ByteBufCodecs.BOOL.encode(buf, s.offlineSimulationEnabled());
+            ByteBufCodecs.BOOL.encode(buf, s.chunkLoadingEnabled());
+            ByteBufCodecs.BOOL.encode(buf, s.chunkLoadingAllowed());
             ByteBufCodecs.VAR_INT.encode(buf, s.members().size());
             for (Member m : s.members()) {
                 UUIDUtil.STREAM_CODEC.encode(buf, m.id());
@@ -97,6 +103,8 @@ public record SpaceInfo(UUID spaceId, UUID ownerId, String name, int width, int 
             SpacePermission.AccessLevel protectedLevel = safeLevel(ByteBufCodecs.VAR_INT.decode(buf));
             SpacePermission.AccessLevel publicLevel = safeLevel(ByteBufCodecs.VAR_INT.decode(buf));
             boolean offlineSimulationEnabled = ByteBufCodecs.BOOL.decode(buf);
+            boolean chunkLoadingEnabled = ByteBufCodecs.BOOL.decode(buf);
+            boolean chunkLoadingAllowed = ByteBufCodecs.BOOL.decode(buf);
             int n = ByteBufCodecs.VAR_INT.decode(buf);
             List<Member> members = new ArrayList<>(n);
             for (int i = 0; i < n; i++) {
@@ -108,22 +116,38 @@ public record SpaceInfo(UUID spaceId, UUID ownerId, String name, int width, int 
                 members.add(new Member(id, mname, role, override));
             }
             return new SpaceInfo(spaceId, ownerId, name, width, depth, biome, terrain, dimensionId,
-                    infinite, amplitude, mode, protectedLevel, publicLevel, offlineSimulationEnabled, List.copyOf(members));
+                    infinite, amplitude, mode, protectedLevel, publicLevel, offlineSimulationEnabled,
+                    chunkLoadingEnabled, chunkLoadingAllowed, List.copyOf(members));
         }
     );
 
     /** 由服务端构建：解析成员 UUID → 名字（profile 缓存）。 */
     public static SpaceInfo from(MinecraftServer server, SpaceData d) {
         SpacePermission perm = d.getPermission();
+        return fromPermission(server, d.getSpaceId(), d.getOwnerId(), d.getName(), d.getWidth(), d.getDepth(),
+                d.getBiome(), d.getTerrainType(), d.getDimensionId().toString(), d.isInfinite(), d.getTerrainAmplitude(),
+                d.isOfflineSimulationEnabled(), d.isChunkLoadingEnabled() && SpaceChunkLoadingManager.canEnable(d),
+                SpaceChunkLoadingManager.canEnable(d), perm);
+    }
+
+    public static SpaceInfo ownerPermission(MinecraftServer server, UUID ownerId, SpacePermission permission) {
+        return fromPermission(server, OWNER_PERMISSION_ID, ownerId, "我的私有权限", 0, 0, "",
+                SpaceData.TerrainType.FLAT, "", false, 0.0f, false, false, false, permission);
+    }
+
+    private static SpaceInfo fromPermission(MinecraftServer server, UUID spaceId, UUID ownerId, String name,
+                                            int width, int depth, String biome, SpaceData.TerrainType terrain,
+                                            String dimensionId, boolean infinite, float amplitude,
+                                            boolean offlineSimulationEnabled, boolean chunkLoadingEnabled,
+                                            boolean chunkLoadingAllowed, SpacePermission perm) {
         List<Member> members = new ArrayList<>();
         for (SpacePermission.MemberRule rule : perm.getMemberRules().values()) {
-            String name = resolveName(server, rule.id());
-            members.add(new Member(rule.id(), name, rule.role(), rule.overrideLevel()));
+            String memberName = resolveName(server, rule.id());
+            members.add(new Member(rule.id(), memberName, rule.role(), rule.overrideLevel()));
         }
-        return new SpaceInfo(d.getSpaceId(), d.getOwnerId(), d.getName(),
-                d.getWidth(), d.getDepth(), d.getBiome(), d.getTerrainType(),
-                d.getDimensionId().toString(), d.isInfinite(), d.getTerrainAmplitude(),
-                perm.getMode(), perm.getProtectedLevel(), perm.getPublicLevel(), d.isOfflineSimulationEnabled(), List.copyOf(members));
+        return new SpaceInfo(spaceId, ownerId, name, width, depth, biome, terrain, dimensionId,
+                infinite, amplitude, perm.getMode(), perm.getProtectedLevel(), perm.getPublicLevel(),
+                offlineSimulationEnabled, chunkLoadingEnabled, chunkLoadingAllowed, List.copyOf(members));
     }
 
     private static String resolveName(MinecraftServer server, UUID id) {

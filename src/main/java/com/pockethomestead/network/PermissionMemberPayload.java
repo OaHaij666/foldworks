@@ -71,8 +71,10 @@ public record PermissionMemberPayload(UUID spaceId, boolean add, String name, UU
     public static void handleOnServer(PermissionMemberPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer player)) return;
-            SpaceData space = SpaceManager.getInstance().getSpace(payload.spaceId());
-            if (space == null || !space.can(player.getUUID(), SpacePermission.AccessLevel.MANAGE)) return;
+            boolean globalOwnerRule = SpaceInfo.OWNER_PERMISSION_ID.equals(payload.spaceId());
+            SpaceData space = globalOwnerRule ? null : SpaceManager.getInstance().getSpace(payload.spaceId());
+            if (!globalOwnerRule && (space == null || !space.can(player.getUUID(), SpacePermission.AccessLevel.MANAGE))) return;
+            UUID ownerId = globalOwnerRule ? player.getUUID() : space.getOwnerId();
 
             UUID targetId = payload.targetId();
             if (payload.add()) {
@@ -92,11 +94,11 @@ public record PermissionMemberPayload(UUID spaceId, boolean add, String name, UU
                     targetId = profileOpt.get().getId();
                 }
                 UUID memberId = targetId;
-                SpaceManager.getInstance().updateOwnerPermission(space.getOwnerId(),
+                SpaceManager.getInstance().updateOwnerPermission(ownerId,
                         permission -> permission.setMember(memberId, payload.role(), payload.overrideLevel()));
             } else {
                 UUID memberId = targetId;
-                SpaceManager.getInstance().updateOwnerPermission(space.getOwnerId(),
+                SpaceManager.getInstance().updateOwnerPermission(ownerId,
                         permission -> permission.removeMember(memberId));
             }
             SpaceListPayload.sendToAll(player.server);
