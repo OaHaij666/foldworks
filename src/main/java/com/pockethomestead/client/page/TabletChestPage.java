@@ -8,6 +8,7 @@ import com.pockethomestead.client.ui.widget.UiButton;
 import com.pockethomestead.menu.BaseChestMenu;
 import com.pockethomestead.network.ChestSyncPacket;
 import com.pockethomestead.network.TabletChestActionPacket;
+import com.pockethomestead.client.search.ItemSearch;
 import com.pockethomestead.network.TabletChestSyncPacket;
 import com.pockethomestead.api.suite.SuiteToolRegistry;
 import com.pockethomestead.suite.VanillaSuiteAdapters;
@@ -24,6 +25,7 @@ import net.minecraft.world.item.Items;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -71,6 +73,25 @@ public class TabletChestPage extends Page {
     private int suiteScrollDrag;
     private String suiteSearchQuery = "";
 
+    // 订单领取后的“定位 + 闪烁”辅助：玩家点击领取按钮的瞬间，这里记录下订单目标，
+    // 待箱内同步到达该产物后自动滚动到对应行并让该格缓慢闪烁约 3 秒。
+    private ItemStack claimPendingTarget = ItemStack.EMPTY;
+    private long claimPendingUntil;
+    private int highlightSlotIdx = -1;
+    private long highlightUntil;
+
+    // 工作台九宫格“按住左/右键拖拽分发”状态。
+    // 仅在玩家手里携带物品时启用；其它情况仍走单击立即发包。
+    // 右键：每路过一个新槽立即把 carried 的 1 个放进去（即时服务端发包）。
+    // 左键：拖拽期间客户端模拟显示 carried 被重新均分到目前拖过的所有槽，carried 数量保持不变；
+    //       释放时一次性发 DISTRIBUTE_WORKBENCH 把最终分布提交服务端。
+    private boolean workbenchDragging;
+    private int workbenchDragButton = -1;
+    private int workbenchDragCarriedCount;
+    private final BitSet workbenchDragSlots = new BitSet(9);
+    // 客户端模拟：drag 开始时九宫格每槽的快照（仅左键拖时使用，用于在渲染时叠加分布）。
+    private final ItemStack[] workbenchDragInitial = new ItemStack[9];
+
     @Override
     public String id() {
         return "tablet_chest";
@@ -92,7 +113,7 @@ public class TabletChestPage extends Page {
         if (searchBox == null) buildWidgets();
     }
 
-    @Override
+@Override
     public void onExit() {
         if (searchBox != null) searchBox.setFocused(false);
         if (suiteSearchBox != null) suiteSearchBox.setFocused(false);
@@ -100,6 +121,10 @@ public class TabletChestPage extends Page {
             submitSuiteQuantity();
             suiteQtyBox.setFocused(false);
         }
+        // 切页时携带物品与未完成的工作台拖拽状态都不应残留。
+        workbenchDragging = false;
+        workbenchDragButton = -1;
+        workbenchDragSlots.clear();
         if (mc.player != null) PacketDistributor.sendToServer(new TabletChestActionPacket(TabletChestActionPacket.RETURN_CARRIED));
     }
 
@@ -260,6 +285,29 @@ public class TabletChestPage extends Page {
             int thumbH = Math.max(14, trackH * rows / totalRows);
             int thumbY = trackY + chestScrollRow * Math.max(1, trackH - thumbH) / Math.max(1, totalRows - rows);
             ChestGuiTextures.scrollbar(g, trackX, trackY, 6, trackH, thumbY, thumbH);
+        }
+
+        // 订单领取后的“缓慢闪烁高亮”：3 秒内以约 2Hz 呼吸式金色边框叠加在被定位的槽上。
+        if (highlightSlotIdx >= 0 && System.currentTimeMillis() <= highlightUntil) {
+            int row = highlightSlotIdx / COLS - chestScrollRow;
+            int col = highlightSlotIdx % COLS;
+            if (row >= 0 && row < rows) {
+                int sx = gridX + col * SLOT;
+                int sy = gridY + row * SLOT;
+                long now = System.currentTimeMillis();
+                long remainMs = Math.max(0, highlightUntil - now);
+                // 整体不透明度随剩余时间线性淡出，叠加 sin 呼吸。
+                float fade = Math.max(0f, Math.min(1f, remainMs / 1000f));
+                float pulse = 0.5f + 0.5f * (float) Math.sin(now / 250.0);
+                int alpha = Math.round(0xA0 * fade * pulse);
+                int color = (alpha << 24) | 0x00FFE08A;
+                g.pose().pushPose();
+                g.pose().translate(0, 0, 260);
+                g.fill(sx - 1, sy - 1, sx + 17, sy + 17, color);
+                g.pose().popPose();
+            }
+        } else if (highlightSlotIdx >= 0) {
+            highlightSlotIdx = -1;
         }
     }
 
@@ -471,7 +519,7 @@ public class TabletChestPage extends Page {
         drawScrollbar(g, x + w - 4, y, rows * 18 - 1, suiteSearchResults.size(), rows, suiteSearchScroll);
     }
 
-    private void rebuildSuiteSearchResults() {
+private void rebuildSuiteSearchResults() {
         suiteSearchResults.clear();
         if (suiteSearchBox == null) return;
         String query = suiteSearchBox.getValue().trim().toLowerCase(Locale.ROOT);
@@ -483,10 +531,8 @@ public class TabletChestPage extends Page {
         for (var item : BuiltInRegistries.ITEM) {
             if (item == Items.AIR) continue;
             ItemStack stack = new ItemStack(item);
-            String name = stack.getHoverName().getString().toLowerCase(Locale.ROOT);
-            ResourceLocation id = BuiltInRegistries.ITEM.getKey(item);
-            String key = id == null ? "" : id.toString().toLowerCase(Locale.ROOT);
-            if (name.contains(query) || key.contains(query)) {
+            // 走 ItemSearch：物品名支持拼音匹配；物品 key 走普通小写包含。
+            if (ItemSearch.matches(stack, query)) {
                 suiteSearchResults.add(stack);
             }
         }
@@ -577,6 +623,8 @@ public class TabletChestPage extends Page {
                 ChestGuiTextures.slot(g, sx - 1, sy - 1, hover);
                 if (idx < inputs.size()) {
                     ItemStack stack = inputs.get(idx);
+                    // 左键拖拽期间显示客户端模拟的“已均分到该槽”的状态，让玩家立即看到分布变化。
+                    stack = workbenchDragPreview(idx, stack);
                     if (!stack.isEmpty()) {
                         g.renderItem(stack, sx, sy);
                         g.renderItemDecorations(font, stack, sx, sy, null);
@@ -809,13 +857,31 @@ public class TabletChestPage extends Page {
             case ID -> Comparator.comparing(entry -> itemId(entry.stack()), String.CASE_INSENSITIVE_ORDER);
         };
         visibleItems.sort(comparator);
-        int rows = Math.max(1, (h - Theme.PAD * 2 - 25 - PLAYER_ROWS * SLOT - 28) / SLOT);
-        chestScrollRow = clamp(chestScrollRow, 0, Math.max(0, (visibleItems.size() + COLS - 1) / COLS - rows));
+        int chestH = chestRect()[3];
+        int rows = Math.max(1, (chestH - 26) / SLOT);
+        int totalRows = Math.max(rows, (visibleItems.size() + COLS - 1) / COLS);
+        chestScrollRow = clamp(chestScrollRow, 0, Math.max(0, totalRows - rows));
+
+        // 订单领取后定位：若仍在 5 秒定位窗口内且箱内出现匹配产物，把滚动行跳到产物的行，
+        // 并设置该槽 3 秒缓慢闪烁高亮。
+        if (!claimPendingTarget.isEmpty() && System.currentTimeMillis() <= claimPendingUntil) {
+            for (int i = 0; i < visibleItems.size(); i++) {
+                if (ItemStack.isSameItemSameComponents(visibleItems.get(i).stack(), claimPendingTarget)) {
+                    int itemRow = i / COLS;
+                    int maxScroll = Math.max(0, totalRows - rows);
+                    chestScrollRow = clamp(itemRow, 0, maxScroll);
+                    highlightSlotIdx = i;
+                    highlightUntil = System.currentTimeMillis() + 3000;
+                    claimPendingTarget = ItemStack.EMPTY;
+                    break;
+                }
+            }
+        }
     }
 
     private boolean matches(ItemStack stack, String query) {
-        return itemName(stack).toLowerCase(Locale.ROOT).contains(query)
-                || itemId(stack).toLowerCase(Locale.ROOT).contains(query);
+        // 走 ItemSearch：物品名支持拼音（JEC/PinIn），物品 ID 走普通 contains。
+        return ItemSearch.matches(stack, query);
     }
 
     private String itemName(ItemStack stack) {
@@ -864,6 +930,18 @@ public class TabletChestPage extends Page {
     private void renderCarriedStack(GuiGraphics g, int mouseX, int mouseY) {
         ItemStack carried = ClientTabletChestCache.carriedStack();
         if (carried.isEmpty()) return;
+        // 左键拖拽期间，鼠标上“显示”的携带数量 = 原数量 - 已分配到拖过槽的总量，
+        // 让玩家直观看到 carried 在分批进入九宫格；释放时服务端会真正结算。
+        if (workbenchDragging && workbenchDragButton == 0) {
+            int n = workbenchDragSlots.cardinality();
+            int total = workbenchDragCarriedCount;
+            int base = n > 0 ? total / n : 0;
+            int remainder = n > 0 ? total % n : 0;
+            int placed = base * n + remainder;
+            int left = Math.max(0, total - placed);
+            if (left <= 0) return;
+            carried = carried.copyWithCount(left);
+        }
         g.pose().pushPose();
         g.pose().translate(0, 0, 400);
         g.renderItem(carried, mouseX - 8, mouseY - 8);
@@ -898,6 +976,15 @@ public class TabletChestPage extends Page {
             suiteQtyBox.setFocused(false);
         }
 
+// 携带物品时左/右键点击箱内区域：永远只存入，不应拾取格子内物品。
+        // 该行为与传输箱 (BaseChestScreen) 的交互一致。
+        if (isInChestArea(mx, my) && !ClientTabletChestCache.carriedStack().isEmpty()) {
+            PacketDistributor.sendToServer(new TabletChestActionPacket(button == 1
+                    ? TabletChestActionPacket.CLICK_CHEST_RIGHT
+                    : TabletChestActionPacket.CLICK_CHEST_LEFT, ItemStack.EMPTY));
+            return true;
+        }
+
         int chestIdx = chestIndexAt(mx, my);
         if (chestIdx >= 0 && chestIdx < visibleItems.size()) {
             ItemStack stack = visibleItems.get(chestIdx).stack().copyWithCount(1);
@@ -905,12 +992,6 @@ public class TabletChestPage extends Page {
                     ? TabletChestActionPacket.QUICK_MOVE_CHEST
                     : button == 1 ? TabletChestActionPacket.CLICK_CHEST_RIGHT : TabletChestActionPacket.CLICK_CHEST_LEFT;
             PacketDistributor.sendToServer(new TabletChestActionPacket(action, stack));
-            return true;
-        }
-        if (isInChestArea(mx, my) && !ClientTabletChestCache.carriedStack().isEmpty()) {
-            PacketDistributor.sendToServer(new TabletChestActionPacket(button == 1
-                    ? TabletChestActionPacket.CLICK_CHEST_RIGHT
-                    : TabletChestActionPacket.CLICK_CHEST_LEFT, ItemStack.EMPTY));
             return true;
         }
 
@@ -925,10 +1006,21 @@ public class TabletChestPage extends Page {
         return false;
     }
 
-    private boolean handleWorkbenchClick(double mx, double my, int button) {
+private boolean handleWorkbenchClick(double mx, double my, int button) {
         if (!ClientTabletChestCache.suiteUpgradeInstalled()) return false;
         int inputSlot = workbenchInputSlotAt(mx, my);
         if (inputSlot >= 0) {
+            ItemStack carried = ClientTabletChestCache.carriedStack();
+            // 携带物品时按住左键/右键拖入九宫格：进入 drag 状态，
+            // 待 mouseReleased 一次性按拖过的槽分发（左键=整组均分 / 右键=每槽各放一个）。
+            if (!carried.isEmpty() && (button == 0 || button == 1) && !Screen.hasShiftDown()) {
+                startWorkbenchDrag(button, inputSlot, carried);
+                if (button == 1) {
+                    PacketDistributor.sendToServer(new TabletChestActionPacket(
+                            TabletChestActionPacket.CLICK_WORKBENCH_RIGHT, inputSlot));
+                }
+                return true;
+            }
             PacketDistributor.sendToServer(new TabletChestActionPacket(button == 1
                     ? TabletChestActionPacket.CLICK_WORKBENCH_RIGHT
                     : TabletChestActionPacket.CLICK_WORKBENCH_LEFT, inputSlot));
@@ -943,6 +1035,84 @@ public class TabletChestPage extends Page {
         return false;
     }
 
+    private void startWorkbenchDrag(int button, int slot, ItemStack carried) {
+        workbenchDragging = true;
+        workbenchDragButton = button;
+        workbenchDragCarriedCount = carried.getCount();
+        workbenchDragSlots.clear();
+        workbenchDragSlots.set(slot);
+        // 左键拖动期间需基于“drag 开始时的 grid 快照”叠加分布，于是缓存九宫格当前内容。
+        if (button == 0) {
+            List<ItemStack> inputs = ClientTabletChestCache.workbenchInputs();
+            for (int i = 0; i < 9; i++) {
+                ItemStack s = i < inputs.size() ? inputs.get(i) : ItemStack.EMPTY;
+                workbenchDragInitial[i] = s == null ? ItemStack.EMPTY : s.copy();
+            }
+        }
+    }
+
+    private void finishWorkbenchDrag() {
+        boolean left = workbenchDragButton == 0;
+        int[] slots = new int[workbenchDragSlots.cardinality()];
+        int idx = 0;
+        for (int s = workbenchDragSlots.nextSetBit(0); s >= 0 && s < 9; s = workbenchDragSlots.nextSetBit(s + 1)) {
+            slots[idx++] = s;
+        }
+        workbenchDragging = false;
+        workbenchDragButton = -1;
+        workbenchDragSlots.clear();
+        for (int i = 0; i < 9; i++) workbenchDragInitial[i] = null;
+        int n = slots.length;
+if (n == 0) return;
+
+        if (n == 1) {
+            if (left) {
+                // 左键只按下没拖：等同单击放整组。右键首槽已在按下时即时放过一个。
+                PacketDistributor.sendToServer(new TabletChestActionPacket(
+                        TabletChestActionPacket.CLICK_WORKBENCH_LEFT, slots[0]));
+            }
+            return;
+}
+
+        if (left) {
+            // volume distributed below
+            int total = workbenchDragCarriedCount;
+            int base = total / n;
+            int remainder = total % n;
+            int[] addCounts = new int[9];
+            for (int i = 0; i < n; i++) {
+                addCounts[slots[i]] = base + (i < remainder ? 1 : 0);
+            }
+            PacketDistributor.sendToServer(new TabletChestActionPacket(
+                    TabletChestActionPacket.DISTRIBUTE_WORKBENCH, addCounts));
+        }
+        // 右键分支无需补发：每路过新槽时已在 mouseDragged 即时放过 RIGHT。
+    }
+
+    private ItemStack workbenchDragPreview(int slot, ItemStack original) {
+        if (!workbenchDragging || workbenchDragButton != 0 || !workbenchDragSlots.get(slot)) return original;
+        int n = workbenchDragSlots.cardinality();
+        if (n <= 0) return original;
+        int total = workbenchDragCarriedCount;
+        int base = total / n;
+        int remainder = total % n;
+        int ordinal = -1;
+        int seen = 0;
+        for (int s = workbenchDragSlots.nextSetBit(0); s >= 0 && s < 9; s = workbenchDragSlots.nextSetBit(s + 1)) {
+            if (s == slot) { ordinal = seen; break; }
+            seen++;
+        }
+        if (ordinal < 0) return original;
+        int add = base + (ordinal < remainder ? 1 : 0);
+        ItemStack initial = workbenchDragInitial[slot];
+        ItemStack prototype = ClientTabletChestCache.carriedStack();
+        if (add <= 0) return initial == null ? ItemStack.EMPTY : initial;
+        if (initial == null || initial.isEmpty()) {
+            return prototype.copyWithCount(add);
+        }
+        if (!ItemStack.isSameItemSameComponents(initial, prototype)) return initial;
+        return initial.copyWithCount(Math.min(initial.getMaxStackSize(), initial.getCount() + add));
+    }
     private boolean handleFurnaceClick(double mx, double my, int button) {
         if (!ClientTabletChestCache.suiteUpgradeInstalled()) return false;
         int slot = furnaceSlotAt(mx, my);
@@ -1107,11 +1277,16 @@ public class TabletChestPage extends Page {
         for (int i = 0; i < rows && suiteOrderScroll + i < orders.size(); i++) {
             TabletChestSyncPacket.OrderEntry order = orders.get(suiteOrderScroll + i);
             int y0 = listY + i * rowH;
-            if (order.canClaim() || order.canRecover() || order.canDelete()) {
+if (order.canClaim() || order.canRecover() || order.canDelete()) {
                 if (!Theme.inside(mx, my, px + pw - 23, y0 + 1, 16, 15)) continue;
                 int action = order.canClaim() ? TabletChestActionPacket.CLAIM_SUITE_ORDER
                         : order.canRecover() ? TabletChestActionPacket.RECOVER_SUITE_ORDER
                         : TabletChestActionPacket.DELETE_SUITE_ORDER;
+                // 领取时记录订单目标，用于稍后在箱内定位 + 闪烁高亮。
+                if (action == TabletChestActionPacket.CLAIM_SUITE_ORDER && !order.target().isEmpty()) {
+                    claimPendingTarget = order.target().copyWithCount(1);
+                    claimPendingUntil = System.currentTimeMillis() + 5000;
+                }
                 PacketDistributor.sendToServer(new TabletChestActionPacket(action, order.id()));
                 return true;
             }
@@ -1165,10 +1340,22 @@ public class TabletChestPage extends Page {
         return panelY + 45;
     }
 
-    @Override
+@Override
     public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
         if (suiteScrollDrag != 0) {
             updateSuiteScrollbarDrag(my);
+            return true;
+        }
+        if (workbenchDragging && workbenchDragButton == button) {
+            int slot = workbenchInputSlotAt(mx, my);
+            if (slot >= 0) {
+                boolean visited = workbenchDragSlots.get(slot);
+                workbenchDragSlots.set(slot);
+                if (!visited && button == 1) {
+                    PacketDistributor.sendToServer(new TabletChestActionPacket(
+                            TabletChestActionPacket.CLICK_WORKBENCH_RIGHT, slot));
+                }
+            }
             return true;
         }
         return false;
@@ -1180,13 +1367,17 @@ public class TabletChestPage extends Page {
             suiteScrollDrag = 0;
             return true;
         }
+        if (workbenchDragging) {
+            finishWorkbenchDrag();
+            return true;
+        }
         return false;
     }
 
     @Override
     public boolean mouseScrolled(double mx, double my, double sx, double sy) {
         if (handleSuiteOrderScroll(mx, my, sy)) return true;
-        if (handleStonecutterScroll(mx, my, sy)) return true;
+if (handleStonecutterScroll(mx, my, sy)) return true;
         if (!ClientTabletChestCache.available() || !isInChestArea(mx, my)) return false;
         int rows = currentChestRows();
         int totalRows = Math.max(rows, (visibleItems.size() + COLS - 1) / COLS);

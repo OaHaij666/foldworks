@@ -82,6 +82,7 @@ public class PocketHomestead {
 
     private static void onCommonSetup(FMLCommonSetupEvent event) {
         event.enqueueWork(com.pockethomestead.compat.create.CreateCompat::registerMovementCompatibility);
+        com.pockethomestead.suite.NativeCraftingPlanner.tryLoad();
     }
 
     private static void loadSavedSpaceDimensions(MinecraftServer server,

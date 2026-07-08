@@ -16,9 +16,11 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeType;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 public final class SuiteOrderSystem {
@@ -227,25 +229,138 @@ public final class SuiteOrderSystem {
         long now = level.getGameTime();
         boolean changed = completeOperations(now);
         if (!chest.hasSuiteUpgrade()) return;
+        // 错峰：基于方块位置 hash 偏移，每 3 tick 只跑一次规划搜索
+        int plannerInterval = 3;
+        int plannerOffset = Math.abs(chest.getBlockPos().hashCode()) % plannerInterval;
+        boolean shouldPlan = (now + plannerOffset) % plannerInterval == 0;
+        if (!shouldPlan) {
+            if (changed) chest.setChanged();
+            return;
+        }
+        int cooldownTicks = Math.max(0, ModConfig.SUITE_PLANNER_FAIL_COOLDOWN_TICKS.get());
+
+        // 优先尝试 Rust 原生规划器
+        boolean usedRust = false;
+        int rustPlanned = 0;
+        long rustCostMs = 0;
+
+        // 尝试同步配方（首次调用时触发）
+        NativeCraftingPlanner.syncAllRecipesIfNeeded(level);
+
+        if (NativeCraftingPlanner.isAvailable()) {
+            long rustStart = System.nanoTime();
+            boolean rustChanged = tryNativePlan(level, now, cooldownTicks);
+            rustCostMs = (System.nanoTime() - rustStart) / 1_000_000;
+            if (rustChanged) {
+                changed = true;
+                usedRust = true;
+                rustPlanned = 1;
+            }
+        }
+
+        // Java 兜底：处理 Rust 未覆盖的订单
+        long javaStart = System.nanoTime();
+        int javaPlanned = 0;
+        long deadlineNanos = System.nanoTime() + 120_000_000L; // 120ms 兜底
         int attempts = Math.min(orders.size(), 32);
         for (int i = 0; i < attempts && !orders.isEmpty(); i++) {
+            if (System.nanoTime() > deadlineNanos) break;
             schedulerCursor = Math.floorMod(schedulerCursor, orders.size());
             Order order = orders.get(schedulerCursor);
             schedulerCursor = (schedulerCursor + 1) % Math.max(1, orders.size());
-            if (tryFulfillFromPublicStock(order)) {
-                changed = true;
-                order.refreshPassiveState();
-                continue;
-            }
             if (!order.acceptingNewOperations || order.cancelRequested || order.claimed + order.ready + order.activeTargetOutputCount() >= order.requested) {
                 order.refreshPassiveState();
                 continue;
             }
-            if (tryStartFor(order, order.target, true, level, now, 0)) {
+            if (now < order.searchCooldownUntil) continue;
+            if (tryStartFor(order, order.target, true, level, now, 0, new HashSet<>(), deadlineNanos)) {
                 changed = true;
+                javaPlanned++;
+            } else {
+                order.searchCooldownUntil = now + cooldownTicks;
             }
         }
+        long javaCostMs = (System.nanoTime() - javaStart) / 1_000_000;
+
+        if (rustPlanned > 0 || javaPlanned > 0 || rustCostMs > 0 || javaCostMs > 0) {
+            com.pockethomestead.PocketHomestead.LOGGER.info(
+                    "[SuitePlanner] chest={}, engine={}|rust={}ms/java={}ms, planned={}|{}/{}",
+                    chest.getBlockPos().toShortString(),
+                    usedRust ? "RUST" : "JAVA",
+                    rustCostMs, javaCostMs, rustPlanned, javaPlanned, orders.size());
+        }
         if (changed) chest.setChanged();
+    }
+
+    private boolean tryNativePlan(ServerLevel level, long now, int cooldownTicks) {
+        int maxDepth = Math.max(1, ModConfig.SUITE_PLANNER_MAX_DEPTH.get());
+
+        // 收集待处理订单
+        List<NativeCraftingPlanner.OrderContext> orderContexts = new ArrayList<>();
+        List<Order> pendingOrderRefs = new ArrayList<>();
+        for (Order order : orders) {
+            if (!order.acceptingNewOperations || order.cancelRequested
+                    || order.claimed + order.ready + order.activeTargetOutputCount() >= order.requested) {
+                order.refreshPassiveState();
+                continue;
+            }
+            if (now < order.searchCooldownUntil) continue;
+            orderContexts.add(new NativeCraftingPlanner.OrderContext(
+                    order.target, order.requested, order.ready, order.activeTargetOutputCount()));
+            pendingOrderRefs.add(order);
+        }
+        if (orderContexts.isEmpty()) return false;
+
+        List<NativeCraftingPlanner.PlanAction> actions = NativeCraftingPlanner.plan(
+                level, orderContexts, chest, toolPool, maxDepth);
+
+        if (actions == null) {
+            // Rust 原生库不可用或异常，不设冷却，让 Java 兜底处理
+            return false;
+        }
+
+        if (actions.isEmpty()) {
+            // Rust 搜索无结果，设置冷却
+            for (Order order : pendingOrderRefs) {
+                order.searchCooldownUntil = now + cooldownTicks;
+            }
+            return false;
+        }
+
+        boolean changed = false;
+        for (NativeCraftingPlanner.PlanAction action : actions) {
+            if (action.orderIndex() >= pendingOrderRefs.size()) continue;
+            Order order = pendingOrderRefs.get(action.orderIndex());
+
+            // 检查工具可用性
+            int toolIndex = availableToolIndex(action.tool());
+            if (toolIndex < 0) continue;
+
+            // 查找精确匹配的配方模板
+            List<SuiteOperationTemplate> candidates = SuiteToolRegistry.operationsFor(level, action.output()).stream()
+                    .filter(op -> hasTool(op.tool()) && ItemStack.isSameItemSameComponents(op.tool(), action.tool()))
+                    .toList();
+            boolean consumed = false;
+            for (SuiteOperationTemplate op : candidates) {
+                Ingredient missing = firstMissingIngredient(order, op.inputs());
+                if (missing == null) {
+                    if (!ensureFuel(op, toolIndex)) continue;
+                    consumeIngredients(order, op.inputs());
+                    order.activeOperations.add(new RunningOperation(op.tool().copyWithCount(1), op.output().copy(),
+                            action.isTargetOutput(), toolIndex, now + Math.max(1, op.timeTicks())));
+                    order.state = OrderState.RUNNING;
+                    order.reason = "";
+                    consumed = true;
+                    break;
+                }
+            }
+            if (consumed) {
+                changed = true;
+            } else {
+                order.searchCooldownUntil = now + cooldownTicks;
+            }
+        }
+        return changed;
     }
 
     private boolean completeOperations(long now) {
@@ -278,67 +393,62 @@ public final class SuiteOrderSystem {
     }
 
     private boolean tryStartFor(Order order, ItemStack desired, boolean targetOutput,
-                                ServerLevel level, long now, int depth) {
+                                ServerLevel level, long now, int depth,
+                                Set<String> visited, long deadlineNanos) {
         if (desired.isEmpty()) return false;
-        if (depth > Math.max(1, ModConfig.SUITE_PLANNER_MAX_DEPTH.get())) {
-            order.state = OrderState.WAITING_MATERIAL;
-            order.reason = "找路深度已达上限";
-            return false;
-        }
-        List<SuiteOperationTemplate> candidates = SuiteToolRegistry.operationsFor(level, desired).stream()
-                .filter(op -> hasTool(op.tool()))
-                .limit(Math.max(1, ModConfig.SUITE_PLANNER_MAX_CANDIDATES_PER_ITEM.get()))
-                .toList();
-        if (candidates.isEmpty()) {
-            order.state = hasAnyRecipe(level, desired) ? OrderState.WAITING_TOOL : OrderState.STOPPED;
-            order.reason = hasAnyRecipe(level, desired) ? "缺少可用工具" : "找不到生产路线";
-            return false;
-        }
-        for (SuiteOperationTemplate op : candidates) {
-            int toolIndex = availableToolIndex(op.tool());
-            if (toolIndex < 0) {
-                order.state = OrderState.WAITING_TOOL;
-                order.reason = "工具忙碌";
-                continue;
+        if (System.nanoTime() > deadlineNanos) return false;
+        String key = stackKey(desired);
+        if (!visited.add(key)) return false;
+        try {
+            if (depth > Math.max(1, ModConfig.SUITE_PLANNER_MAX_DEPTH.get())) {
+                order.state = OrderState.WAITING_MATERIAL;
+                order.reason = "找路深度已达上限";
+                return false;
             }
-            Ingredient missing = firstMissingIngredient(order, op.inputs());
-            if (missing != null) {
-                for (ItemStack next : ingredientTargets(order, missing)) {
-                    if (!next.isEmpty() && tryStartFor(order, next.copyWithCount(1), false, level, now, depth + 1)) {
-                        order.state = OrderState.RUNNING;
-                        order.reason = "生产中间材料";
-                        return true;
-                    }
+            List<SuiteOperationTemplate> candidates = SuiteToolRegistry.operationsFor(level, desired).stream()
+                    .filter(op -> hasTool(op.tool()))
+                    .toList();
+            if (candidates.isEmpty()) {
+                order.state = hasAnyRecipe(level, desired) ? OrderState.WAITING_TOOL : OrderState.STOPPED;
+                order.reason = hasAnyRecipe(level, desired) ? "缺少可用工具" : "找不到生产路线";
+                return false;
+            }
+            for (SuiteOperationTemplate op : candidates) {
+                int toolIndex = availableToolIndex(op.tool());
+                if (toolIndex < 0) {
+                    order.state = OrderState.WAITING_TOOL;
+                    order.reason = "工具忙碌";
+                    continue;
                 }
-                order.state = OrderState.WAITING_MATERIAL;
-                order.reason = "缺少材料";
-                continue;
+                Ingredient missing = firstMissingIngredient(order, op.inputs());
+                if (missing != null) {
+                    for (ItemStack next : ingredientTargets(order, missing)) {
+                        if (!next.isEmpty() && tryStartFor(order, next.copyWithCount(1), false, level, now, depth + 1, visited, deadlineNanos)) {
+                            order.state = OrderState.RUNNING;
+                            order.reason = "生产中间材料";
+                            return true;
+                        }
+                    }
+                    order.state = OrderState.WAITING_MATERIAL;
+                    order.reason = "缺少材料";
+                    continue;
+                }
+                if (!ensureFuel(op, toolIndex)) {
+                    order.state = OrderState.WAITING_MATERIAL;
+                    order.reason = "缺少燃料";
+                    continue;
+                }
+                consumeIngredients(order, op.inputs());
+                order.activeOperations.add(new RunningOperation(op.tool().copyWithCount(1), op.output().copy(),
+                        targetOutput, toolIndex, now + Math.max(1, op.timeTicks())));
+                order.state = OrderState.RUNNING;
+                order.reason = "";
+                return true;
             }
-            if (!ensureFuel(op, toolIndex)) {
-                order.state = OrderState.WAITING_MATERIAL;
-                order.reason = "缺少燃料";
-                continue;
-            }
-            consumeIngredients(order, op.inputs());
-            order.activeOperations.add(new RunningOperation(op.tool().copyWithCount(1), op.output().copy(),
-                    targetOutput, toolIndex, now + Math.max(1, op.timeTicks())));
-            order.state = OrderState.RUNNING;
-            order.reason = "";
-            return true;
+            return false;
+        } finally {
+            visited.remove(key);
         }
-        return false;
-    }
-
-    private boolean tryFulfillFromPublicStock(Order order) {
-        if (order.cancelRequested || !order.acceptingNewOperations) return false;
-        int remaining = order.requested - order.claimed - order.ready - order.activeTargetOutputCount();
-        if (remaining <= 0) return false;
-        int removed = chest.removeItem(order.target, remaining);
-        if (removed <= 0) return false;
-        order.ready += removed;
-        order.state = OrderState.READY;
-        order.reason = "库存已满足";
-        return true;
     }
 
     private boolean hasAnyRecipe(ServerLevel level, ItemStack desired) {
@@ -395,11 +505,9 @@ public final class SuiteOrderSystem {
         ItemStack existing = findIngredientAvailable(order, ingredient, List.of());
         if (!existing.isEmpty()) targets.add(existing.copyWithCount(1));
         ItemStack[] options = ingredient.getItems();
-        int limit = Math.max(1, ModConfig.SUITE_PLANNER_MAX_CANDIDATES_PER_ITEM.get());
         for (ItemStack option : options) {
             if (option.isEmpty() || containsSameStack(targets, option)) continue;
             targets.add(option.copyWithCount(1));
-            if (targets.size() >= limit) break;
         }
         return targets;
     }
@@ -550,6 +658,11 @@ public final class SuiteOrderSystem {
                 + "|" + tool.getComponentsPatch().hashCode();
     }
 
+    private static String stackKey(ItemStack stack) {
+        return net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString()
+                + "|" + stack.getComponentsPatch().hashCode();
+    }
+
     public void save(CompoundTag tag, HolderLookup.Provider reg) {
         tag.putInt("NextOrderId", nextOrderId);
         tag.put("Tools", saveStacks(toolPool, reg));
@@ -675,6 +788,7 @@ public final class SuiteOrderSystem {
         private final List<ItemStack> internalInventory = new ArrayList<>();
         private final List<ItemStack> recoverableInventory = new ArrayList<>();
         private final List<RunningOperation> activeOperations = new ArrayList<>();
+        private long searchCooldownUntil;
 
         private Order(int id, UUID requester, ItemStack target, int requested) {
             this.id = id;
@@ -766,6 +880,7 @@ public final class SuiteOrderSystem {
             ListTag ops = new ListTag();
             for (RunningOperation op : activeOperations) ops.add(op.save(reg, now));
             tag.put("Active", ops);
+            tag.putLong("SearchCooldownUntil", searchCooldownUntil);
             return tag;
         }
 
@@ -789,6 +904,7 @@ public final class SuiteOrderSystem {
             for (Tag raw : tag.getList("Active", Tag.TAG_COMPOUND)) {
                 order.activeOperations.add(RunningOperation.load((CompoundTag) raw, reg));
             }
+            order.searchCooldownUntil = tag.getLong("SearchCooldownUntil");
             return order;
         }
     }

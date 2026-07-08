@@ -3,6 +3,7 @@ package com.pockethomestead.client.page;
 import com.pockethomestead.client.ClientSpaceCache;
 import com.pockethomestead.client.ui.Page;
 import com.pockethomestead.client.ui.Theme;
+import com.pockethomestead.client.search.SearchSupport;
 import com.pockethomestead.client.ui.widget.UiButton;
 import com.pockethomestead.client.ui.widget.UiScrollList;
 import com.pockethomestead.dimension.PocketDimensionManager;
@@ -845,9 +846,9 @@ public class ManagePage extends Page {
         if (ownerSelfFilter && self != null && space.ownerId().equals(self)) return true;
         if (selectedOwnerIds.contains(space.ownerId())) return true;
 
-        String query = ownerFilterInput == null ? "" : ownerFilterInput.getValue().trim().toLowerCase(Locale.ROOT);
-        if (query.isEmpty()) return false;
-        return space.ownerId().toString().toLowerCase(Locale.ROOT).contains(query);
+        String query = ownerFilterInput == null ? "" : ownerFilterInput.getValue().trim();
+        if (query == null || query.isEmpty()) return false;
+        return SearchSupport.contains(space.ownerId().toString(), query);
     }
 
     private boolean hasOwnerFilter() {

@@ -8,6 +8,7 @@ import net.minecraft.world.item.ItemStack;
 public final class StoredItemStack {
     private final ItemStack prototype;
     private int count;
+    private transient int nativeItemId = -1;
 
     public StoredItemStack(ItemStack prototype, int count) {
         if (prototype == null || prototype.isEmpty()) {
@@ -58,5 +59,17 @@ public final class StoredItemStack {
 
     public String sortKey() {
         return itemId() + "|" + prototype.getComponentsPatch().hashCode() + "|" + prototype.getHoverName().getString();
+    }
+
+    public int nativeItemId() {
+        return nativeItemId;
+    }
+
+    public void nativeItemId(int id) {
+        this.nativeItemId = id;
+    }
+
+    public ItemStack prototypeRef() {
+        return prototype;
     }
 }

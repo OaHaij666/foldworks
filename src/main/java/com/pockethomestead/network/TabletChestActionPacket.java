@@ -35,7 +35,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-public record TabletChestActionPacket(int action, int playerSlot, ItemStack stack) implements CustomPacketPayload {
+public record TabletChestActionPacket(int action, int playerSlot, ItemStack stack, int[] workbenchDistribution) implements CustomPacketPayload {
     public static final int REQUEST = 0;
     public static final int CLICK_PLAYER_LEFT = 1;
     public static final int CLICK_PLAYER_RIGHT = 2;
@@ -74,6 +74,9 @@ public record TabletChestActionPacket(int action, int playerSlot, ItemStack stac
     public static final int RECOVER_SUITE_ORDER = 35;
     public static final int DELETE_SUITE_ORDER = 36;
     public static final int SET_SUITE_ORDER_QUANTITY = 37;
+    // 左键长按拖拽九宫格的最终分布（carried 全量被重新均分到本轮拖过的槽）。
+    // 客户端在拖动期间模拟显示，释放时把每个槽本轮需要新增的数量一次性发到服务端。
+    public static final int DISTRIBUTE_WORKBENCH = 38;
 
     private static final Map<UUID, ItemStack> CARRIED = new ConcurrentHashMap<>();
     private static final Map<UUID, NonNullList<ItemStack>> WORKBENCH_INPUTS = new ConcurrentHashMap<>();
@@ -87,15 +90,23 @@ public record TabletChestActionPacket(int action, int playerSlot, ItemStack stac
             ResourceLocation.fromNamespaceAndPath(PocketHomestead.MODID, "tablet_chest_action"));
 
     public TabletChestActionPacket(int action) {
-        this(action, -1, ItemStack.EMPTY);
+        this(action, -1, ItemStack.EMPTY, null);
     }
 
     public TabletChestActionPacket(int action, int playerSlot) {
-        this(action, playerSlot, ItemStack.EMPTY);
+        this(action, playerSlot, ItemStack.EMPTY, null);
     }
 
     public TabletChestActionPacket(int action, ItemStack stack) {
-        this(action, -1, stack);
+        this(action, -1, stack, null);
+    }
+
+    public TabletChestActionPacket(int action, int playerSlot, ItemStack stack) {
+        this(action, playerSlot, stack, null);
+    }
+
+    public TabletChestActionPacket(int action, int[] workbenchDistribution) {
+        this(action, -1, ItemStack.EMPTY, workbenchDistribution);
     }
 
     public static final StreamCodec<RegistryFriendlyByteBuf, TabletChestActionPacket> STREAM_CODEC = new StreamCodec<>() {
@@ -104,7 +115,12 @@ public record TabletChestActionPacket(int action, int playerSlot, ItemStack stac
             int action = ByteBufCodecs.VAR_INT.decode(buf);
             int playerSlot = ByteBufCodecs.VAR_INT.decode(buf);
             ItemStack stack = ItemStack.OPTIONAL_STREAM_CODEC.decode(buf);
-            return new TabletChestActionPacket(action, playerSlot, stack);
+            int[] distribution = null;
+            if (buf.readBoolean()) {
+                distribution = new int[9];
+                for (int i = 0; i < 9; i++) distribution[i] = ByteBufCodecs.VAR_INT.decode(buf);
+            }
+            return new TabletChestActionPacket(action, playerSlot, stack, distribution);
         }
 
         @Override
@@ -112,6 +128,14 @@ public record TabletChestActionPacket(int action, int playerSlot, ItemStack stac
             ByteBufCodecs.VAR_INT.encode(buf, packet.action);
             ByteBufCodecs.VAR_INT.encode(buf, packet.playerSlot);
             ItemStack.OPTIONAL_STREAM_CODEC.encode(buf, packet.stack == null ? ItemStack.EMPTY : packet.stack.copyWithCount(1));
+            boolean hasDistribution = packet.workbenchDistribution != null;
+            buf.writeBoolean(hasDistribution);
+            if (hasDistribution) {
+                int[] dist = packet.workbenchDistribution;
+                for (int i = 0; i < 9; i++) {
+                    ByteBufCodecs.VAR_INT.encode(buf, i < dist.length ? dist[i] : 0);
+                }
+            }
         }
     };
 
@@ -184,8 +208,9 @@ public record TabletChestActionPacket(int action, int playerSlot, ItemStack stac
                 case CLICK_SMITHING_RIGHT -> clickSmithingInput(player, chest, packet.playerSlot, true);
                 case TAKE_SMITHING_RESULT -> takeSmithingResult(player, chest, false);
                 case QUICK_MOVE_SMITHING_RESULT -> takeSmithingResult(player, chest, true);
-                case CLICK_STONECUTTER_LEFT -> clickStonecutterInput(player, chest, false);
+case CLICK_STONECUTTER_LEFT -> clickStonecutterInput(player, chest, false);
                 case CLICK_STONECUTTER_RIGHT -> clickStonecutterInput(player, chest, true);
+                case DISTRIBUTE_WORKBENCH -> distributeWorkbench(player, chest, packet.workbenchDistribution);
                 case SELECT_STONECUTTER_RECIPE -> selectStonecutterRecipe(player, packet.playerSlot);
                 case TAKE_STONECUTTER_RESULT -> takeStonecutterResult(player, chest, false);
                 case QUICK_MOVE_STONECUTTER_RESULT -> takeStonecutterResult(player, chest, true);
@@ -429,7 +454,7 @@ public record TabletChestActionPacket(int action, int playerSlot, ItemStack stac
         }
     }
 
-    private static void clickWorkbenchInput(ServerPlayer player, BaseChestBlockEntity chest, int slot, boolean rightClick) {
+private static void clickWorkbenchInput(ServerPlayer player, BaseChestBlockEntity chest, int slot, boolean rightClick) {
         if (!chest.hasSuiteUpgrade()) {
             returnWorkbenchInputs(player);
             return;
@@ -443,6 +468,53 @@ public record TabletChestActionPacket(int action, int playerSlot, ItemStack stac
         } else {
             leftClickWorkbenchSlot(player, inputs, slot, slotStack, carried);
         }
+    }
+
+    /**
+     * 工作台左键长按拖拽的最终结算：carried 物品按客户端算出的“每槽本轮新增量”一次性分发。
+     * 客户端在拖拽期间模拟显示，服务端在此调用前 grid 仍是拖拽开始时的状态。
+     * 若 carried 不足或种类不符，本轮不会产生任何副作用（保持原子）。
+     */
+    private static void distributeWorkbench(ServerPlayer player, BaseChestBlockEntity chest, int[] addCounts) {
+        if (!chest.hasSuiteUpgrade()) {
+            returnWorkbenchInputs(player);
+            return;
+        }
+        if (addCounts == null || addCounts.length != 9) return;
+        ItemStack carried = carried(player);
+        if (carried.isEmpty()) return;
+
+        int total = 0;
+        for (int c : addCounts) {
+            if (c < 0) return;
+            total += c;
+        }
+        if (total <= 0 || total > carried.getCount()) return;
+
+        NonNullList<ItemStack> inputs = workbenchInputs(player);
+        // 原子预校验：每个待分槽必须为空或同种同组件，否则放弃整轮。
+        for (int i = 0; i < 9; i++) {
+            int add = addCounts[i];
+            if (add <= 0) continue;
+            ItemStack slotStack = inputs.get(i);
+            if (slotStack.isEmpty()) continue;
+            if (!ItemStack.isSameItemSameComponents(slotStack, carried)) return;
+            if (slotStack.getCount() + add > slotStack.getMaxStackSize()) return;
+        }
+
+        for (int i = 0; i < 9; i++) {
+            int add = addCounts[i];
+            if (add <= 0) continue;
+            ItemStack slotStack = inputs.get(i);
+            if (slotStack.isEmpty()) {
+                inputs.set(i, carried.copyWithCount(add));
+            } else {
+                slotStack.grow(add);
+            }
+            carried.shrink(add);
+        }
+        if (carried.isEmpty()) clearCarried(player);
+        chest.setChanged();
     }
 
     private static void leftClickWorkbenchSlot(ServerPlayer player, NonNullList<ItemStack> inputs, int slot, ItemStack slotStack, ItemStack carried) {

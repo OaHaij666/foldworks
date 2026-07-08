@@ -3,6 +3,7 @@ package com.pockethomestead.client.page;
 import com.pockethomestead.client.ClientProductionStatsCache;
 import com.pockethomestead.client.ui.Page;
 import com.pockethomestead.client.ui.Theme;
+import com.pockethomestead.client.search.SearchSupport;
 import com.pockethomestead.network.ProductionStatsSyncPacket;
 import com.pockethomestead.network.RequestProductionStatsPacket;
 import com.pockethomestead.network.UpdateProductionStatsPacket;
@@ -740,7 +741,7 @@ public class ProductionStatsPage extends Page {
         List<ClientProductionStatsCache.ProductionRow> rows = new ArrayList<>();
         for (ClientProductionStatsCache.ProductionRow row : ClientProductionStatsCache.rowsFor(selectedGroupId, RANGES[rangeIndex])) {
             if (hideZero && row.inputRatePerMinute() == 0 && row.outputRatePerMinute() == 0 && row.currentCount() == 0) continue;
-            if (!q.isEmpty() && !row.itemId().toLowerCase(Locale.ROOT).contains(q) && !shortResource(row.itemId()).toLowerCase(Locale.ROOT).contains(q)) continue;
+            if (!q.isEmpty() && !SearchSupport.contains(row.itemId(), q) && !SearchSupport.contains(shortResource(row.itemId()), q)) continue;
             rows.add(row);
         }
         Comparator<ClientProductionStatsCache.ProductionRow> comparator = switch (sortMode) {

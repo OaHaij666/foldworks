@@ -9,10 +9,14 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.InteractionResultHolder;
+import net.minecraft.world.entity.EquipmentSlotGroup;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
+import net.minecraft.world.item.component.ItemAttributeModifiers;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -23,8 +27,22 @@ import java.util.List;
 
 /** 尘歌玉盘：合并了创建与管理功能，右键打开口袋家园主界面。 */
 public class HomesteadTabletItem extends Item {
+
     public HomesteadTabletItem(Properties properties) {
         super(properties);
+    }
+
+    public static ItemAttributeModifiers createTabletAttributes(double attackDamage, double attackSpeed) {
+        var builder = ItemAttributeModifiers.builder();
+        builder.add(Attributes.ATTACK_DAMAGE,
+                new AttributeModifier(net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("pockethomestead", "tablet_attack_damage"),
+                        attackDamage, AttributeModifier.Operation.ADD_VALUE),
+                EquipmentSlotGroup.MAINHAND);
+        builder.add(Attributes.ATTACK_SPEED,
+                new AttributeModifier(net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("pockethomestead", "tablet_attack_speed"),
+                        attackSpeed, AttributeModifier.Operation.ADD_VALUE),
+                EquipmentSlotGroup.MAINHAND);
+        return builder.build();
     }
 
     @Override

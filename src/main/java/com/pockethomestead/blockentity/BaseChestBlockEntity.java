@@ -738,6 +738,10 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         return Collections.unmodifiableList(items);
     }
 
+    public List<StoredItemStack> getStoredItemsDirect() {
+        return itemStorage;
+    }
+
     private StoredItemStack findStoredStack(ItemStack stack) {
         for (StoredItemStack stored : itemStorage) {
             if (stored.matches(stack)) return stored;

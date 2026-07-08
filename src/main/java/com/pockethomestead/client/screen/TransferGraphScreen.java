@@ -3180,8 +3180,9 @@ public class TransferGraphScreen extends Screen {
                 ResourceLocation id = BuiltInRegistries.FLUID.getKey(fluid);
                 if (id.getPath().startsWith("flowing_")) continue;
                 String full = id.toString().toLowerCase();
-                String name = new FluidStack(fluid, 1).getHoverName().getString().toLowerCase();
-                if (full.contains(q) || id.getPath().contains(q) || name.contains(q)) {
+                String name = new FluidStack(fluid, 1).getHoverName().getString();
+                // 资源名走拼音（装了 JEC 即生效），id / 路径段走普通包含。
+                if (com.pockethomestead.client.search.ItemSearch.matches(name, full, q)) {
                     result.add(TransferEdge.fluidPort(id.toString()));
                     if (result.size() >= 7) break;
                 }
@@ -3193,8 +3194,8 @@ public class TransferGraphScreen extends Screen {
                 if (item == Items.AIR) continue;
                 ResourceLocation id = BuiltInRegistries.ITEM.getKey(item);
                 String full = id.toString().toLowerCase();
-                String name = new ItemStack(item).getHoverName().getString().toLowerCase();
-                if (full.contains(q) || id.getPath().contains(q) || name.contains(q)) {
+                String name = new ItemStack(item).getHoverName().getString();
+                if (com.pockethomestead.client.search.ItemSearch.matches(name, full, q)) {
                     result.add(id.toString());
                     if (result.size() >= 7) break;
                 }

@@ -97,7 +97,7 @@ public class ModConfig {
 
     public static final ModConfigSpec.IntValue STORAGE_UPGRADE_CAPACITY = BUILDER
             .comment("每个存储升级增加的物品容量")
-            .defineInRange("storageUpgradeCapacity", 64, 0, 100000000);
+            .defineInRange("storageUpgradeCapacity", 128, 0, 100000000);
 
     public static final ModConfigSpec.IntValue BASE_CHEST_FLUID_TYPES = BUILDER
             .comment("箱子基础可存储的流体种类数量")
@@ -181,11 +181,19 @@ public class ModConfig {
 
     public static final ModConfigSpec.IntValue SUITE_PLANNER_MAX_DEPTH = BUILDER
             .comment("套件自动订单在线找路的最大递归深度")
-            .defineInRange("suite.plannerMaxDepth", 4, 1, 32);
+            .defineInRange("suite.plannerMaxDepth", 10, 1, 32);
 
     public static final ModConfigSpec.IntValue SUITE_PLANNER_MAX_CANDIDATES_PER_ITEM = BUILDER
             .comment("套件自动订单每个目标物品最多尝试的候选配方数量")
             .defineInRange("suite.plannerMaxCandidatesPerItem", 16, 1, 256);
+
+    public static final ModConfigSpec.IntValue SUITE_PLANNER_MAX_BUDGET_MS = BUILDER
+            .comment("套件规划器每个 tick 的最大时间预算（毫秒），超时则停止本次搜索，避免卡服")
+            .defineInRange("suite.plannerMaxBudgetMs", 10, 1, 1000);
+
+    public static final ModConfigSpec.IntValue SUITE_PLANNER_FAIL_COOLDOWN_TICKS = BUILDER
+            .comment("套件订单搜索失败后的冷却 tick 数，冷却期间跳过该订单避免反复空转")
+            .defineInRange("suite.plannerFailCooldownTicks", 100, 0, 1200);
 
     public static final ModConfigSpec.IntValue TICK_OFFSET = BUILDER
             .comment("传输tick偏移（分散不同箱子的传输时刻，减少卡顿）")

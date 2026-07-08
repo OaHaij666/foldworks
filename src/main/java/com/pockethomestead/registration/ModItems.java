@@ -1,6 +1,7 @@
 package com.pockethomestead.registration;
 
 import com.pockethomestead.PocketHomestead;
+import com.pockethomestead.config.ModConfig;
 import com.pockethomestead.item.HomesteadTabletItem;
 import net.minecraft.world.item.Item;
 import net.neoforged.neoforge.registries.DeferredItem;
@@ -10,7 +11,9 @@ public class ModItems {
     public static final DeferredRegister.Items ITEMS = DeferredRegister.createItems(PocketHomestead.MODID);
 
     public static final DeferredItem<HomesteadTabletItem> HOMESTEAD_TABLET = ITEMS.register("homestead_tablet",
-            () -> new HomesteadTabletItem(new Item.Properties().stacksTo(1)));
+            () -> new HomesteadTabletItem(new Item.Properties()
+                    .stacksTo(1)
+                    .attributes(HomesteadTabletItem.createTabletAttributes(8.0, -2.4))));
 
     public static final DeferredItem<Item> STORAGE_UPGRADE = ITEMS.register("storage_upgrade",
             () -> new Item(new Item.Properties()));
