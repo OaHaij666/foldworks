@@ -87,7 +87,7 @@ public class SpaceManager {
         spaces.clear();
         dimensionIndex.clear();
         ownerPermissions.clear();
-        Foldworks.LOGGER.info("清空工域缓存");
+        Foldworks.LOGGER.info("清空空间缓存");
     }
 
     public boolean deleteSpace(MinecraftServer server, UUID spaceId, UUID requesterId) {
@@ -129,7 +129,7 @@ public class SpaceManager {
             spaces.put(s.getSpaceId(), s);
             dimensionIndex.put(s.getDimensionId(), s);
         }
-        Foldworks.LOGGER.info("加载了 {} 个工域", spaces.size());
+        Foldworks.LOGGER.info("加载了 {} 个空间", spaces.size());
     }
 
     public SpacePermission ownerPermission(UUID ownerId) {
@@ -210,7 +210,7 @@ public class SpaceManager {
             SpaceStorage.markDirty();
             return true;
         } catch (RuntimeException e) {
-            Foldworks.LOGGER.error("开启工域常加载失败: {}", space.getDimensionId(), e);
+            Foldworks.LOGGER.error("开启空间常加载失败: {}", space.getDimensionId(), e);
             space.setChunkLoadingEnabled(false);
             SpaceChunkLoadingManager.getInstance().remove(server, space);
             SpaceStorage.markDirty();

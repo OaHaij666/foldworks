@@ -148,7 +148,7 @@ public class ProductionStatsPage extends Page {
         int searchRight = searchRightX();
         if (searchRight - searchX >= 66) {
             int searchW = Math.min(132, searchRight - searchX);
-            Theme.panel(g, searchX, toolbarY, searchW, 16, 7, searchFocused ? 0xFFFFFFFF : Theme.SURFACE_SUNK,
+            Theme.panel(g, searchX, toolbarY, searchW, 16, Theme.RADIUS, searchFocused ? Theme.SURFACE : Theme.SURFACE_SUNK,
                     searchFocused ? Theme.PRIMARY : Theme.BORDER);
             Theme.text(g, font, searchValue.isEmpty() ? "搜索资源" : Theme.ellipsize(font, searchValue, searchW - 14),
                     searchX + 7, toolbarY + 4, searchValue.isEmpty() ? Theme.TEXT_FAINT : Theme.TEXT);
@@ -184,9 +184,9 @@ public class ProductionStatsPage extends Page {
         int trendX = hx + infoW + gap;
         int statX = trendX + trendW + gap;
 
-        Theme.fillRound(g, hx, hy, hw, HEADER_H, 7, 0x99E5EDF5);
-        Theme.vLine(g, trendX - gap / 2, hy + 2, HEADER_H - 4, 0x99C8D7E6);
-        Theme.vLine(g, statX - gap / 2, hy + 2, HEADER_H - 4, 0x99C8D7E6);
+        Theme.fillRound(g, hx, hy, hw, HEADER_H, Theme.RADIUS, Theme.HEADER);
+        Theme.vLine(g, trendX - gap / 2, hy + 2, HEADER_H - 4, Theme.DIVIDER);
+        Theme.vLine(g, statX - gap / 2, hy + 2, HEADER_H - 4, Theme.DIVIDER);
         Theme.textCentered(g, font, "产物信息", hx + infoW / 2, hy + 3, Theme.TEXT_MUTED);
         Theme.textCentered(g, font, "产率/消耗率走势", trendX + trendW / 2, hy + 3, Theme.TEXT_MUTED);
         Theme.textCentered(g, font, "当前统计", statX + statW / 2, hy + 3, Theme.TEXT_MUTED);
@@ -197,7 +197,7 @@ public class ProductionStatsPage extends Page {
         int boxH = 78;
         int bx = ex + (ew - boxW) / 2;
         int by = ey + Math.max(10, (eh - boxH) / 2);
-        Theme.panel(g, bx, by, boxW, boxH, Theme.RADIUS + 2, 0xFFF8FCFF, Theme.DIVIDER);
+        Theme.panel(g, bx, by, boxW, boxH, Theme.RADIUS, Theme.SURFACE, Theme.DIVIDER);
         Theme.fillRound(g, bx + 14, by + 16, 24, 24, 8, Theme.PRIMARY_SOFT);
         drawMiniBars(g, bx + 21, by + 22, Theme.PRIMARY_PRESS);
         Theme.text(g, font, "暂无产率数据", bx + 48, by + 18, Theme.TEXT);
@@ -207,7 +207,7 @@ public class ProductionStatsPage extends Page {
     private void renderRow(GuiGraphics g, int mx, int my, ClientProductionStatsCache.ProductionRow row,
                            int rx, int ry, int rw, int rh) {
         boolean hover = Theme.inside(mx, my, rx, ry, rw, rh);
-        Theme.panel(g, rx, ry, rw, rh, 6, hover ? 0xFFFFFFFF : 0xFFF8FCFF, hover ? Theme.BORDER_STRONG : Theme.DIVIDER);
+        Theme.panel(g, rx, ry, rw, rh, Theme.RADIUS, hover ? Theme.SURFACE : Theme.SURFACE_ALT, hover ? Theme.BORDER_STRONG : Theme.DIVIDER);
 
         int infoW = infoColumnWidth(rw);
         int statW = statColumnWidth(rw);
@@ -363,7 +363,7 @@ public class ProductionStatsPage extends Page {
         int pw = groupPopupW();
         int ph = groupPopupH();
         Theme.shadow(g, px, py, pw, ph, Theme.RADIUS + 2);
-        Theme.panel(g, px, py, pw, ph, Theme.RADIUS + 2, 0xFFFBFEFF, Theme.BORDER_STRONG);
+        Theme.panel(g, px, py, pw, ph, Theme.RADIUS, Theme.SURFACE, Theme.BORDER_STRONG);
 
         Theme.text(g, font, "分组", px + 10, py + 9, Theme.TEXT);
         Theme.textRight(g, font, mergeSelection.isEmpty() ? "选择统计范围" : "已选 " + mergeSelection.size(),
@@ -433,7 +433,7 @@ public class ProductionStatsPage extends Page {
         Theme.panel(g, bx, by, bw, bh, Theme.RADIUS + 1, Theme.SURFACE, Theme.BORDER_STRONG);
         String title = inputMode == InputMode.RENAME ? "重命名分组" : "新增分组";
         Theme.text(g, font, title, bx + 10, by + 10, Theme.TEXT);
-        Theme.panel(g, bx + 10, by + 28, bw - 20, 18, 5, 0xFFFFFFFF, Theme.PRIMARY);
+        Theme.panel(g, bx + 10, by + 28, bw - 20, 18, Theme.RADIUS, Theme.SURFACE, Theme.PRIMARY);
         Theme.text(g, font, inputValue + ((syncTicker / 10) % 2 == 0 ? "_" : ""), bx + 16, by + 33, Theme.TEXT);
         chip(g, bx + 10, by + 54, 52, 16, "保存", Theme.PRIMARY_SOFT, Theme.PRIMARY_PRESS);
         chip(g, bx + 70, by + 54, 52, 16, "取消", Theme.SURFACE_ALT, Theme.TEXT_MUTED);

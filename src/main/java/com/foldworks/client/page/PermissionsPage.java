@@ -144,7 +144,7 @@ public class PermissionsPage extends Page {
             int ry = rowTop + i * rowH;
             boolean selected = team.id().equals(selectedTeamId);
             boolean hover = Theme.inside(mx, my, sx + 5, ry, sw - 10, rowH - 4);
-            int fill = selected ? Theme.PRIMARY_SOFT : hover ? 0xFFF8FCFF : Theme.SURFACE_ALT;
+            int fill = selected ? Theme.PRIMARY_SOFT : hover ? Theme.SURFACE : Theme.SURFACE_ALT;
             int border = selected ? Theme.PRIMARY : Theme.DIVIDER;
             Theme.panel(g, sx + 5, ry, sw - 10, rowH - 4, 5, fill, border);
             Theme.text(g, font, Theme.ellipsize(font, team.name(), sw - 24), sx + 10, ry + 5, selected ? Theme.PRIMARY_PRESS : Theme.TEXT);
@@ -154,7 +154,7 @@ public class PermissionsPage extends Page {
 
     private void renderTeamDetail(GuiGraphics g, int mx, int my, float pt, TransferGraphSyncPacket.TeamData team,
                                   int dx, int dy, int dw, int dh) {
-        Theme.panel(g, dx, dy, dw, dh, Theme.RADIUS, 0xFFF8FCFF, Theme.DIVIDER);
+        Theme.panel(g, dx, dy, dw, dh, Theme.RADIUS, Theme.SURFACE, Theme.DIVIDER);
         if (team == null) {
             Theme.text(g, font, "团队管理", dx + 10, dy + 9, Theme.TEXT);
             renderTeamHelpButton(g, mx, my, dx + 72, dy + 7);
@@ -251,7 +251,7 @@ public class PermissionsPage extends Page {
     }
 
     private void renderPrivateRules(GuiGraphics g, int mx, int my, float pt, int dx, int dy, int dw, int dh) {
-        Theme.panel(g, dx, dy, dw, dh, Theme.RADIUS, 0xFFF8FCFF, Theme.DIVIDER);
+        Theme.panel(g, dx, dy, dw, dh, Theme.RADIUS, Theme.SURFACE, Theme.DIVIDER);
         SpaceInfo profile = privatePermissionProfile();
         Theme.text(g, font, "我的私有权限", dx + 10, dy + 8, Theme.TEXT);
 

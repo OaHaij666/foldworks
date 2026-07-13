@@ -13,23 +13,23 @@ SCALE = 8
 ATLAS = LOGICAL_ATLAS * SCALE
 
 WHITE = (255, 255, 255, 255)
-SURFACE = (250, 253, 255, 255)
-SURFACE_SOFT = (242, 249, 255, 255)
-SURFACE_SUNK = (230, 240, 249, 255)
-BLUE = (112, 177, 231, 255)
-BLUE_DEEP = (76, 139, 204, 255)
-BLUE_SOFT = (224, 243, 255, 255)
-CYAN = (78, 184, 203, 255)
-GREEN = (84, 190, 133, 255)
-GOLD = (224, 174, 66, 255)
-PINK = (241, 126, 144, 255)
-PURPLE = (168, 120, 205, 255)
-BORDER = (202, 219, 232, 255)
-BORDER_STRONG = (146, 195, 235, 255)
-INK = (50, 65, 82, 255)
-MUTED = (128, 145, 162, 255)
-FAINT = (176, 188, 200, 255)
-WARNING = (239, 185, 74, 255)
+SURFACE = (248, 251, 253, 255)
+SURFACE_SOFT = (231, 240, 246, 255)
+SURFACE_SUNK = (215, 228, 236, 255)
+BLUE = (104, 191, 234, 255)
+BLUE_DEEP = (47, 140, 190, 255)
+BLUE_SOFT = (221, 244, 255, 255)
+CYAN = (66, 181, 204, 255)
+GREEN = (47, 125, 93, 255)
+GOLD = (169, 104, 24, 255)
+PINK = (180, 61, 80, 255)
+PURPLE = (114, 87, 154, 255)
+BORDER = (165, 199, 217, 255)
+BORDER_STRONG = (111, 166, 196, 255)
+INK = (23, 43, 58, 255)
+MUTED = (82, 107, 122, 255)
+FAINT = (130, 149, 161, 255)
+WARNING = (169, 104, 24, 255)
 
 
 def mix(a, b, t: float):
@@ -66,7 +66,7 @@ class D:
 
 
 def draw_panel(d: D, x: int, y: int, fill, outline=BORDER, header=False):
-    d.rr((x, y, x + 31, y + 31), 8, fill, outline, 1)
+    d.rr((x, y, x + 31, y + 31), 5, fill, outline, 1)
     d.line((x + 7, y + 1, x + 24, y + 1), mix(WHITE, fill, 0.12), 1)
     d.line((x + 3, y + 30, x + 28, y + 30), mix(outline, INK, 0.20), 1)
     if header:
@@ -75,39 +75,39 @@ def draw_panel(d: D, x: int, y: int, fill, outline=BORDER, header=False):
 
 
 def draw_button(d: D, x: int, y: int, fill, outline=BORDER, danger=False):
-    d.rr((x, y, x + 31, y + 23), 4, fill, outline, 1)
+    d.rr((x, y, x + 31, y + 23), 3, fill, outline, 1)
     d.line((x + 6, y + 2, x + 25, y + 2), mix(WHITE, fill, 0.1), 1)
     d.line((x + 4, y + 22, x + 27, y + 22), mix(outline, PINK if danger else BLUE, 0.18), 1)
 
 
 def draw_chip(d: D, x: int, y: int, fill, outline=BORDER):
-    d.rr((x, y, x + 31, y + 15), 4, fill, outline, 1)
+    d.rr((x, y, x + 31, y + 15), 2, fill, outline, 1)
     d.line((x + 6, y + 1, x + 25, y + 1), mix(WHITE, fill, 0.18), 1)
 
 
 def draw_icon(d: D, kind: str, x: int, y: int, color=BLUE_DEEP):
     if kind == "create":
-        d.rr((x + 11, y + 3, x + 16, y + 25), 2, color, color)
-        d.rr((x + 3, y + 11, x + 25, y + 16), 2, color, color)
+        d.rect((x + 5, y + 5, x + 22, y + 24), outline=color, width=2)
+        d.line((x + 18, y + 5, x + 22, y + 9), color, 2)
+        d.line((x + 14, y + 12, x + 14, y + 20), color, 2)
+        d.line((x + 10, y + 16, x + 18, y + 16), color, 2)
     elif kind == "manage":
-        for ox, oy in ((4, 4), (16, 4), (4, 16), (16, 16)):
-            d.rr((x + ox, y + oy, x + ox + 8, y + oy + 8), 3, color, color)
-            d.rect((x + ox + 2, y + oy + 2, x + ox + 6, y + oy + 3), mix(WHITE, color, 0.18))
+        for yy, knob_x in ((7, 11), (14, 19), (21, 8)):
+            d.line((x + 5, y + yy, x + 23, y + yy), color, 2)
+            d.rect((x + knob_x - 2, y + yy - 2, x + knob_x + 2, y + yy + 2), fill=SURFACE, outline=color, width=2)
     elif kind == "tablet_chest":
-        d.rr((x + 5, y + 8, x + 23, y + 24), 4, color, color)
-        d.rect((x + 7, y + 6, x + 21, y + 11), fill=mix(color, WHITE, 0.18))
-        d.line((x + 8, y + 14, x + 20, y + 14), WHITE, 2)
-        d.rr((x + 9, y + 17, x + 13, y + 21), 2, mix(WHITE, color, 0.18), mix(WHITE, color, 0.18))
-        d.rr((x + 15, y + 17, x + 19, y + 21), 2, mix(WHITE, color, 0.18), mix(WHITE, color, 0.18))
+        d.rect((x + 5, y + 8, x + 23, y + 23), outline=color, width=2)
+        d.line((x + 5, y + 13, x + 23, y + 13), color, 2)
+        d.rect((x + 12, y + 11, x + 16, y + 16), fill=SURFACE, outline=color, width=2)
     elif kind == "permissions":
-        d.rr((x + 5, y + 12, x + 23, y + 25), 4, color, color)
-        d.arc((x + 8, y + 3, x + 20, y + 17), 180, 360, color, 4)
-        d.ellipse((x + 12, y + 17, x + 16, y + 21), fill=WHITE)
+        d.polygon(((x + 14, y + 4), (x + 23, y + 8), (x + 21, y + 19), (x + 14, y + 25), (x + 7, y + 19), (x + 5, y + 8)), fill=SURFACE)
+        d.line((x + 14, y + 4, x + 23, y + 8, x + 21, y + 19, x + 14, y + 25, x + 7, y + 19, x + 5, y + 8, x + 14, y + 4), color, 2, "curve")
+        d.line((x + 10, y + 14, x + 13, y + 17, x + 19, y + 11), color, 2, "curve")
     elif kind == "production":
-        for i, h in enumerate((8, 14, 20)):
-            bx = x + 5 + i * 7
-            d.rr((bx, y + 25 - h, bx + 4, y + 25), 2, color, color)
-        d.line((x + 4, y + 22, x + 12, y + 15, x + 19, y + 17, x + 25, y + 8), color, 2, "curve")
+        d.line((x + 5, y + 23, x + 5, y + 6), color, 2)
+        d.line((x + 5, y + 23, x + 24, y + 23), color, 2)
+        d.line((x + 8, y + 19, x + 13, y + 14, x + 17, y + 16, x + 23, y + 8), color, 2, "curve")
+        d.polygon(((x + 20, y + 8), (x + 24, y + 7), (x + 23, y + 11)), color)
     elif kind == "migration":
         d.line((x + 5, y + 9, x + 20, y + 9, x + 16, y + 5), color, 3, "curve")
         d.line((x + 20, y + 9, x + 16, y + 13), color, 3, "curve")
@@ -117,47 +117,47 @@ def draw_icon(d: D, kind: str, x: int, y: int, color=BLUE_DEEP):
         d.line((x + 7, y + 7, x + 21, y + 21), color, 3)
         d.line((x + 21, y + 7, x + 7, y + 21), color, 3)
     elif kind == "settings":
-        d.ellipse((x + 5, y + 5, x + 23, y + 23), outline=color, width=3)
-        for px, py in ((14, 1), (14, 27), (1, 14), (27, 14)):
-            d.ellipse((x + px - 2, y + py - 2, x + px + 2, y + py + 2), fill=color)
-        d.ellipse((x + 11, y + 11, x + 17, y + 17), fill=color)
+        for yy, knob_x in ((7, 18), (14, 10), (21, 16)):
+            d.line((x + 5, y + yy, x + 23, y + yy), color, 2)
+            d.rect((x + knob_x - 2, y + yy - 2, x + knob_x + 2, y + yy + 2), fill=SURFACE, outline=color, width=2)
     elif kind == "enter":
         d.line((x + 5, y + 14, x + 20, y + 14), color, 3)
         d.line((x + 15, y + 8, x + 21, y + 14, x + 15, y + 20), color, 3, "curve")
         d.line((x + 21, y + 6, x + 25, y + 6, x + 25, y + 22, x + 21, y + 22), color, 2)
     elif kind == "offline":
-        d.ellipse((x + 5, y + 6, x + 23, y + 22), outline=color, width=3)
-        d.line((x + 8, y + 20, x + 22, y + 6), color, 3)
+        d.rect((x + 5, y + 6, x + 23, y + 22), outline=color, width=2)
+        d.line((x + 8, y + 20, x + 21, y + 7), color, 2)
     elif kind == "delete":
-        d.rr((x + 7, y + 8, x + 21, y + 24), 3, color, color)
-        d.rect((x + 5, y + 5, x + 23, y + 8), fill=color)
-        d.line((x + 10, y + 12, x + 18, y + 20), WHITE, 2)
-        d.line((x + 18, y + 12, x + 10, y + 20), WHITE, 2)
+        d.rect((x + 8, y + 8, x + 20, y + 24), outline=color, width=2)
+        d.line((x + 5, y + 7, x + 23, y + 7), color, 2)
+        d.line((x + 11, y + 4, x + 17, y + 4), color, 2)
+        d.line((x + 12, y + 12, x + 12, y + 20), color, 2)
+        d.line((x + 16, y + 12, x + 16, y + 20), color, 2)
     elif kind == "refresh":
         d.arc((x + 5, y + 5, x + 23, y + 23), 30, 320, color, 3)
         d.polygon(((x + 22, y + 5), (x + 25, y + 13), (x + 17, y + 10)), color)
     elif kind == "download":
         d.line((x + 14, y + 4, x + 14, y + 18), color, 3)
         d.line((x + 8, y + 13, x + 14, y + 19, x + 20, y + 13), color, 3, "curve")
-        d.rr((x + 5, y + 21, x + 23, y + 25), 2, color, color)
+        d.line((x + 5, y + 24, x + 23, y + 24), color, 2)
     elif kind == "upload":
         d.line((x + 14, y + 10, x + 14, y + 24), color, 3)
         d.line((x + 8, y + 10, x + 14, y + 4, x + 20, y + 10), color, 3, "curve")
-        d.rr((x + 5, y + 24, x + 23, y + 27), 2, color, color)
+        d.line((x + 5, y + 24, x + 23, y + 24), color, 2)
     elif kind == "search":
         d.ellipse((x + 5, y + 5, x + 17, y + 17), outline=color, width=3)
         d.line((x + 16, y + 16, x + 24, y + 24), color, 3)
     elif kind == "team":
-        d.ellipse((x + 10, y + 4, x + 18, y + 12), fill=color)
-        d.ellipse((x + 3, y + 9, x + 10, y + 16), fill=mix(color, WHITE, 0.12))
-        d.ellipse((x + 18, y + 9, x + 25, y + 16), fill=mix(color, WHITE, 0.12))
-        d.rr((x + 7, y + 15, x + 21, y + 24), 5, color, color)
-        d.rr((x + 1, y + 18, x + 9, y + 25), 4, mix(color, WHITE, 0.12), mix(color, WHITE, 0.12))
-        d.rr((x + 19, y + 18, x + 27, y + 25), 4, mix(color, WHITE, 0.12), mix(color, WHITE, 0.12))
+        d.ellipse((x + 10, y + 4, x + 18, y + 12), outline=color, width=2)
+        d.ellipse((x + 3, y + 9, x + 9, y + 15), outline=color, width=2)
+        d.ellipse((x + 19, y + 9, x + 25, y + 15), outline=color, width=2)
+        d.arc((x + 6, y + 13, x + 22, y + 27), 180, 360, color, 2)
+        d.arc((x + 1, y + 15, x + 11, y + 25), 180, 330, color, 2)
+        d.arc((x + 17, y + 15, x + 27, y + 25), 210, 360, color, 2)
     elif kind == "archive":
-        d.rr((x + 5, y + 8, x + 23, y + 24), 4, color, color)
-        d.rect((x + 7, y + 5, x + 17, y + 10), fill=mix(color, WHITE, 0.24))
-        d.line((x + 9, y + 15, x + 19, y + 15), WHITE, 2)
+        d.rect((x + 5, y + 9, x + 23, y + 24), outline=color, width=2)
+        d.rect((x + 4, y + 5, x + 24, y + 10), fill=SURFACE, outline=color, width=2)
+        d.line((x + 10, y + 16, x + 18, y + 16), color, 2)
 
 
 def draw_atlas() -> Image.Image:

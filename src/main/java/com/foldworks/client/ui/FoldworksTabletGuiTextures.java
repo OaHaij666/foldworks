@@ -62,8 +62,8 @@ public final class FoldworksTabletGuiTextures {
     }
 
     public static void shadow(GuiGraphics g, int x, int y, int w, int h) {
-        fill(g, x + 2, y + 3, w, h, 0x300F2236);
-        fill(g, x + 4, y + 5, w, h, 0x180F2236);
+        fill(g, x + 2, y + 3, w, h, Theme.SHADOW);
+        fill(g, x + 4, y + 5, w, h, Theme.lerpColor(Theme.SHADOW, 0x00071422, 0.45f));
     }
 
     public static void panel(GuiGraphics g, int x, int y, int w, int h) {
@@ -103,11 +103,11 @@ public final class FoldworksTabletGuiTextures {
     }
 
     public static void hDivider(GuiGraphics g, int x, int y, int w) {
-        fill(g, x, y, w, 1, 0xFFEDF4FA);
+        fill(g, x, y, w, 1, Theme.DIVIDER);
     }
 
     public static void vDivider(GuiGraphics g, int x, int y, int h) {
-        fill(g, x, y, 1, h, 0xFFEDF4FA);
+        fill(g, x, y, 1, h, Theme.DIVIDER);
     }
 
     private static void nineSlice(GuiGraphics g, Sprite s, int x, int y, int w, int h) {

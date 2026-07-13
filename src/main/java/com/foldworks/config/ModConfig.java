@@ -9,7 +9,7 @@ public class ModConfig {
 
     // 性能预算配置
     public static final ModConfigSpec.IntValue MAX_CONCURRENT_SPACES = BUILDER
-            .comment("最大同时加载的工域数量")
+            .comment("最大同时加载的空间数量")
             .defineInRange("maxConcurrentSpaces", 3, 1, 20);
 
     public static final ModConfigSpec.IntValue TICKS_PER_SESSION = BUILDER
@@ -56,25 +56,25 @@ public class ModConfig {
 
     // 空间单边最大尺寸（宽/深），同时用于创建界面输入校验与服务端夹紧
     public static final ModConfigSpec.IntValue MAX_SPACE_SIZE = BUILDER
-            .comment("工域单边最大尺寸（宽/深）。注意：尺寸越大首次生成与占用越高")
+            .comment("空间单边最大尺寸（宽/深）。注意：尺寸越大首次生成与占用越高")
             .defineInRange("maxSpaceSize", 4096, 32, 30000000);
 
     // 空间单边最小尺寸（宽/深）
     public static final ModConfigSpec.IntValue MIN_SPACE_SIZE = BUILDER
-            .comment("工域单边最小尺寸（宽/深）")
+            .comment("空间单边最小尺寸（宽/深）")
             .defineInRange("minSpaceSize", 32, 8, 4096);
 
     // 单玩家最大空间数量（0 = 不限制）
     public static final ModConfigSpec.IntValue MAX_SPACES_PER_PLAYER = BUILDER
-            .comment("每个玩家最多可创建的工域数量（0 = 不限制）")
+            .comment("每个玩家最多可创建的空间数量（0 = 不限制）")
             .defineInRange("maxSpacesPerPlayer", 16, 0, 1024);
 
     public static final ModConfigSpec.IntValue SPACE_CHUNK_LOADING_MAX_AREA = BUILDER
-            .comment("允许开启常加载的工域最大面积（宽×深，格）。超过该值或无限空间不能开启常加载")
+            .comment("允许开启常加载的空间最大面积（宽×深，格）。超过该值或无限空间不能开启常加载")
             .defineInRange("spaceChunkLoadingMaxArea", 65536, 1, Integer.MAX_VALUE);
 
     public static final ModConfigSpec.ConfigValue<List<? extends String>> POCKET_DIMENSION_ENTITY_SPAWN_BLACKLIST = BUILDER
-            .comment("工域维度禁止自然生成的实体ID列表。默认屏蔽 Alex's Mobs 的 farseer")
+            .comment("空间维度禁止自然生成的实体ID列表。默认屏蔽 Alex's Mobs 的 farseer")
             .defineListAllowEmpty("productionSpaceDimensionEntitySpawnBlacklist",
                     List.of("alexsmobs:farseer"),
                     () -> "",

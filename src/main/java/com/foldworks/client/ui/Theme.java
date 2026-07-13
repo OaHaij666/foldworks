@@ -14,12 +14,13 @@ import net.minecraft.resources.ResourceLocation;
 import org.joml.Matrix4f;
 
 /**
- * 维度工造 UI 主题：淡蓝 + 白配色，配套纯代码绘制工具（圆角矩形 / 描边 / 柔和阴影 / 文本）。
+ * 维度工造 UI 主题：精密蓝白工业控制台，配套纯代码绘制工具（圆角矩形 / 描边 / 阴影 / 文本）。
  * 圆角矩形通过运行时生成的抗锯齿纹理实现类似 CSS border-radius 的光滑效果。
  */
 public final class Theme {
     private Theme() {}
-    public static final float UI_BRIGHTNESS = 0.80f;
+    /** Token values are authored at their final display brightness. */
+    public static final float UI_BRIGHTNESS = 1.0f;
     private static float scissorScale = 1.0f;
 
     // ---------------------------------------------------------------------
@@ -104,45 +105,53 @@ public final class Theme {
     }
 
     // ===== 背景 / 表面 =====
-    public static final int SCRIM        = 0x600F1720; // 更淡的半透明背景遮罩
-    public static final int SURFACE      = 0xFFFAFDFF; // 柔和白（微蓝）
-    public static final int SURFACE_ALT  = 0xFFF0F7FD; // 淡蓝表面
-    public static final int SURFACE_SUNK = 0xFFE5F0FA; // 凹陷 / 输入框底
-    public static final int SIDEBAR      = 0xFFF3F8FD; // 侧边栏底色
-    public static final int HEADER       = 0xFFF8FBFF; // 头部底色
+    public static final int SCRIM        = 0x78071422;
+    public static final int SURFACE      = 0xFFF8FBFD;
+    public static final int SURFACE_ALT  = 0xFFE4F2FA;
+    public static final int SURFACE_SUNK = 0xFFD5E8F3;
+    public static final int SIDEBAR      = 0xFFE0F1FA;
+    public static final int HEADER       = 0xFFEFF9FE;
+    public static final int CANVAS       = 0xFFEAF7FE;
+    public static final int SURFACE_DISABLED = 0xFFCCE0EB;
+    public static final int GRID_MINOR   = 0x1D48A7D6;
+    public static final int GRID_MAJOR   = 0x40529DC8;
 
-    // ===== 主色（淡蓝 - 更柔和） =====
-    public static final int PRIMARY        = 0xFF7CB3E8;
-    public static final int PRIMARY_HOVER  = 0xFF9AC9F5;
-    public static final int PRIMARY_PRESS  = 0xFF5A9DD8;
-    public static final int PRIMARY_SOFT   = 0xFFE8F4FC; // 选中项淡蓝底
-    public static final int PRIMARY_SOFT_H = 0xFFD9EBF7;
+    // ===== 主色：海军蓝结构 + 清晰的交互蓝 =====
+    public static final int PRIMARY        = 0xFF68BFEA;
+    public static final int PRIMARY_HOVER  = 0xFF86D2F5;
+    public static final int PRIMARY_PRESS  = 0xFF2577A2;
+    public static final int PRIMARY_SOFT   = 0xFFDDF4FF;
+    public static final int PRIMARY_SOFT_H = 0xFFC8ECFC;
 
-    // ===== 中性 / 边框（更柔和） =====
-    public static final int BORDER       = 0xFFD4E4F5;
-    public static final int BORDER_STRONG= 0xFFB5D0EB;
-    public static final int DIVIDER      = 0xFFEDF4FA;
+    // ===== 中性 / 边框：结构线比表面明显，避免白色卡片糊成一片 =====
+    public static final int BORDER        = 0xFFA5C7D9;
+    public static final int BORDER_STRONG = 0xFF6FA6C4;
+    public static final int DIVIDER       = 0xFFC9E2EF;
 
     // ===== 文本 =====
-    public static final int TEXT         = 0xFF2C3E50;
-    public static final int TEXT_MUTED   = 0xFF7A8BA0;
-    public static final int TEXT_FAINT   = 0xFFA8B8C8;
-    public static final int TEXT_ON_PRIM = 0xFFFFFFFF;
+    public static final int TEXT         = 0xFF172B3A;
+    public static final int TEXT_MUTED   = 0xFF4F7184;
+    public static final int TEXT_FAINT   = 0xFF7F9AAA;
+    public static final int TEXT_ON_PRIM = 0xFF17364A;
+    public static final int TEXT_ON_DANGER = 0xFFFFFFFF;
 
-    // ===== 语义色（更柔和） =====
-    public static final int DANGER       = 0xFFF08080;
-    public static final int DANGER_HOVER = 0xFFF59595;
-    public static final int DANGER_SOFT  = 0xFFFDE8E8;
-    public static final int SUCCESS      = 0xFF6BCFA0;
-    public static final int SUCCESS_HOVER= 0xFF85DBB0;
+    // ===== 语义色 =====
+    public static final int DANGER        = 0xFFB43D50;
+    public static final int DANGER_HOVER  = 0xFFC94E60;
+    public static final int DANGER_SOFT   = 0xFFF8E2E6;
+    public static final int SUCCESS       = 0xFF2F7D5D;
+    public static final int SUCCESS_HOVER = 0xFF3D9470;
+    public static final int SUCCESS_SOFT  = 0xFFE0F3EA;
+    public static final int WARNING       = 0xFFA96818;
+    public static final int WARNING_SOFT  = 0xFFFFEBCB;
 
     // ===== 阴影（更柔和） =====
-    public static final int SHADOW       = 0x1A000000;
+    public static final int SHADOW       = 0x30071422;
 
     // ===== 间距 =====
     public static final int PAD    = 12;
     public static final int GAP    = 8;
-    public static final int RADIUS = 5;
+    public static final int RADIUS = 3;
 
     // ---------------------------------------------------------------------
     // 圆角矩形

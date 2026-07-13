@@ -13,25 +13,25 @@ ATLAS_SCALE = 8
 ATLAS = LOGICAL_ATLAS * ATLAS_SCALE
 
 WHITE = (255, 255, 255, 255)
-SURFACE = (255, 255, 255, 246)
-SURFACE_SOFT = (250, 253, 255, 250)
-FIELD = (245, 249, 252, 255)
-GRID = (226, 238, 247, 255)
-GRID_MAJOR = (209, 228, 241, 255)
-BLUE = (91, 166, 226, 255)
-BLUE_SOFT = (226, 244, 255, 255)
-CYAN = (75, 187, 201, 255)
-CYAN_SOFT = (226, 248, 251, 255)
-PINK = (255, 132, 162, 255)
-PINK_SOFT = (255, 238, 244, 255)
-GREEN = (76, 187, 128, 255)
-GOLD = (225, 178, 66, 255)
-PURPLE = (184, 112, 204, 255)
-BORDER = (207, 221, 232, 255)
-BORDER_STRONG = (126, 188, 239, 255)
-INK = (76, 91, 108, 255)
-MUTED = (136, 151, 166, 255)
-DISABLED = (231, 236, 242, 255)
+SURFACE = (248, 251, 253, 248)
+SURFACE_SOFT = (231, 240, 246, 250)
+FIELD = (236, 243, 247, 255)
+GRID = (205, 230, 243, 255)
+GRID_MAJOR = (164, 210, 233, 255)
+BLUE = (104, 191, 234, 255)
+BLUE_SOFT = (221, 244, 255, 255)
+CYAN = (66, 181, 204, 255)
+CYAN_SOFT = (210, 238, 242, 255)
+PINK = (180, 61, 80, 255)
+PINK_SOFT = (248, 226, 230, 255)
+GREEN = (47, 125, 93, 255)
+GOLD = (169, 104, 24, 255)
+PURPLE = (114, 87, 154, 255)
+BORDER = (165, 199, 217, 255)
+BORDER_STRONG = (111, 166, 196, 255)
+INK = (23, 43, 58, 255)
+MUTED = (82, 107, 122, 255)
+DISABLED = (205, 215, 221, 255)
 
 
 class ScaledDraw:
@@ -82,23 +82,23 @@ def rounded(
 
 
 def sprite_panel(d: ImageDraw.ImageDraw, x: int, y: int, fill: tuple[int, int, int, int], outline=BORDER) -> None:
-    rounded(d, x, y, 24, 24, 8, fill, outline)
+    rounded(d, x, y, 24, 24, 4, fill, outline)
     d.line((x + 7, y + 1, x + 17, y + 1), fill=mix(WHITE, fill, 0.18))
     d.line((x + 2, y + 22, x + 21, y + 22), fill=mix(outline, (76, 98, 120, 255), 0.25))
 
 
 def sprite_button(d: ImageDraw.ImageDraw, x: int, y: int, fill: tuple[int, int, int, int], outline: tuple[int, int, int, int]) -> None:
-    rounded(d, x, y, 26, 24, 8, fill, outline)
+    rounded(d, x, y, 26, 24, 4, fill, outline)
     d.line((x + 7, y + 2, x + 18, y + 2), fill=mix(WHITE, fill, 0.08))
 
 
 def sprite_header(d: ImageDraw.ImageDraw, x: int, y: int, fill: tuple[int, int, int, int], line: tuple[int, int, int, int]) -> None:
-    rounded(d, x, y, 24, 16, 8, fill, fill)
+    rounded(d, x, y, 24, 16, 3, fill, fill)
     d.line((x + 5, y + 15, x + 19, y + 15), fill=line)
 
 
 def draw_grid(d: ImageDraw.ImageDraw, x: int, y: int) -> None:
-    d.rectangle((x, y, x + 71, y + 71), fill=(253, 254, 255, 255))
+    d.rectangle((x, y, x + 71, y + 71), fill=FIELD)
     d.line((x, y, x + 71, y), fill=GRID_MAJOR)
     d.line((x, y, x, y + 71), fill=GRID_MAJOR)
     d.line((x + 36, y, x + 36, y + 71), fill=GRID)
@@ -106,42 +106,33 @@ def draw_grid(d: ImageDraw.ImageDraw, x: int, y: int) -> None:
 
 
 def icon_save64(d: ImageDraw.ImageDraw, x: int, y: int, color=BLUE) -> None:
-    rounded(d, x + 8, y + 6, 48, 52, 12, color, color)
-    d.rectangle((x + 17, y + 13, x + 47, y + 24), fill=mix(WHITE, color, 0.08))
-    d.rectangle((x + 22, y + 17, x + 42, y + 20), fill=color)
-    d.rectangle((x + 44, y + 13, x + 47, y + 24), fill=mix(color, (32, 96, 150, 255), 0.24))
-    d.rounded_rectangle((x + 18, y + 38, x + 47, y + 55), radius=4, fill=mix(WHITE, color, 0.18))
-    d.rectangle((x + 22, y + 42, x + 43, y + 45), fill=mix(color, WHITE, 0.68))
-    d.rectangle((x + 22, y + 50, x + 43, y + 53), fill=mix(color, (32, 96, 150, 255), 0.14))
+    d.line((x + 32, y + 10, x + 32, y + 40), fill=color, width=6)
+    d.line((x + 20, y + 30, x + 32, y + 42, x + 44, y + 30), fill=color, width=6)
+    d.line((x + 16, y + 52, x + 48, y + 52), fill=color, width=5)
 
 
 def icon_page64(d: ImageDraw.ImageDraw, x: int, y: int, color=BLUE) -> None:
-    rounded(d, x + 14, y + 5, 38, 54, 10, color, color)
-    d.rectangle((x + 23, y + 16, x + 44, y + 20), fill=mix(WHITE, color, 0.08))
-    d.rectangle((x + 23, y + 29, x + 44, y + 33), fill=mix(WHITE, color, 0.08))
-    d.rectangle((x + 23, y + 42, x + 44, y + 46), fill=mix(WHITE, color, 0.08))
+    d.line((x + 16, y + 12, x + 40, y + 12, x + 49, y + 21), fill=color, width=5)
+    d.line((x + 40, y + 12, x + 40, y + 21, x + 49, y + 21), fill=color, width=5)
+    for yy in (30, 40, 50):
+        d.line((x + 18, y + yy, x + 46, y + yy), fill=color, width=4)
 
 
 def icon_plus64(d: ImageDraw.ImageDraw, x: int, y: int, color=BLUE) -> None:
-    d.ellipse((x + 8, y + 8, x + 56, y + 56), fill=mix(WHITE, BLUE_SOFT, 0.24))
-    d.ellipse((x + 8, y + 8, x + 56, y + 56), outline=mix(color, WHITE, 0.08), width=5)
-    d.rounded_rectangle((x + 29, y + 18, x + 35, y + 46), radius=3, fill=color)
-    d.rounded_rectangle((x + 18, y + 29, x + 46, y + 35), radius=3, fill=color)
+    d.line((x + 32, y + 14, x + 32, y + 50), fill=color, width=6)
+    d.line((x + 14, y + 32, x + 50, y + 32), fill=color, width=6)
 
 
 def icon_help64(d: ImageDraw.ImageDraw, x: int, y: int, color=BLUE) -> None:
-    d.ellipse((x + 7, y + 7, x + 57, y + 57), fill=mix(WHITE, BLUE_SOFT, 0.26))
-    d.ellipse((x + 7, y + 7, x + 57, y + 57), outline=color, width=5)
     d.arc((x + 21, y + 16, x + 43, y + 38), 205, 34, fill=color, width=6)
     d.line((x + 37, y + 31, x + 32, y + 39), fill=color, width=6)
     d.line((x + 32, y + 39, x + 32, y + 42), fill=color, width=5)
     d.ellipse((x + 28, y + 45, x + 36, y + 53), fill=color)
-    d.ellipse((x + 17, y + 15, x + 24, y + 22), fill=(255, 255, 255, 135))
 
 
 def icon_close64(d: ImageDraw.ImageDraw, x: int, y: int, color=BLUE) -> None:
-    d.line((x + 18, y + 18, x + 46, y + 46), fill=color, width=8)
-    d.line((x + 46, y + 18, x + 18, y + 46), fill=color, width=8)
+    d.line((x + 20, y + 20, x + 44, y + 44), fill=color, width=6)
+    d.line((x + 44, y + 20, x + 20, y + 44), fill=color, width=6)
 
 
 def icon_chevron64(d: ImageDraw.ImageDraw, x: int, y: int, color=BLUE, right: bool = False) -> None:

@@ -16,28 +16,28 @@ LOGICAL_ATLAS = 256
 SCALE = 8
 ATLAS = LOGICAL_ATLAS * SCALE
 
-TRANSPARENT_RGB = (248, 253, 255, 0)
+TRANSPARENT_RGB = (238, 245, 249, 0)
 WHITE = (255, 255, 255, 255)
-INK = (48, 63, 80, 255)
-SURFACE = (248, 253, 255, 255)
-SURFACE_SOFT = (239, 248, 255, 255)
-SURFACE_SUNK = (224, 238, 248, 255)
-SLOT = (218, 234, 246, 255)
-SLOT_HOVER = (207, 232, 249, 255)
-SLOT_SELECTED = (211, 239, 229, 255)
-SLOT_LOCKED = (207, 218, 228, 255)
-BORDER = (196, 218, 235, 255)
-BORDER_SOFT = (216, 232, 244, 255)
-BORDER_STRONG = (132, 181, 220, 255)
-BLUE = (76, 139, 204, 255)
-BLUE_SOFT = (222, 242, 255, 255)
-BLUE_HOVER = (211, 237, 255, 255)
-CYAN = (65, 179, 199, 255)
-GREEN = (77, 185, 128, 255)
-GOLD = (224, 174, 66, 255)
-BRASS = (176, 132, 72, 255)
-PINK = (241, 126, 144, 255)
-DISABLED = (218, 228, 236, 255)
+INK = (23, 43, 58, 255)
+SURFACE = (248, 251, 253, 255)
+SURFACE_SOFT = (231, 240, 246, 255)
+SURFACE_SUNK = (215, 228, 236, 255)
+SLOT = (225, 235, 241, 255)
+SLOT_HOVER = (207, 228, 240, 255)
+SLOT_SELECTED = (204, 228, 220, 255)
+SLOT_LOCKED = (199, 210, 217, 255)
+BORDER = (165, 199, 217, 255)
+BORDER_SOFT = (207, 221, 229, 255)
+BORDER_STRONG = (111, 166, 196, 255)
+BLUE = (104, 191, 234, 255)
+BLUE_SOFT = (221, 244, 255, 255)
+BLUE_HOVER = (200, 236, 252, 255)
+CYAN = (66, 181, 204, 255)
+GREEN = (47, 125, 93, 255)
+GOLD = (169, 104, 24, 255)
+BRASS = (117, 91, 60, 255)
+PINK = (180, 61, 80, 255)
+DISABLED = (205, 215, 221, 255)
 
 
 def mix(a: tuple[int, int, int, int], b: tuple[int, int, int, int], t: float) -> tuple[int, int, int, int]:
@@ -82,30 +82,30 @@ def draw_soft_box(d: D, x: int, y: int, w: int, h: int, r: int, fill, border=BOR
 
 
 def draw_panel_sprite(d: D, x: int, y: int, fill) -> None:
-    draw_soft_box(d, x, y, 16, 16, 4, fill, BORDER)
-    d.rr((x + 3, y + 3, x + 12, y + 12), 2, mix(fill, WHITE, 0.32))
+    draw_soft_box(d, x, y, 16, 16, 3, fill, BORDER)
+    d.rr((x + 3, y + 3, x + 12, y + 12), 1, mix(fill, WHITE, 0.22))
 
 
 def draw_panel32_sprite(d: D, x: int, y: int, fill, *, inset: bool = False) -> None:
-    draw_soft_box(d, x, y, 32, 32, 8, fill, BORDER, inset=inset)
+    draw_soft_box(d, x, y, 32, 32, 5, fill, BORDER, inset=inset)
     if inset:
-        d.rr((x + 5, y + 5, x + 26, y + 26), 6, mix(fill, WHITE, 0.12))
+        d.rr((x + 5, y + 5, x + 26, y + 26), 3, mix(fill, WHITE, 0.10))
     else:
-        d.rr((x + 5, y + 5, x + 26, y + 26), 6, mix(fill, WHITE, 0.24))
+        d.rr((x + 5, y + 5, x + 26, y + 26), 3, mix(fill, WHITE, 0.18))
 
 
 def draw_inset_sprite(d: D, x: int, y: int) -> None:
-    draw_soft_box(d, x, y, 16, 16, 4, SURFACE_SUNK, BORDER, inset=True)
-    d.rr((x + 3, y + 3, x + 12, y + 12), 2, mix(SURFACE_SUNK, WHITE, 0.14))
+    draw_soft_box(d, x, y, 16, 16, 3, SURFACE_SUNK, BORDER, inset=True)
+    d.rr((x + 3, y + 3, x + 12, y + 12), 1, mix(SURFACE_SUNK, WHITE, 0.12))
 
 
 def draw_button_sprite(d: D, x: int, y: int, fill, border=BORDER, *, selected=False) -> None:
-    draw_soft_box(d, x, y, 18, 18, 5, fill, border, inset=selected)
+    draw_soft_box(d, x, y, 18, 18, 3, fill, border, inset=selected)
 
 
 def draw_slot_sprite(d: D, x: int, y: int, fill, border=BORDER_STRONG, locked: bool = False) -> None:
-    draw_soft_box(d, x, y, 18, 18, 4, fill, border, inset=True)
-    d.rr((x + 3, y + 3, x + 14, y + 14), 3, mix(fill, WHITE, 0.16))
+    draw_soft_box(d, x, y, 18, 18, 2, fill, border, inset=True)
+    d.rr((x + 3, y + 3, x + 14, y + 14), 1, mix(fill, WHITE, 0.14))
     if locked:
         d.rr((x + 6, y + 9, x + 13, y + 14), 1, mix(BORDER, INK, 0.08))
         d.arc((x + 6, y + 5, x + 13, y + 13), 180, 360, mix(BORDER, INK, 0.08), 2)
@@ -146,30 +146,33 @@ def paste_icon(image: Image.Image, x: int, y: int, kind: str) -> None:
     }[kind]
     icon, d = icon_image(base)
     if kind == "storage":
-        d.rr((28, 38, 100, 94), 10, BLUE)
-        d.rect((36, 48, 92, 57), WHITE)
-        d.rr((53, 64, 75, 81), 3, WHITE)
+        d.rect((24, 34, 104, 96), outline=BLUE, width=9)
+        d.line((24, 56, 104, 56), BLUE, 9)
+        d.rect((54, 49, 74, 68), fill=SURFACE, outline=BLUE, width=7)
     elif kind == "fluid":
-        d.ellipse((38, 48, 90, 102), CYAN)
-        d.polygon(((64, 20), (39, 67), (89, 67)), CYAN)
+        d.polygon(((64, 17), (36, 63), (36, 79), (46, 96), (64, 104), (82, 96), (92, 79), (92, 63)), fill=SURFACE)
+        d.line((64, 17, 36, 63, 36, 79, 46, 96, 64, 104, 82, 96, 92, 79, 92, 63, 64, 17), CYAN, 9, "curve")
+        d.line((48, 77, 57, 87, 75, 69), CYAN, 7, "curve")
     elif kind == "network":
-        d.arc((24, 32, 104, 112), 220, 320, GREEN, 10)
-        d.arc((40, 52, 88, 100), 220, 320, GREEN, 9)
-        d.arc((54, 70, 74, 90), 220, 320, GREEN, 7)
-        d.ellipse((58, 94, 70, 106), GREEN)
+        for cx, cy in ((30, 64), (64, 31), (98, 64), (64, 98)):
+            d.rect((cx - 9, cy - 9, cx + 9, cy + 9), fill=SURFACE, outline=GREEN, width=7)
+        d.line((39, 58, 55, 39), GREEN, 7)
+        d.line((73, 39, 89, 58), GREEN, 7)
+        d.line((89, 73, 73, 89), GREEN, 7)
+        d.line((55, 89, 39, 73), GREEN, 7)
     elif kind == "energy":
         d.polygon(((73, 14), (36, 61), (59, 61), (47, 114), (96, 52), (68, 52)), GOLD)
     elif kind == "stress":
-        d.line((34, 64, 94, 64), BRASS, 13)
-        d.line((64, 34, 64, 94), BRASS, 13)
-        d.ellipse((45, 45, 83, 83), BRASS)
-        d.ellipse((56, 56, 72, 72), WHITE)
+        d.ellipse((31, 31, 97, 97), fill=SURFACE, outline=BRASS, width=9)
+        for x1, y1, x2, y2 in ((64, 18, 64, 34), (64, 94, 64, 110), (18, 64, 34, 64), (94, 64, 110, 64)):
+            d.line((x1, y1, x2, y2), BRASS, 9)
+        d.ellipse((53, 53, 75, 75), outline=BRASS, width=7)
     elif kind == "suite":
-        d.line((43, 84, 84, 43), PINK, 13)
-        d.line((47, 88, 88, 47), INK, 4)
-        d.polygon(((31, 36), (42, 25), (55, 38), (48, 45), (42, 39), (38, 43)), PINK)
-        d.ellipse((72, 72, 96, 96), PINK)
-        d.ellipse((78, 78, 90, 90), WHITE)
+        d.line((34, 94, 92, 36), PINK, 10)
+        d.polygon(((27, 31), (41, 19), (56, 34), (48, 42), (41, 35), (34, 42)), PINK)
+        d.rect((74, 72, 101, 99), fill=SURFACE, outline=PINK, width=8)
+        d.line((80, 78, 95, 93), PINK, 6)
+        d.line((95, 78, 80, 93), PINK, 6)
     icon = icon.resize((32 * SCALE, 32 * SCALE), Image.Resampling.LANCZOS)
     image.alpha_composite(icon, (x * SCALE, y * SCALE))
 

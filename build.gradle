@@ -85,14 +85,10 @@ def createDevJars = files(
 def hasCreateDevJars = createDevJars.files.every { it.isFile() }
 
 dependencies {
-    def localDynamicDimensionsJar = providers.gradleProperty("localDynamicDimensionsJar")
-    if (localDynamicDimensionsJar.isPresent()) {
-        implementation files(localDynamicDimensionsJar.get())
-    } else {
-        implementation("dev.galacticraft:dynamicdimensions-neoforge:${dynamicdimensions_version}") {
-            exclude group: "lol.bai", module: "badpackets"
-        }
-    }
+    // DynamicDimensions is vendored for reproducible local development. Do not
+    // resolve it from Terra's Maven repository: that endpoint is unreliable and
+    // runClient must work without an extra Gradle property or network fallback.
+    implementation files("libs/dynamicdimensions-neoforge-0.9.1+75e1622e-dirty.jar")
 
     // badpackets 是 DynamicDimensions 的运行时依赖，用于在客户端-服务端之间同步动态维度注册信息。
     // 没有它，DynamicDimensions 的 S2C 维度创建包不会被发送/接收，

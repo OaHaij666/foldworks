@@ -74,7 +74,7 @@ public final class ChestGuiTextures {
     }
 
     public static void shadow(GuiGraphics g, int x, int y, int w, int h) {
-        fill(g, x + 3, y + 3, w, h, 0x551A1A1A);
+        fill(g, x + 3, y + 3, w, h, Theme.SHADOW);
     }
 
     public static void flat(GuiGraphics g, int x, int y, int w, int h, int color) {
@@ -83,12 +83,12 @@ public final class ChestGuiTextures {
 
     public static void hDivider(GuiGraphics g, int x, int y, int w) {
         if (w <= 0) return;
-        g.fill(x, y, x + w, y + 1, Theme.uiColor(0xFFEDF4FA));
+        g.fill(x, y, x + w, y + 1, Theme.uiColor(Theme.DIVIDER));
     }
 
     public static void vDivider(GuiGraphics g, int x, int y, int h) {
         if (h <= 0) return;
-        g.fill(x, y, x + 1, y + h, Theme.uiColor(0xFFEDF4FA));
+        g.fill(x, y, x + 1, y + h, Theme.uiColor(Theme.DIVIDER));
     }
 
     public static void panel(GuiGraphics g, int x, int y, int w, int h) {
@@ -142,9 +142,9 @@ public final class ChestGuiTextures {
     public static void scrollbar(GuiGraphics g, int x, int y, int w, int h, int thumbY, int thumbH) {
         if (w <= 0 || h <= 0) return;
         int radius = Math.max(1, Math.min(4, w / 2));
-        Theme.fillRound(g, x, y, w, h, radius, 0xFFBFD8EC);
+        Theme.fillRound(g, x, y, w, h, radius, Theme.BORDER);
         Theme.fillRound(g, x + 1, y + 1, Math.max(0, w - 2), Math.max(0, h - 2),
-                Math.max(0, radius - 1), 0xFFE7F2FB);
+                Math.max(0, radius - 1), Theme.SURFACE_SUNK);
         if (w > 4 && h > 4) {
             fill(g, x + 2, y + 2, w - 4, h - 4, 0x55FFFFFF);
         }
@@ -152,7 +152,7 @@ public final class ChestGuiTextures {
         int safeThumbH = Math.max(8, Math.min(thumbH, Math.max(1, h - 2)));
         int safeThumbY = Math.max(y + 1, Math.min(thumbY, y + h - 1 - safeThumbH));
         Theme.fillRound(g, x + 1, safeThumbY, Math.max(1, w - 2), safeThumbH,
-                Math.max(1, radius - 1), 0xFF6AADE0);
+                Math.max(1, radius - 1), Theme.PRIMARY);
         if (w > 4 && safeThumbH > 4) {
             fill(g, x + 2, safeThumbY + 2, Math.max(0, w - 4), 1, 0x80FFFFFF);
         }

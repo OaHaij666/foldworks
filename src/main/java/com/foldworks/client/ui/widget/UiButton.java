@@ -1,7 +1,5 @@
 package com.foldworks.client.ui.widget;
 
-import com.foldworks.client.ui.ChestGuiTextures;
-import com.foldworks.client.ui.FoldworksTabletGuiTextures;
 import com.foldworks.client.ui.Theme;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -23,6 +21,7 @@ public class UiButton {
     private boolean enabled = true;
     private Runnable onClick = () -> {};
     private float hoverAnim = 0f;
+    private long pressedUntilMs;
 
     public UiButton(String label, Variant variant) {
         this.label = label;
@@ -45,29 +44,31 @@ public class UiButton {
         float target = hovered ? 1f : 0f;
         hoverAnim += (target - hoverAnim) * Math.min(1f, partialTick * 0.6f + 0.25f);
 
+        boolean pressed = enabled && System.currentTimeMillis() < pressedUntilMs;
+        int fill;
+        int border;
         int textColor;
-        ChestGuiTextures.ButtonState chestState;
-        FoldworksTabletGuiTextures.ButtonState tabletState;
         switch (variant) {
             case PRIMARY -> {
-                chestState = hovered ? ChestGuiTextures.ButtonState.HOVER : ChestGuiTextures.ButtonState.NORMAL;
-                tabletState = hovered ? FoldworksTabletGuiTextures.ButtonState.HOVER : FoldworksTabletGuiTextures.ButtonState.SELECTED;
-                textColor = Theme.PRIMARY_PRESS;
+                fill = pressed ? Theme.lerpColor(Theme.PRIMARY, Theme.PRIMARY_PRESS, 0.35f)
+                        : hovered ? Theme.PRIMARY_HOVER : Theme.PRIMARY;
+                border = Theme.PRIMARY_PRESS;
+                textColor = Theme.TEXT_ON_PRIM;
             }
             case DANGER -> {
-                chestState = ChestGuiTextures.ButtonState.DANGER;
-                tabletState = FoldworksTabletGuiTextures.ButtonState.DANGER;
-                textColor = 0xFFB65264;
+                fill = pressed ? Theme.DANGER : hovered ? Theme.DANGER_HOVER : Theme.DANGER_SOFT;
+                border = Theme.DANGER;
+                textColor = pressed || hovered ? Theme.TEXT_ON_DANGER : Theme.DANGER;
             }
             case SECONDARY -> {
-                chestState = hovered ? ChestGuiTextures.ButtonState.HOVER : ChestGuiTextures.ButtonState.NORMAL;
-                tabletState = hovered ? FoldworksTabletGuiTextures.ButtonState.HOVER : FoldworksTabletGuiTextures.ButtonState.NORMAL;
+                fill = pressed ? Theme.PRIMARY_SOFT_H : hovered ? Theme.PRIMARY_SOFT : Theme.SURFACE;
+                border = hovered || pressed ? Theme.PRIMARY : Theme.BORDER_STRONG;
                 textColor = Theme.TEXT;
             }
             default /*GHOST*/ -> {
-                chestState = hovered ? ChestGuiTextures.ButtonState.HOVER : ChestGuiTextures.ButtonState.NORMAL;
-                tabletState = hovered ? FoldworksTabletGuiTextures.ButtonState.HOVER : FoldworksTabletGuiTextures.ButtonState.NORMAL;
-                textColor = Theme.PRIMARY;
+                fill = pressed ? Theme.PRIMARY_SOFT_H : Theme.PRIMARY_SOFT;
+                border = pressed ? Theme.PRIMARY : Theme.PRIMARY_SOFT_H;
+                textColor = Theme.PRIMARY_PRESS;
             }
         }
 
@@ -78,18 +79,22 @@ public class UiButton {
         }
 
         if (!enabled) {
-            chestState = ChestGuiTextures.ButtonState.DISABLED;
-            tabletState = FoldworksTabletGuiTextures.ButtonState.DISABLED;
+            fill = Theme.SURFACE_SUNK;
+            border = Theme.BORDER;
             textColor = Theme.TEXT_FAINT;
         }
 
-        if (skin == Skin.CHEST) ChestGuiTextures.button(g, x, y, w, h, chestState);
-        else FoldworksTabletGuiTextures.button(g, x, y, w, h, tabletState);
+        int radius = skin == Skin.CHEST ? 2 : Theme.RADIUS;
+        Theme.panel(g, x, y, w, h, radius, fill, border);
+        if (variant == Variant.PRIMARY && enabled) {
+            Theme.hLine(g, x + 3, y + h - 2, Math.max(0, w - 6), pressed ? Theme.PRIMARY_HOVER : Theme.PRIMARY_PRESS);
+        }
         Theme.textInBox(g, font, label, x, y, w, h, textColor);
     }
 
     public boolean mouseClicked(double mx, double my, int button) {
         if (button == 0 && enabled && Theme.inside(mx, my, x, y, w, h)) {
+            pressedUntilMs = System.currentTimeMillis() + 140L;
             Minecraft.getInstance().getSoundManager().play(
                     net.minecraft.client.resources.sounds.SimpleSoundInstance.forUI(
                             net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK, 1.0F));

@@ -146,8 +146,8 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     // 所有者UUID
     protected UUID ownerUUID = null;
 
-    // 所属工域缓存：避免 canChest 热路径每次查 SpaceManager.dimensionIndex。
-    // SpaceData.markDeleted() 会使缓存失效；空间删除后重新查找返回 null（非工域维度）。
+    // 所属空间缓存：避免 canChest 热路径每次查 SpaceManager.dimensionIndex。
+    // SpaceData.markDeleted() 会使缓存失效；空间删除后重新查找返回 null（非空间维度）。
     private SpaceData cachedContainingSpace;
 
     // 传输图权限层级
@@ -1274,7 +1274,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
     public void setOwnerUUID(UUID uuid) { this.ownerUUID = uuid; setChanged(); }
 
     /**
-     * 返回箱子所在维度所属的工域（null 表示非工域维度）。
+     * 返回箱子所在维度所属的空间（null 表示非空间维度）。
      * 缓存查找结果，空间删除时通过 SpaceData.isDeleted() 失效。
      */
     public SpaceData getContainingSpace() {

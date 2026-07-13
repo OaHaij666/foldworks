@@ -40,6 +40,7 @@ public class UiDropdown {
     public void setLabels(List<String> labels) {
         this.labels = labels;
         this.selected = clampIndex(selected);
+        if (labels == null || labels.isEmpty()) open = false;
     }
 
     public int selected() { return selected; }
@@ -64,15 +65,16 @@ public class UiDropdown {
     }
 
     private int popupVisibleRows() {
-        return Math.min(MAX_VISIBLE, Math.max(1, labels.size()));
+        return Math.min(MAX_VISIBLE, Math.max(1, labels == null ? 0 : labels.size()));
     }
 
     private int maxScroll() {
-        return Math.max(0, labels.size() * ROW_H - popupVisibleRows() * ROW_H);
+        int size = labels == null ? 0 : labels.size();
+        return Math.max(0, size * ROW_H - popupVisibleRows() * ROW_H);
     }
 
     private String currentLabel() {
-        if (labels == null || labels.isEmpty()) return "—";
+        if (labels == null || labels.isEmpty()) return "无可用选项";
         return labels.get(clampIndex(selected));
     }
 
@@ -90,15 +92,18 @@ public class UiDropdown {
 
     // ===== 闭合态 =====
     public void render(GuiGraphics g, int mouseX, int mouseY) {
-        boolean hovered = Theme.inside(mouseX, mouseY, x, y, w, h);
-        FoldworksTabletGuiTextures.button(g, x, y, w, h,
-                (open || hovered) ? FoldworksTabletGuiTextures.ButtonState.HOVER : FoldworksTabletGuiTextures.ButtonState.NORMAL);
+        boolean empty = labels == null || labels.isEmpty();
+        boolean hovered = !empty && Theme.inside(mouseX, mouseY, x, y, w, h);
+        int fill = empty ? Theme.SURFACE_SUNK : (open || hovered) ? Theme.PRIMARY_SOFT : Theme.SURFACE;
+        int border = empty ? Theme.BORDER : (open || hovered) ? Theme.PRIMARY : Theme.BORDER_STRONG;
+        Theme.panel(g, x, y, w, h, Theme.RADIUS, fill, border);
+        if (open) Theme.vLine(g, x + 1, y + 3, Math.max(0, h - 6), Theme.PRIMARY);
 
         String text = Theme.ellipsize(font, currentLabel(), w - 24);
-        g.drawString(font, Theme.styled(text), x + 8, y + (h - font.lineHeight) / 2 + 1, Theme.TEXT, false);
-        // 箭头
-        String arrow = open ? "▲" : "▼";
-        g.drawString(font, Theme.styled(arrow), x + w - 14, y + (h - font.lineHeight) / 2 + 1, Theme.TEXT_MUTED, false);
+        int textColor = empty ? Theme.TEXT_FAINT : Theme.TEXT;
+        g.drawString(font, Theme.styled(text), x + 8, y + (h - font.lineHeight) / 2 + 1, textColor, false);
+        if (open) Theme.chevronUp(g, x + w - 10, y + h / 2, 5, Theme.PRIMARY_PRESS);
+        else Theme.chevronDown(g, x + w - 10, y + h / 2, 5, empty ? Theme.TEXT_FAINT : Theme.TEXT_MUTED);
     }
 
     // ===== 展开态（overlay）=====
@@ -123,6 +128,7 @@ public class UiDropdown {
             boolean isSel = idx == selected;
             if (isSel) {
                 Theme.fillRound(g, x + 2, rowY + 1, w - 4, ROW_H - 2, 3, Theme.PRIMARY_SOFT);
+                Theme.vLine(g, x + 2, rowY + 3, ROW_H - 6, Theme.PRIMARY);
             } else if (rowHover) {
                 Theme.fillRound(g, x + 2, rowY + 1, w - 4, ROW_H - 2, 3, Theme.SURFACE_ALT);
             }
@@ -137,14 +143,14 @@ public class UiDropdown {
             int trackH = popH - 4;
             int barH = Math.max(16, trackH * rows / labels.size());
             int barY = top + 2 + (int) (scroll / maxScroll() * (trackH - barH));
-            g.fill(x + w - 4, top + 2, x + w - 2, top + 2 + trackH, 0x22000000);
+            g.fill(x + w - 4, top + 2, x + w - 2, top + 2 + trackH, Theme.SURFACE_SUNK);
             Theme.fillRound(g, x + w - 4, barY, 2, barH, 1, Theme.BORDER_STRONG);
         }
     }
 
     /** 闭合态点击：命中控件则切换开合。 */
     public boolean mouseClicked(double mx, double my, int button) {
-        if (button == 0 && Theme.inside(mx, my, x, y, w, h)) {
+        if (button == 0 && labels != null && !labels.isEmpty() && Theme.inside(mx, my, x, y, w, h)) {
             toggle();
             return true;
         }

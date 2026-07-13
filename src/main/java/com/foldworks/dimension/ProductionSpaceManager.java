@@ -80,7 +80,7 @@ public class ProductionSpaceManager {
     private void queueTeleportToSpace(ServerPlayer player, SpaceData space, int delayTicks, boolean clearOutsideBoundary) {
         long readyAtTick = player.server.overworld().getGameTime() + Math.max(0, delayTicks);
         pendingTeleports.add(new PendingTeleport(player.getUUID(), space.getSpaceId(), readyAtTick, clearOutsideBoundary));
-        player.sendSystemMessage(Component.literal("工域正在准备，请稍候...").withStyle(ChatFormatting.YELLOW));
+        player.sendSystemMessage(Component.literal("空间正在准备，请稍候...").withStyle(ChatFormatting.YELLOW));
     }
 
     public void onServerTick(MinecraftServer server) {
@@ -111,7 +111,7 @@ public class ProductionSpaceManager {
 
     private void teleportToSpace(ServerPlayer player, SpaceData space, boolean clearOutsideBoundary) {
         if (!space.canAccess(player.getUUID())) {
-            player.sendSystemMessage(Component.literal("你没有权限进入该工域").withStyle(ChatFormatting.RED));
+            player.sendSystemMessage(Component.literal("你没有权限进入该空间").withStyle(ChatFormatting.RED));
             return;
         }
 
@@ -120,8 +120,8 @@ public class ProductionSpaceManager {
         try {
             target = SpaceDimensionService.getInstance().loadOrCreate(server, space);
         } catch (RuntimeException e) {
-            Foldworks.LOGGER.error("无法加载工域", e);
-            player.sendSystemMessage(Component.literal("无法加载工域: " + e.getMessage()).withStyle(ChatFormatting.RED));
+            Foldworks.LOGGER.error("无法加载空间", e);
+            player.sendSystemMessage(Component.literal("无法加载空间: " + e.getMessage()).withStyle(ChatFormatting.RED));
             return;
         }
 

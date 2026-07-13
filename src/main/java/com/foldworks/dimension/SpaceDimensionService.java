@@ -136,7 +136,7 @@ public final class SpaceDimensionService {
                 }
             }
         }
-        Foldworks.LOGGER.info("工域边界外侧清理完成: space={} columns={} changed={}",
+        Foldworks.LOGGER.info("空间边界外侧清理完成: space={} columns={} changed={}",
                 space.getSpaceId(), columns, changed);
     }
 

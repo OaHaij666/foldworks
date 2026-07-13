@@ -319,16 +319,16 @@ public class TransferGraphScreen extends Screen {
     }
 
     private void renderGrid(GuiGraphics g) {
-        g.fill(0, 0, width, height, 0xFFFDFEFF);
+        g.fill(0, 0, width, height, Theme.CANVAS);
         int major = Math.max(56, (int) Math.round(72 * Math.max(0.75, Math.min(1.35, zoom))));
         int minor = Math.max(28, major / 2);
         int startX = Math.floorMod(panX, minor) - minor;
         int startY = Math.floorMod(panY, minor) - minor;
         for (int x = startX; x < width; x += minor) {
-            Theme.vLine(g, x, 0, height, Math.floorMod(x - panX, major) == 0 ? 0x2EB7D7EE : 0x1DD9EAF6);
+            Theme.vLine(g, x, 0, height, Math.floorMod(x - panX, major) == 0 ? Theme.GRID_MAJOR : Theme.GRID_MINOR);
         }
         for (int y = startY; y < height; y += minor) {
-            Theme.hLine(g, 0, y, width, Math.floorMod(y - panY, major) == 0 ? 0x2EB7D7EE : 0x1DD9EAF6);
+            Theme.hLine(g, 0, y, width, Math.floorMod(y - panY, major) == 0 ? Theme.GRID_MAJOR : Theme.GRID_MINOR);
         }
     }
 
@@ -339,8 +339,8 @@ public class TransferGraphScreen extends Screen {
             if (x + sw < 0 || y + sh < HEADER_H || x > width || y > height) continue;
             boolean selected = node.id().equals(selectedNodeId);
             boolean invalid = hasIssueForNode(node.id());
-            int fill = node.enabled() ? Theme.SURFACE : 0xFFE9EDF2;
-            int border = invalid ? Theme.DANGER : selected ? Theme.PRIMARY_PRESS : (node.enabled() ? Theme.BORDER_STRONG : 0xFFC8D0D9);
+            int fill = node.enabled() ? Theme.SURFACE : Theme.SURFACE_DISABLED;
+            int border = invalid ? Theme.DANGER : selected ? Theme.PRIMARY_PRESS : (node.enabled() ? Theme.BORDER_STRONG : Theme.BORDER);
             g.pose().pushPose();
             g.pose().translate(x, y, 0);
             g.pose().scale((float) zoom, (float) zoom, 1.0f);
@@ -384,26 +384,20 @@ public class TransferGraphScreen extends Screen {
     }
 
     private void drawNodePanel(GuiGraphics g, int w, int h, boolean enabled, boolean selected, boolean invalid) {
-        int fill = enabled ? Theme.SURFACE : 0xFFE9EDF2;
-        int border = invalid ? Theme.DANGER : selected ? Theme.PRIMARY_PRESS : enabled ? Theme.BORDER_STRONG : 0xFFC8D0D9;
+        int fill = enabled ? Theme.SURFACE : Theme.SURFACE_DISABLED;
+        int border = invalid ? Theme.DANGER : selected ? Theme.PRIMARY_PRESS : enabled ? Theme.BORDER_STRONG : Theme.BORDER;
         softPanel(g, 0, 0, w, h, fill, border);
     }
 
     private void drawNodeHeader(GuiGraphics g, int w, TransferGraphGuiTextures.HeaderStyle style) {
-        int fill = switch (style) {
-            case CYAN -> 0xFFE6F7FA;
-            case PINK -> 0xFFFFEEF4;
-            case DISABLED -> 0xFFDDE3EA;
-            default -> 0xFFE6F4FF;
-        };
         int line = switch (style) {
-            case CYAN -> 0xFF4BBBC9;
-            case PINK -> 0xFFFF84A2;
+            case CYAN -> 0xFF32AFC5;
+            case PINK -> Theme.DANGER;
             case DISABLED -> Theme.TEXT_FAINT;
             default -> Theme.PRIMARY;
         };
-        Theme.fillRound(g, 4, 4, w - 8, 26, 13, fill);
-        Theme.hLine(g, 16, 29, w - 32, line);
+        Theme.fillRound(g, 5, 5, 3, 22, 1, line);
+        Theme.hLine(g, 14, 29, w - 28, line);
     }
 
     private void renderRerouteNode(GuiGraphics g, TransferGraphSyncPacket.NodeData node, int border) {
@@ -980,7 +974,7 @@ public class TransferGraphScreen extends Screen {
     }
 
     private void renderGateInput(GuiGraphics g, int x, int y, int w, String value, boolean focused) {
-        Theme.panel(g, x, y, w, 18, 5, focused ? 0xFFFFFFFF : Theme.SURFACE_SUNK, focused ? Theme.PRIMARY : Theme.BORDER);
+        Theme.panel(g, x, y, w, 18, Theme.RADIUS, focused ? Theme.SURFACE : Theme.SURFACE_SUNK, focused ? Theme.PRIMARY : Theme.BORDER);
         text(g, Theme.ellipsize(font, value.isEmpty() ? "∞" : value, w - 8), x + 6, y + 5, focused ? Theme.TEXT : Theme.TEXT_MUTED);
     }
 
@@ -1101,7 +1095,7 @@ public class TransferGraphScreen extends Screen {
     }
 
     private void renderEdgeInput(GuiGraphics g, int x, int y, int w, String value, boolean focused) {
-        Theme.panel(g, x, y, w, 18, 5, focused ? 0xFFFFFFFF : Theme.SURFACE_SUNK, focused ? Theme.PRIMARY : Theme.BORDER);
+        Theme.panel(g, x, y, w, 18, Theme.RADIUS, focused ? Theme.SURFACE : Theme.SURFACE_SUNK, focused ? Theme.PRIMARY : Theme.BORDER);
         String shown = Theme.ellipsize(font, value.isEmpty() ? "0" : value, w - 8);
         text(g, shown, x + 6, y + 5, focused ? Theme.TEXT : Theme.TEXT_MUTED);
     }
@@ -1138,7 +1132,7 @@ public class TransferGraphScreen extends Screen {
                 : "添加过滤";
         text(g, title, popupX + 9, popupY + 10, Theme.TEXT);
         TransferGraphGuiTextures.icon(g, TransferGraphGuiTextures.Icon.CLOSE, popupX + SEARCH_W - 24, popupY + 7);
-        Theme.panel(g, popupX + 8, popupY + 26, SEARCH_W - 16, 18, 5, searchFocused ? 0xFFFFFFFF : Theme.SURFACE_SUNK, searchFocused ? Theme.PRIMARY : Theme.BORDER);
+        Theme.panel(g, popupX + 8, popupY + 26, SEARCH_W - 16, 18, Theme.RADIUS, searchFocused ? Theme.SURFACE : Theme.SURFACE_SUNK, searchFocused ? Theme.PRIMARY : Theme.BORDER);
         String shown = searchValue.isEmpty() ? "搜索资源" : searchValue;
         int textColor = searchValue.isEmpty() ? Theme.TEXT_FAINT : Theme.TEXT;
         text(g, Theme.ellipsize(font, shown + (searchFocused && (graphSyncTicker / 10) % 2 == 0 ? "_" : ""), SEARCH_W - 28), popupX + 13, popupY + 31, textColor);

@@ -110,22 +110,22 @@ public final class TransferGraphGuiTextures {
     }
 
     public static void canvasBackground(GuiGraphics g, int width, int height, int panX, int panY, double zoom) {
-        fill(g, 0, 0, width, height, 0xFFFDFEFF);
+        fill(g, 0, 0, width, height, Theme.CANVAS);
         int grid = Math.max(56, (int) Math.round(72 * Math.max(0.75, Math.min(1.35, zoom))));
         int minor = Math.max(28, grid / 2);
         int startX = Math.floorMod(panX, minor) - minor;
         int startY = Math.floorMod(panY, minor) - minor;
         for (int x = startX; x < width; x += minor) {
-            fill(g, x, 0, 1, height, Math.floorMod(x - panX, grid) == 0 ? 0x2EB7D7EE : 0x1DD9EAF6);
+            fill(g, x, 0, 1, height, Math.floorMod(x - panX, grid) == 0 ? Theme.GRID_MAJOR : Theme.GRID_MINOR);
         }
         for (int y = startY; y < height; y += minor) {
-            fill(g, 0, y, width, 1, Math.floorMod(y - panY, grid) == 0 ? 0x2EB7D7EE : 0x1DD9EAF6);
+            fill(g, 0, y, width, 1, Math.floorMod(y - panY, grid) == 0 ? Theme.GRID_MAJOR : Theme.GRID_MINOR);
         }
     }
 
     public static void shadow(GuiGraphics g, int x, int y, int w, int h) {
-        fill(g, x + 3, y + 4, w, h, 0x1F405E78);
-        fill(g, x + 1, y + 2, w, h, 0x102A4860);
+        fill(g, x + 3, y + 4, w, h, Theme.SHADOW);
+        fill(g, x + 1, y + 2, w, h, Theme.lerpColor(Theme.SHADOW, 0x00071422, 0.55f));
     }
 
     public static void panel(GuiGraphics g, int x, int y, int w, int h, PanelStyle style) {
@@ -216,7 +216,7 @@ public final class TransferGraphGuiTextures {
     }
 
     public static void dividerH(GuiGraphics g, int x, int y, int w) {
-        fill(g, x, y, w, 1, 0xFFE7F0F8);
+        fill(g, x, y, w, 1, Theme.DIVIDER);
     }
 
     public static void fillRect(GuiGraphics g, int x, int y, int w, int h, int color) {

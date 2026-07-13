@@ -99,7 +99,7 @@ public class ModEvents {
                 SpaceStorage.factory(),
                 "foldworks_spaces"
         );
-        Foldworks.LOGGER.info("工域数据已加载（{} 个空间）", SpaceManager.getInstance().getAllSpaces().size());
+        Foldworks.LOGGER.info("空间数据已加载（{} 个空间）", SpaceManager.getInstance().getAllSpaces().size());
         SpaceChunkLoadingManager.getInstance().reconcile(server);
     }
 
@@ -113,7 +113,7 @@ public class ModEvents {
         SpaceManager.getInstance().clearSpaces();
         ProductionSpaceManager.getInstance().reset();
         SpaceStorage.clearInstance();
-        Foldworks.LOGGER.info("工域运行时缓存已清理");
+        Foldworks.LOGGER.info("空间运行时缓存已清理");
     }
 
     @SubscribeEvent
@@ -365,7 +365,7 @@ public class ModEvents {
     }
 
     private static void denyProductionSpaceEntry(ServerPlayer player) {
-        player.displayClientMessage(Component.literal("你没有权限进入该工域"), true);
+        player.displayClientMessage(Component.literal("你没有权限进入该空间"), true);
     }
 
     private record SpawnCapKey(UUID spaceId, MobCategory category) {}

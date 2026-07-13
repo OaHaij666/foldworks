@@ -72,7 +72,7 @@ public final class SpaceChunkLoadingManager {
                 apply(server, space);
                 applied++;
             } catch (RuntimeException e) {
-                Foldworks.LOGGER.error("开启工域常加载失败: {}", space.getDimensionId(), e);
+                Foldworks.LOGGER.error("开启空间常加载失败: {}", space.getDimensionId(), e);
                 space.setChunkLoadingEnabled(false);
                 remove(server, space);
                 dirty = true;
@@ -81,7 +81,7 @@ public final class SpaceChunkLoadingManager {
         }
         if (dirty) SpaceStorage.markDirty();
         if (applied > 0 || disabled > 0) {
-            Foldworks.LOGGER.info("工域常加载同步完成：应用 {} 个，关闭 {} 个", applied, disabled);
+            Foldworks.LOGGER.info("空间常加载同步完成：应用 {} 个，关闭 {} 个", applied, disabled);
         }
     }
 

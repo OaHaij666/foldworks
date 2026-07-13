@@ -117,7 +117,7 @@ public final class TransferGraphValidator {
         if (server == null || key == null || !key.isValid()) return issues;
         SpaceData spaceGraph = key.kind() == GraphKey.Kind.SPACE ? SpaceManager.getInstance().getSpace(key.id()) : null;
         if (key.kind() == GraphKey.Kind.SPACE && spaceGraph == null) {
-            issues.add(new Issue(Severity.ERROR, "", "", "空间图绑定的工域不存在"));
+            issues.add(new Issue(Severity.ERROR, "", "", "传输图绑定的空间不存在"));
             return issues;
         }
         boolean createLoaded = ModList.get().isLoaded("create");

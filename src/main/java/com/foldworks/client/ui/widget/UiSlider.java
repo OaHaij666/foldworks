@@ -49,18 +49,19 @@ public class UiSlider {
 
         int tx = trackX(), ty = trackY(), tw = trackW();
         // 轨道底
-        Theme.fillRound(g, tx, ty, tw, TRACK_H, TRACK_H / 2, Theme.SURFACE_SUNK);
+        Theme.panel(g, tx, ty, tw, TRACK_H, 2, Theme.SURFACE_SUNK, Theme.BORDER);
         // 已填充
         int filled = (int) (tw * value);
         int fillColor = enabled ? Theme.PRIMARY : Theme.BORDER_STRONG;
-        if (filled > 0) Theme.fillRound(g, tx, ty, filled, TRACK_H, TRACK_H / 2, fillColor);
+        if (filled > 0) Theme.fillRound(g, tx + 1, ty + 1, Math.max(1, filled - 1), TRACK_H - 2, 1, fillColor);
         // 滑块
         int knob = 12;
         int knobX = clampInt(tx + filled - knob / 2, tx, tx + tw - knob);
         int knobY = ty + TRACK_H / 2 - knob / 2;
         boolean hover = enabled && Theme.inside(mouseX, mouseY, knobX - 2, knobY - 2, knob + 4, knob + 4);
-        Theme.fillRound(g, knobX, knobY, knob, knob, knob / 2, 0xFFFFFFFF);
-        Theme.outlineRound(g, knobX, knobY, knob, knob, knob / 2, (hover || dragging) ? Theme.PRIMARY : Theme.BORDER_STRONG);
+        if (hover || dragging) Theme.outlineRound(g, knobX - 2, knobY - 2, knob + 4, knob + 4, 4, Theme.PRIMARY_SOFT_H);
+        Theme.panel(g, knobX, knobY, knob, knob, 3, enabled ? Theme.SURFACE : Theme.SURFACE_ALT,
+                (hover || dragging) ? Theme.PRIMARY_PRESS : Theme.BORDER_STRONG);
     }
 
     public boolean mouseClicked(double mx, double my, int button) {

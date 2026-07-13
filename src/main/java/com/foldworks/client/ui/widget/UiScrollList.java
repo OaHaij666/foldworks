@@ -69,7 +69,7 @@ public class UiScrollList<T> {
             int barX = x + w - 4;
             int barH = Math.max(20, h * h / contentHeight());
             int barY = y + (int) (scroll / maxScroll() * (h - barH));
-            g.fill(barX, y, barX + 3, y + h, 0x18000000);
+            g.fill(barX, y, barX + 3, y + h, Theme.SURFACE_SUNK);
             Theme.fillRound(g, barX, barY, 3, barH, 1, Theme.BORDER_STRONG);
         }
     }

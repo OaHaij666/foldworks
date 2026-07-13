@@ -51,14 +51,16 @@ public class ManagePage extends Page {
     private EditBox ownerFilterInput;
     private long lastSeenSpaceVersion = -1;
 
-    private static final int ROW_H = 60;
+    private static final int ROW_H = 82;
     private static final int ROW_GAP = 6;
-    private static final int BTN = 20;
-    private static final int PILL_W = 50;
-    private static final int CUR_W = 54;
-    private static final int OFFLINE_W = 36;
-    private static final int CHUNKLOAD_W = 36;
-    private static final int PILL_H = 22;
+    private static final int ACTION_H = 20;
+    private static final int ENTER_W = 58;
+    private static final int CUR_W = 58;
+    private static final int SETTINGS_W = 58;
+    private static final int RENAME_W = 48;
+    private static final int DELETE_W = 40;
+    private static final int OFFLINE_W = 64;
+    private static final int CHUNKLOAD_W = 64;
     private static final int FILTER_H = 48;
     private static final SpacePermission.AccessMode[] MODES = SpacePermission.AccessMode.values();
     private static final SpacePermission.AccessLevel[] FILTER_LEVELS = {
@@ -179,7 +181,7 @@ public class ManagePage extends Page {
     }
 
     private void renderFilters(GuiGraphics g, int mouseX, int mouseY, float partialTick, int fx, int fy, int fw) {
-        Theme.panel(g, fx, fy, fw, FILTER_H - 6, Theme.RADIUS, 0xFFF8FCFF, Theme.DIVIDER);
+        Theme.panel(g, fx, fy, fw, FILTER_H - 6, Theme.RADIUS, Theme.SURFACE, Theme.DIVIDER);
         int row1 = fy + 5;
         Theme.text(g, font, "权限", fx + 8, row1 + 5, Theme.TEXT_MUTED);
         int cx = fx + 38;
@@ -221,19 +223,19 @@ public class ManagePage extends Page {
 
     private void computeCardRects(int rx, int ry, int rw, int rh, boolean owner, boolean current) {
         int rightEdge = rx + rw - 12;
-        btnY = ry + rh - BTN - 8;
-        pillY = ry + rh - PILL_H - 7;
+        btnY = ry + rh - ACTION_H - 8;
+        pillY = btnY;
         hasDelete = owner && !current;
         hasSettings = owner;
         hasRename = owner;
         hasOfflineToggle = owner;
         hasChunkLoadToggle = owner;
-        if (hasDelete) { delX = rightEdge - BTN; rightEdge = delX - 6; }
-        if (hasSettings) { setX = rightEdge - BTN; rightEdge = setX - 6; }
-        if (hasRename) { renameX = rightEdge - BTN; rightEdge = renameX - 6; }
+        if (hasDelete) { delX = rightEdge - DELETE_W; rightEdge = delX - 6; }
+        if (hasRename) { renameX = rightEdge - RENAME_W; rightEdge = renameX - 6; }
         if (hasOfflineToggle) { offlineX = rightEdge - OFFLINE_W; rightEdge = offlineX - 6; }
         if (hasChunkLoadToggle) { chunkLoadX = rightEdge - CHUNKLOAD_W; rightEdge = chunkLoadX - 6; }
-        pillX = rightEdge - (current ? CUR_W : PILL_W);
+        if (hasSettings) { setX = rightEdge - SETTINGS_W; rightEdge = setX - 6; }
+        pillX = rightEdge - (current ? CUR_W : ENTER_W);
     }
 
     private void renderCard(GuiGraphics g, SpaceInfo space, int rx, int ry, int rw, int rh, int mouseX, int mouseY, boolean hovered) {
@@ -245,7 +247,7 @@ public class ManagePage extends Page {
         int border = current ? Theme.SUCCESS : (hovered ? Theme.PRIMARY : Theme.BORDER);
         Theme.panel(g, rx, ry, rw, rh, Theme.RADIUS, fill, border);
 
-        int textRight = pillX - 8; // 标题可用右界
+        int textRight = rx + rw - 12;
         String name = Theme.ellipsize(font, space.name(), textRight - (rx + 12));
         g.drawString(font, Theme.styled(name), rx + 12, ry + 8, Theme.TEXT, false);
         String tag = space.infinite() ? Component.translatable("foldworks.space.infinite_tag").getString()
@@ -259,49 +261,52 @@ public class ManagePage extends Page {
         Theme.text(g, font, Theme.ellipsize(font, "Owner " + space.ownerId(), ownerW), rx + 12, ry + 39, Theme.TEXT_FAINT);
         Theme.textRight(g, font, permission, textRight, ry + 39, Theme.TEXT_FAINT);
 
-        // 进入 / 当前 药丸
+        // 第二行操作区：使用完整标签，避免“名 / 删 / 常载”这类不可读缩写。
         if (current) {
-            Theme.fillRound(g, pillX, pillY, CUR_W, PILL_H, Theme.RADIUS, Theme.SUCCESS);
-            Theme.textInBox(g, font, Component.translatable("foldworks.space.list.current").getString(), pillX, pillY, CUR_W, PILL_H, Theme.TEXT_ON_PRIM);
+            Theme.panel(g, pillX, pillY, CUR_W, ACTION_H, Theme.RADIUS, Theme.SUCCESS_SOFT, Theme.SUCCESS);
+            Theme.textInBox(g, font, "当前空间", pillX, pillY, CUR_W, ACTION_H, Theme.SUCCESS);
         } else {
-            boolean ph = Theme.inside(mouseX, mouseY, pillX, pillY, PILL_W, PILL_H);
-            Theme.fillRound(g, pillX, pillY, PILL_W, PILL_H, Theme.RADIUS, ph ? Theme.PRIMARY_HOVER : Theme.PRIMARY);
-            Theme.textInBox(g, font, Component.translatable("foldworks.space.list.enter").getString(), pillX, pillY, PILL_W, PILL_H, Theme.TEXT_ON_PRIM);
+            boolean ph = Theme.inside(mouseX, mouseY, pillX, pillY, ENTER_W, ACTION_H);
+            Theme.panel(g, pillX, pillY, ENTER_W, ACTION_H, Theme.RADIUS,
+                    ph ? Theme.PRIMARY_HOVER : Theme.PRIMARY, Theme.PRIMARY_PRESS);
+            Theme.textInBox(g, font, "进入空间", pillX, pillY, ENTER_W, ACTION_H, Theme.TEXT_ON_PRIM);
         }
-        // 设置 ⚙
         if (hasSettings) {
-            boolean sh = Theme.inside(mouseX, mouseY, setX, btnY, BTN, BTN);
-            Theme.fillRound(g, setX, btnY, BTN, BTN, Theme.RADIUS, sh ? Theme.PRIMARY_SOFT : Theme.SURFACE_SUNK);
-            Theme.textInBox(g, font, "⚙", setX, btnY, BTN, BTN, Theme.TEXT_MUTED);
+            boolean sh = Theme.inside(mouseX, mouseY, setX, btnY, SETTINGS_W, ACTION_H);
+            Theme.panel(g, setX, btnY, SETTINGS_W, ACTION_H, Theme.RADIUS,
+                    sh ? Theme.PRIMARY_SOFT : Theme.SURFACE, sh ? Theme.PRIMARY : Theme.BORDER);
+            Theme.textInBox(g, font, "权限管理", setX, btnY, SETTINGS_W, ACTION_H, sh ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED);
         }
         if (hasRename) {
-            boolean renameHover = Theme.inside(mouseX, mouseY, renameX, btnY, BTN, BTN);
-            Theme.fillRound(g, renameX, btnY, BTN, BTN, Theme.RADIUS, renameHover ? Theme.PRIMARY_SOFT : Theme.SURFACE_SUNK);
-            Theme.textInBox(g, font, "名", renameX, btnY, BTN, BTN, Theme.TEXT_MUTED);
+            boolean renameHover = Theme.inside(mouseX, mouseY, renameX, btnY, RENAME_W, ACTION_H);
+            Theme.panel(g, renameX, btnY, RENAME_W, ACTION_H, Theme.RADIUS,
+                    renameHover ? Theme.PRIMARY_SOFT : Theme.SURFACE, renameHover ? Theme.PRIMARY : Theme.BORDER);
+            Theme.textInBox(g, font, "重命名", renameX, btnY, RENAME_W, ACTION_H, renameHover ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED);
         }
         if (hasOfflineToggle) {
             boolean allowed = offlineAllowed(space);
-            boolean oh = Theme.inside(mouseX, mouseY, offlineX, btnY, OFFLINE_W, BTN) && allowed;
+            boolean oh = Theme.inside(mouseX, mouseY, offlineX, btnY, OFFLINE_W, ACTION_H) && allowed;
             int offlineFill = !allowed ? Theme.SURFACE_SUNK : space.offlineSimulationEnabled() ? Theme.PRIMARY_SOFT : (oh ? Theme.SURFACE_ALT : Theme.SURFACE_SUNK);
             int offlineBorder = space.offlineSimulationEnabled() ? Theme.PRIMARY : Theme.BORDER;
             int color = !allowed ? Theme.TEXT_FAINT : space.offlineSimulationEnabled() ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED;
-            Theme.panel(g, offlineX, btnY, OFFLINE_W, BTN, Theme.RADIUS, offlineFill, offlineBorder);
-            Theme.textInBox(g, font, "离线", offlineX, btnY, OFFLINE_W, BTN, color);
+            Theme.panel(g, offlineX, btnY, OFFLINE_W, ACTION_H, Theme.RADIUS, offlineFill, offlineBorder);
+            Theme.textInBox(g, font, "离线模拟", offlineX, btnY, OFFLINE_W, ACTION_H, color);
         }
         if (hasChunkLoadToggle) {
             boolean allowed = space.chunkLoadingAllowed();
-            boolean ch = Theme.inside(mouseX, mouseY, chunkLoadX, btnY, CHUNKLOAD_W, BTN) && allowed;
+            boolean ch = Theme.inside(mouseX, mouseY, chunkLoadX, btnY, CHUNKLOAD_W, ACTION_H) && allowed;
             int chunkFill = !allowed ? Theme.SURFACE_SUNK : space.chunkLoadingEnabled() ? Theme.PRIMARY_SOFT : (ch ? Theme.SURFACE_ALT : Theme.SURFACE_SUNK);
             int chunkBorder = space.chunkLoadingEnabled() ? Theme.PRIMARY : Theme.BORDER;
             int chunkColor = !allowed ? Theme.TEXT_FAINT : space.chunkLoadingEnabled() ? Theme.PRIMARY_PRESS : Theme.TEXT_MUTED;
-            Theme.panel(g, chunkLoadX, btnY, CHUNKLOAD_W, BTN, Theme.RADIUS, chunkFill, chunkBorder);
-            Theme.textInBox(g, font, "常载", chunkLoadX, btnY, CHUNKLOAD_W, BTN, chunkColor);
+            Theme.panel(g, chunkLoadX, btnY, CHUNKLOAD_W, ACTION_H, Theme.RADIUS, chunkFill, chunkBorder);
+            Theme.textInBox(g, font, "保持加载", chunkLoadX, btnY, CHUNKLOAD_W, ACTION_H, chunkColor);
         }
         // 删除 ✕
         if (hasDelete) {
-            boolean dh = Theme.inside(mouseX, mouseY, delX, btnY, BTN, BTN);
-            Theme.fillRound(g, delX, btnY, BTN, BTN, Theme.RADIUS, dh ? Theme.DANGER_HOVER : Theme.DANGER_SOFT);
-            Theme.textInBox(g, font, "✕", delX, btnY, BTN, BTN, dh ? Theme.TEXT_ON_PRIM : Theme.DANGER);
+            boolean dh = Theme.inside(mouseX, mouseY, delX, btnY, DELETE_W, ACTION_H);
+            Theme.panel(g, delX, btnY, DELETE_W, ACTION_H, Theme.RADIUS,
+                    dh ? Theme.DANGER_HOVER : Theme.DANGER_SOFT, Theme.DANGER);
+            Theme.textInBox(g, font, "删除", delX, btnY, DELETE_W, ACTION_H, dh ? Theme.TEXT_ON_DANGER : Theme.DANGER);
         }
     }
 
@@ -311,22 +316,22 @@ public class ManagePage extends Page {
         boolean owner = mc.player != null && space.isOwner(mc.player.getUUID());
         computeCardRects(rx, ry, rw, rh, owner, current);
 
-        if (hasDelete && Theme.inside(mx, my, delX, btnY, BTN, BTN)) { openDeleteConfirm(space); return true; }
-        if (hasSettings && Theme.inside(mx, my, setX, btnY, BTN, BTN)) { openPermission(space); return true; }
-        if (hasRename && Theme.inside(mx, my, renameX, btnY, BTN, BTN)) { openRename(space); return true; }
-        if (hasOfflineToggle && Theme.inside(mx, my, offlineX, btnY, OFFLINE_W, BTN)) {
+        if (hasDelete && Theme.inside(mx, my, delX, btnY, DELETE_W, ACTION_H)) { openDeleteConfirm(space); return true; }
+        if (hasSettings && Theme.inside(mx, my, setX, btnY, SETTINGS_W, ACTION_H)) { openPermission(space); return true; }
+        if (hasRename && Theme.inside(mx, my, renameX, btnY, RENAME_W, ACTION_H)) { openRename(space); return true; }
+        if (hasOfflineToggle && Theme.inside(mx, my, offlineX, btnY, OFFLINE_W, ACTION_H)) {
             if (offlineAllowed(space)) {
                 PacketDistributor.sendToServer(new UpdateOfflineSimulationPayload(space.spaceId(), !space.offlineSimulationEnabled()));
             }
             return true;
         }
-        if (hasChunkLoadToggle && Theme.inside(mx, my, chunkLoadX, btnY, CHUNKLOAD_W, BTN)) {
+        if (hasChunkLoadToggle && Theme.inside(mx, my, chunkLoadX, btnY, CHUNKLOAD_W, ACTION_H)) {
             if (space.chunkLoadingAllowed()) {
                 PacketDistributor.sendToServer(new UpdateSpaceChunkLoadingPayload(space.spaceId(), !space.chunkLoadingEnabled()));
             }
             return true;
         }
-        if (!current && Theme.inside(mx, my, pillX, pillY, PILL_W, PILL_H)) { enterSpace(space); return true; }
+        if (!current && Theme.inside(mx, my, pillX, pillY, ENTER_W, ACTION_H)) { enterSpace(space); return true; }
         if (!current) { enterSpace(space); return true; }
         return false;
     }
@@ -395,10 +400,10 @@ public class ManagePage extends Page {
         int mx = x + (w - mw) / 2, my = y + (h - mh) / 2;
         Theme.shadow(g, mx, my, mw, mh, Theme.RADIUS);
         Theme.panel(g, mx, my, mw, mh, Theme.RADIUS, Theme.SURFACE, Theme.BORDER);
-        Theme.text(g, font, "重命名工造", mx + 12, my + 12, Theme.TEXT);
+        Theme.text(g, font, "重命名空间", mx + 12, my + 12, Theme.TEXT);
 
         if (renameInput == null) renameInput = makeRenameInput();
-        renderEditText(g, renameInput, mx + 12, my + 38, mw - 24, 22, "工造名称", mouseX, mouseY, pt, true);
+        renderEditText(g, renameInput, mx + 12, my + 38, mw - 24, 22, "空间名称", mouseX, mouseY, pt, true);
 
         int bw = (mw - 24 - Theme.GAP) / 2;
         int by = my + mh - 34;
@@ -473,7 +478,7 @@ public class ManagePage extends Page {
         int fill = danger ? (hov ? Theme.DANGER_HOVER : Theme.DANGER) : (hov ? Theme.SURFACE_ALT : Theme.SURFACE_SUNK);
         if (danger) Theme.fillRound(g, x, y, w, 26, Theme.RADIUS, fill);
         else Theme.panel(g, x, y, w, 26, Theme.RADIUS, fill, Theme.BORDER_STRONG);
-        Theme.textInBox(g, font, label, x, y, w, 26, danger ? Theme.TEXT_ON_PRIM : Theme.TEXT);
+        Theme.textInBox(g, font, label, x, y, w, 26, danger ? Theme.TEXT_ON_DANGER : Theme.TEXT);
     }
 
     private EditBox makeNameInput() {
@@ -485,7 +490,7 @@ public class ManagePage extends Page {
     }
 
     private EditBox makeRenameInput() {
-        EditBox box = new EditBox(font, 0, 0, 80, 14, Component.literal("工造名称"));
+        EditBox box = new EditBox(font, 0, 0, 80, 14, Component.literal("空间名称"));
         box.setMaxLength(24);
         box.setBordered(false);
         box.setTextColor(Theme.TEXT);

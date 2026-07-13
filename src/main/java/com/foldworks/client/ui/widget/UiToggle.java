@@ -65,18 +65,19 @@ public class UiToggle {
         // 轨道（靠右）
         int trackX = x + w - trackW - padX;
         int trackY = y + (h - trackH) / 2;
-        int trackColor = disabled
-            ? Theme.BORDER
-            : Theme.lerpColor(Theme.BORDER_STRONG, Theme.PRIMARY, knobAnim);
-        Theme.fillRound(g, trackX, trackY, trackW, trackH, trackH / 2, trackColor);
+        int trackColor = disabled ? Theme.SURFACE_SUNK
+                : Theme.lerpColor(Theme.SURFACE_SUNK, Theme.PRIMARY, knobAnim);
+        int trackBorder = disabled ? Theme.BORDER : value ? Theme.PRIMARY_PRESS : Theme.BORDER_STRONG;
+        Theme.panel(g, trackX, trackY, trackW, trackH, 3, trackColor, trackBorder);
 
         // 滑块
         int knobR = trackH - 4;
         int knobTravel = trackW - knobR - 4;
         int knobX = trackX + 2 + (int) (knobTravel * knobAnim);
         int knobY = trackY + 2;
-        int knobColor = disabled ? 0xFFD0D8E0 : 0xFFFFFFFF;
-        Theme.fillRound(g, knobX, knobY, knobR, knobR, knobR / 2, knobColor);
+        int knobColor = disabled ? Theme.SURFACE_ALT : Theme.SURFACE;
+        Theme.panel(g, knobX, knobY, knobR, knobR, 2, knobColor, disabled ? Theme.BORDER : Theme.PRIMARY_PRESS);
+        if (value && !disabled) Theme.vLine(g, trackX + 4, trackY + 4, Math.max(1, trackH - 8), Theme.TEXT_ON_PRIM);
     }
 
     public boolean mouseClicked(double mx, double my, int button) {
