@@ -21,6 +21,7 @@ public class TransferGraph {
     private final Map<String, TransferGraphPage> pages = new LinkedHashMap<>();
     private final Map<String, TransferNode> nodes = new LinkedHashMap<>();
     private final Map<String, TransferEdge> edges = new LinkedHashMap<>();
+    private final OutgoingEdgeIndex<TransferEdge> outgoingIndex = new OutgoingEdgeIndex<>();
 
     public TransferGraph(UUID owner) {
         this(GraphKey.privateGraph(owner));
@@ -42,8 +43,16 @@ public class TransferGraph {
 
     public void putPage(TransferGraphPage page) { pages.put(page.getId(), page); }
     public void putNode(TransferNode node) { nodes.put(node.getId(), node); }
-    public void putEdge(TransferEdge edge) { edges.put(edge.getId(), edge); }
-    public void clearAll() { pages.clear(); nodes.clear(); edges.clear(); }
+    public void putEdge(TransferEdge edge) {
+        edges.put(edge.getId(), edge);
+        invalidateOutgoingIndex();
+    }
+    public void clearAll() {
+        pages.clear();
+        nodes.clear();
+        edges.clear();
+        invalidateOutgoingIndex();
+    }
 
     public TransferGraphPage ensureDefaultPage() {
         return pages.computeIfAbsent(DEFAULT_PAGE_ID, id -> new TransferGraphPage(id, "默认页", true, 0));
@@ -61,6 +70,7 @@ public class TransferGraph {
         pages.remove(pageId);
         nodes.values().removeIf(node -> node.getPageId().equals(pageId));
         edges.values().removeIf(edge -> edge.getPageId().equals(pageId));
+        invalidateOutgoingIndex();
         if (pages.isEmpty()) ensureDefaultPage();
     }
 
@@ -174,6 +184,7 @@ public class TransferGraph {
     public void removeNode(String nodeId) {
         nodes.remove(nodeId);
         edges.values().removeIf(edge -> edge.getFromNodeId().equals(nodeId) || edge.getToNodeId().equals(nodeId));
+        invalidateOutgoingIndex();
     }
 
     public TransferEdge addEdge(String pageId, String fromNodeId, String fromPortKey, String toNodeId, String toPortKey,
@@ -194,10 +205,13 @@ public class TransferGraph {
         TransferEdge edge = new TransferEdge(UUID.randomUUID().toString(), pageId, fromNodeId, toNodeId, fromPortKey, toPortKey,
                 rateLimitEnabled, rateLimitSeconds, rateLimitItems, true);
         edges.put(edge.getId(), edge);
+        invalidateOutgoingIndex();
         return edge;
     }
 
-    public void removeEdge(String edgeId) { edges.remove(edgeId); }
+    public void removeEdge(String edgeId) {
+        if (edges.remove(edgeId) != null) invalidateOutgoingIndex();
+    }
 
     public void removeFilterItem(String nodeId, String itemId) {
         TransferNode node = nodes.get(nodeId);
@@ -206,13 +220,13 @@ public class TransferGraph {
         String port = itemId != null && itemId.startsWith(TransferEdge.FLUID_PREFIX)
                 ? itemId
                 : TransferEdge.itemPort(itemId);
-        edges.values().removeIf(edge -> edge.getFromNodeId().equals(nodeId) && edge.getFromPortKey().equals(port));
+        if (edges.values().removeIf(edge -> edge.getFromNodeId().equals(nodeId) && edge.getFromPortKey().equals(port))) {
+            invalidateOutgoingIndex();
+        }
     }
 
     public List<TransferEdge> outgoing(String nodeId) {
-        List<TransferEdge> out = new ArrayList<>();
-        for (TransferEdge edge : edges.values()) if (edge.getFromNodeId().equals(nodeId)) out.add(edge);
-        return out;
+        return outgoingIndex.get(nodeId, edges.values(), TransferEdge::getFromNodeId);
     }
 
     public boolean hasExecutableOutgoing(String nodeId) {
@@ -220,12 +234,16 @@ public class TransferGraph {
         if (node == null || !node.isEnabled()) return false;
         TransferGraphPage page = pages.get(node.getPageId());
         if (page == null || !page.isEnabled()) return false;
-        for (TransferEdge edge : edges.values()) {
-            if (!edge.getFromNodeId().equals(nodeId) || !edge.isEnabled()) continue;
+        for (TransferEdge edge : outgoing(nodeId)) {
+            if (!edge.isEnabled()) continue;
             TransferNode target = nodes.get(edge.getToNodeId());
             if (target != null && target.isEnabled()) return true;
         }
         return false;
+    }
+
+    private void invalidateOutgoingIndex() {
+        outgoingIndex.invalidate();
     }
 
     public boolean hasOutgoing(String nodeId) { return hasExecutableOutgoing(nodeId); }

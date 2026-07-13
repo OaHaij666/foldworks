@@ -1535,7 +1535,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
             int index = (start + i) % scopes.length;
             if (!available[index] || bandwidth.maxTransferable(scopes[index]) <= 0) continue;
             followOutgoingEdges(graph, serverLevel, node.getPageId(), node.getId(), scopes[index], cursors[index],
-                    new ArrayList<>(), new HashSet<>(), voidAllowed[index], Integer.MAX_VALUE, bandwidth);
+                    new ArrayList<>(), new HashSet<>(Set.of(node.getId())), voidAllowed[index], Integer.MAX_VALUE, bandwidth);
         }
     }
 
@@ -1559,7 +1559,7 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         stressBudget = Math.min(stressBudget, bandwidth.maxTransferable(TransferEdge.STRESS_SU));
         if (stressBudget <= 0) return;
         followOutgoingEdges(graph, serverLevel, node.getPageId(), node.getId(), TransferEdge.STRESS_SU, "ROOT_STRESS",
-                new ArrayList<>(), new HashSet<>(), false, stressBudget, bandwidth);
+                new ArrayList<>(), new HashSet<>(Set.of(node.getId())), false, stressBudget, bandwidth);
         recordGraphStressBandwidthUse(gameTime, bandwidth.used());
     }
 
@@ -1577,81 +1577,88 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
         if (targetNode == null || !targetNode.isEnabled()) return 0;
         if (!visitedNodes.add(targetNode.getId())) return 0;
 
-        List<TransferEdge> nextPath = new ArrayList<>(path);
-        nextPath.add(edge);
-
-        if (targetNode.getNodeType() == TransferNode.NodeType.LIMIT_GATE) {
-            int gateBudget = limitGateBudget(graph, serverLevel, pageId, targetNode, scopePort, routeBudget);
-            if (gateBudget <= 0) {
-                recordTransferResult(graph, serverLevel, nextPath, gameTime,
-                        new TransferResult(Map.of(), TransferBlockReason.RECEIVER, firstMatchingResourceId(scopePort)));
-                return 0;
+        path.add(edge);
+        try {
+            if (targetNode.getNodeType() == TransferNode.NodeType.LIMIT_GATE) {
+                int gateBudget = limitGateBudget(graph, serverLevel, pageId, targetNode, scopePort, routeBudget);
+                if (gateBudget <= 0) {
+                    recordTransferResult(graph, serverLevel, path, gameTime,
+                            new TransferResult(Map.of(), TransferBlockReason.RECEIVER, firstMatchingResourceId(scopePort)));
+                    return 0;
+                }
+                return followOutgoingEdges(graph, serverLevel, pageId, targetNode.getId(), scopePort, scopePort,
+                        path, visitedNodes, canVoid, gateBudget, bandwidth);
             }
-            return followOutgoingEdges(graph, serverLevel, pageId, targetNode.getId(), scopePort, scopePort,
-                    nextPath, visitedNodes, canVoid, gateBudget, bandwidth);
-        }
 
-        if (targetNode.getNodeType() == TransferNode.NodeType.JUMP_INPUT) {
-            TransferNode output = linkedJumpOutput(graph, targetNode);
-            if (output == null || !output.isEnabled() || !visitedNodes.add(output.getId())) return 0;
-            return followOutgoingEdges(graph, serverLevel, pageId, output.getId(), scopePort, scopePort,
-                    nextPath, visitedNodes, canVoid, routeBudget, bandwidth);
-        }
+            if (targetNode.getNodeType() == TransferNode.NodeType.JUMP_INPUT) {
+                TransferNode output = linkedJumpOutput(graph, targetNode);
+                if (output == null || !output.isEnabled() || !visitedNodes.add(output.getId())) return 0;
+                try {
+                    return followOutgoingEdges(graph, serverLevel, pageId, output.getId(), scopePort, scopePort,
+                            path, visitedNodes, canVoid, routeBudget, bandwidth);
+                } finally {
+                    visitedNodes.remove(output.getId());
+                }
+            }
 
-        if (targetNode.getNodeType() == com.foldworks.transfer.TransferNode.NodeType.REROUTE) {
-            return followOutgoingEdges(graph, serverLevel, pageId, targetNode.getId(), scopePort, scopePort,
-                    nextPath, visitedNodes, canVoid, routeBudget, bandwidth);
-        }
+            if (targetNode.getNodeType() == com.foldworks.transfer.TransferNode.NodeType.REROUTE) {
+                return followOutgoingEdges(graph, serverLevel, pageId, targetNode.getId(), scopePort, scopePort,
+                        path, visitedNodes, canVoid, routeBudget, bandwidth);
+            }
 
-        if (targetNode.getNodeType() == com.foldworks.transfer.TransferNode.NodeType.TRASH) {
-            if (isEnergyScope(scopePort) || isStressScope(scopePort)) return 0;
-            TransferResult result = isFluidScope(scopePort)
-                    ? voidFilteredFluids(scopePort, nextPath, gameTime, routeBudget, bandwidth)
-                    : voidFilteredItems(scopePort, nextPath, gameTime, routeBudget, bandwidth);
-            recordTransferResult(graph, serverLevel, nextPath, gameTime, result);
-            return result.moved();
-        }
+            if (targetNode.getNodeType() == com.foldworks.transfer.TransferNode.NodeType.TRASH) {
+                if (isEnergyScope(scopePort) || isStressScope(scopePort)) return 0;
+                TransferResult result = isFluidScope(scopePort)
+                        ? voidFilteredFluids(scopePort, path, gameTime, routeBudget, bandwidth)
+                        : voidFilteredItems(scopePort, path, gameTime, routeBudget, bandwidth);
+                recordTransferResult(graph, serverLevel, path, gameTime, result);
+                return result.moved();
+            }
 
-        if (targetNode.getNodeType() == com.foldworks.transfer.TransferNode.NodeType.PLAYER_INVENTORY) {
-            TransferResult result = isFluidScope(scopePort) || isEnergyScope(scopePort) || isStressScope(scopePort)
-                    ? new TransferResult(Map.of(), TransferBlockReason.RECEIVER, firstMatchingResourceId(scopePort))
-                    : transferItemsToPlayer(targetNode, scopePort, nextPath, gameTime, routeBudget, bandwidth);
-            recordTransferResult(graph, serverLevel, nextPath, gameTime, result);
-            return result.moved();
-        }
+            if (targetNode.getNodeType() == com.foldworks.transfer.TransferNode.NodeType.PLAYER_INVENTORY) {
+                TransferResult result = isFluidScope(scopePort) || isEnergyScope(scopePort) || isStressScope(scopePort)
+                        ? new TransferResult(Map.of(), TransferBlockReason.RECEIVER, firstMatchingResourceId(scopePort))
+                        : transferItemsToPlayer(targetNode, scopePort, path, gameTime, routeBudget, bandwidth);
+                recordTransferResult(graph, serverLevel, path, gameTime, result);
+                return result.moved();
+            }
 
-        if (targetNode.getNodeType() != com.foldworks.transfer.TransferNode.NodeType.CHEST) return 0;
-        BaseChestBlockEntity target = findNodeChest(targetNode, serverLevel);
-        TransferResult result;
-        if (target != null && !target.isRemoved() && com.foldworks.transfer.TransferGraphAccess.chestMatchesGraph(target, graph.getKey())) {
-            if (isEnergyScope(scopePort)) {
-                result = transferEnergyTo(target, nextPath, gameTime, routeBudget, bandwidth);
-            } else if (isStressScope(scopePort)) {
-                result = transferStressTo(target, nextPath, gameTime, routeBudget, bandwidth);
-            } else {
+            if (targetNode.getNodeType() != com.foldworks.transfer.TransferNode.NodeType.CHEST) return 0;
+            BaseChestBlockEntity target = findNodeChest(targetNode, serverLevel);
+            TransferResult result;
+            if (target != null && !target.isRemoved() && com.foldworks.transfer.TransferGraphAccess.chestMatchesGraph(target, graph.getKey())) {
+                if (isEnergyScope(scopePort)) {
+                    result = transferEnergyTo(target, path, gameTime, routeBudget, bandwidth);
+                } else if (isStressScope(scopePort)) {
+                    result = transferStressTo(target, path, gameTime, routeBudget, bandwidth);
+                } else {
+                    result = isFluidScope(scopePort)
+                            ? transferFluidsTo(target, targetNode, scopePort, path, gameTime, routeBudget, canVoid, bandwidth)
+                            : transferItemsTo(target, targetNode, scopePort, path, gameTime, routeBudget, canVoid, bandwidth);
+                }
+            } else if (findNodeSnapshot(targetNode, serverLevel, graph.getKey()) instanceof OfflineChestSnapshotStorage.Snapshot snapshot) {
+                if (isEnergyScope(scopePort)) {
+                    result = transferEnergyToSnapshot(serverLevel, snapshot, path, gameTime, routeBudget, bandwidth);
+                } else if (isStressScope(scopePort)) {
+                    result = transferStressToSnapshot(snapshot, path, gameTime, routeBudget, bandwidth);
+                } else {
+                    result = isFluidScope(scopePort)
+                            ? transferFluidsToSnapshot(serverLevel, snapshot, targetNode, scopePort, path, gameTime, routeBudget, canVoid, bandwidth)
+                            : transferItemsToSnapshot(serverLevel, snapshot, targetNode, scopePort, path, gameTime, routeBudget, canVoid, bandwidth);
+                }
+            } else if (canVoid) {
                 result = isFluidScope(scopePort)
-                        ? transferFluidsTo(target, targetNode, scopePort, nextPath, gameTime, routeBudget, canVoid, bandwidth)
-                        : transferItemsTo(target, targetNode, scopePort, nextPath, gameTime, routeBudget, canVoid, bandwidth);
-            }
-        } else if (findNodeSnapshot(targetNode, serverLevel, graph.getKey()) instanceof OfflineChestSnapshotStorage.Snapshot snapshot) {
-            if (isEnergyScope(scopePort)) {
-                result = transferEnergyToSnapshot(serverLevel, snapshot, nextPath, gameTime, routeBudget, bandwidth);
-            } else if (isStressScope(scopePort)) {
-                result = transferStressToSnapshot(snapshot, nextPath, gameTime, routeBudget, bandwidth);
+                        ? voidFilteredFluids(scopePort, path, gameTime, routeBudget, bandwidth)
+                        : voidFilteredItems(scopePort, path, gameTime, routeBudget, bandwidth);
             } else {
-                result = isFluidScope(scopePort)
-                        ? transferFluidsToSnapshot(serverLevel, snapshot, targetNode, scopePort, nextPath, gameTime, routeBudget, canVoid, bandwidth)
-                        : transferItemsToSnapshot(serverLevel, snapshot, targetNode, scopePort, nextPath, gameTime, routeBudget, canVoid, bandwidth);
+                result = new TransferResult(Map.of(), TransferBlockReason.RECEIVER, firstMatchingResourceId(scopePort));
             }
-        } else if (canVoid) {
-            result = isFluidScope(scopePort)
-                    ? voidFilteredFluids(scopePort, nextPath, gameTime, routeBudget, bandwidth)
-                    : voidFilteredItems(scopePort, nextPath, gameTime, routeBudget, bandwidth);
-        } else {
-            result = new TransferResult(Map.of(), TransferBlockReason.RECEIVER, firstMatchingResourceId(scopePort));
+            recordTransferResult(graph, serverLevel, path, gameTime, result);
+            return result.moved();
+        } finally {
+            path.remove(path.size() - 1);
+            visitedNodes.remove(targetNode.getId());
         }
-        recordTransferResult(graph, serverLevel, nextPath, gameTime, result);
-        return result.moved();
     }
 
     private int followOutgoingEdges(TransferGraph graph, ServerLevel serverLevel, String pageId, String nodeId,
@@ -1680,7 +1687,8 @@ public abstract class BaseChestBlockEntity extends BlockEntity implements MenuPr
             if (nextScope == null) continue;
             int remainingBudget = Math.min(routeBudget - moved, bandwidth.maxTransferable(nextScope));
             int branchBudget = fairBranchBudget(nextScope, edges.subList(i, edges.size()), remainingBudget);
-            int branchMoved = followTransferEdge(graph, serverLevel, pageId, next, nextScope, path, new HashSet<>(visitedNodes), canVoid, branchBudget, bandwidth);
+            int branchMoved = followTransferEdge(graph, serverLevel, pageId, next, nextScope, path, visitedNodes,
+                    canVoid, branchBudget, bandwidth);
             if (branchMoved > 0) {
                 advanceCursor(nodeId, cursorKey, edges, next);
                 moved += branchMoved;

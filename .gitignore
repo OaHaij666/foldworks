@@ -48,6 +48,9 @@ scripts/run-packaged-client.ps1
 .claude/
 .trae/
 AGENTS.md
+.ua/*
+!.ua/.understandignore
+!.ua/config.json
 
 ### Research & Reference ###
 referance/
