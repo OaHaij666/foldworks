@@ -22,4 +22,32 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build with Gradle
-        run: ./gradlew build
+        run: ./gradlew build --no-daemon
+
+  rust-native:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: rust-crafting-planner
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Test native planner
+        run: cargo test --locked
+
+      - name: Build native planner
+        run: cargo build --release --locked
+
+      - name: Stage ABI v2 DLL
+        shell: pwsh
+        run: Copy-Item target/release/foldworks_crafting_planner.dll target/release/foldworks_crafting_safe_v2_windows_x86_64.dll
+
+      - name: Upload native planner
+        uses: actions/upload-artifact@v4
+        with:
+          name: foldworks-native-windows-x86_64
+          path: rust-crafting-planner/target/release/foldworks_crafting_safe_v2_windows_x86_64.dll

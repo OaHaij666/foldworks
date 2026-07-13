@@ -6,7 +6,7 @@ from PIL import Image, ImageDraw
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "src" / "main" / "resources" / "assets" / "pockethomestead" / "textures" / "gui" / "transfer_graph.png"
+OUT = ROOT / "src" / "main" / "resources" / "assets" / "foldworks" / "textures" / "gui" / "transfer_graph.png"
 
 LOGICAL_ATLAS = 512
 ATLAS_SCALE = 8

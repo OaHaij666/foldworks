@@ -1,5 +1,5 @@
 [package]
-name = "rust-crafting-planner"
+name = "foldworks-crafting-planner"
 version = "0.1.0"
 edition = "2021"
 

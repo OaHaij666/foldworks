@@ -2,43 +2,43 @@
   "sources": [
     {
       "type": "minecraft:single",
-      "resource": "pockethomestead:block/chest_frame"
+      "resource": "foldworks:block/chest_frame"
     },
     {
       "type": "minecraft:single",
-      "resource": "pockethomestead:block/chest_panel"
+      "resource": "foldworks:block/chest_panel"
     },
     {
       "type": "minecraft:single",
-      "resource": "pockethomestead:block/chest_panel_top"
+      "resource": "foldworks:block/chest_panel_top"
     },
     {
       "type": "minecraft:single",
-      "resource": "pockethomestead:block/chest_face_side"
+      "resource": "foldworks:block/chest_face_side"
     },
     {
       "type": "minecraft:single",
-      "resource": "pockethomestead:block/chest_face_cap"
+      "resource": "foldworks:block/chest_face_cap"
     },
     {
       "type": "minecraft:single",
-      "resource": "pockethomestead:block/chest_item_port"
+      "resource": "foldworks:block/chest_item_port"
     },
     {
       "type": "minecraft:single",
-      "resource": "pockethomestead:block/chest_fluid_window"
+      "resource": "foldworks:block/chest_fluid_window"
     },
     {
       "type": "minecraft:single",
-      "resource": "pockethomestead:block/chest_energy_core"
+      "resource": "foldworks:block/chest_energy_core"
     },
     {
       "type": "minecraft:single",
-      "resource": "pockethomestead:block/chest_bearing_ring"
+      "resource": "foldworks:block/chest_bearing_ring"
     },
     {
       "type": "minecraft:single",
-      "resource": "pockethomestead:block/chest_bearing_shaft"
+      "resource": "foldworks:block/chest_bearing_shaft"
     }
   ]
 }

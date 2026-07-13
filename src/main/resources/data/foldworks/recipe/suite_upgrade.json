@@ -1,0 +1,33 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "A": {
+      "item": "minecraft:ender_pearl"
+    },
+    "C": {
+      "item": "minecraft:crafting_table"
+    },
+    "D": {
+      "item": "minecraft:stone"
+    },
+    "E": {
+      "item": "minecraft:redstone_block"
+    },
+    "F": {
+      "item": "minecraft:smoker"
+    },
+    "G": {
+      "item": "minecraft:blast_furnace"
+    }
+  },
+  "pattern": [
+    "ACA",
+    "FEG",
+    "ADA"
+  ],
+  "result": {
+    "count": 1,
+    "id": "foldworks:suite_upgrade"
+  }
+}

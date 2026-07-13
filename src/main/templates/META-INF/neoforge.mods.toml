@@ -7,8 +7,8 @@ modId="${mod_id}"
 version="${mod_version}"
 displayName="${mod_name}"
 description='''
-Pocket Homestead - Create pocket dimensions for your industrial machines.
-Offload rendering, keep the production running!
+Foldworks builds persistent production spaces, dimensional storage, logistics networks,
+offline simulation, and automated crafting for large-scale industry.
 '''
 
 [[dependencies.${mod_id}]]

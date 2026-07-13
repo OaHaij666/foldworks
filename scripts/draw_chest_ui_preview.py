@@ -9,8 +9,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = ROOT / "docs" / "client-ui" / "previews"
-FONT_PATH = ROOT / "src" / "main" / "resources" / "assets" / "pockethomestead" / "font" / "notosanssc-regular.ttf"
-ATLAS_PATH = ROOT / "src" / "main" / "resources" / "assets" / "pockethomestead" / "textures" / "gui" / "chest.png"
+FONT_PATH = ROOT / "src" / "main" / "resources" / "assets" / "foldworks" / "font" / "notosanssc-regular.ttf"
+ATLAS_PATH = ROOT / "src" / "main" / "resources" / "assets" / "foldworks" / "textures" / "gui" / "chest.png"
 
 VERSION = "v8"
 SCALE = 4
@@ -370,7 +370,7 @@ def draw_scrollbar(c: Canvas, x: float, y: float, h: float, thumb_y: float = 7, 
 
 
 def draw_item_page(c: Canvas, ox: int, oy: int) -> None:
-    draw_panel_shell(c, ox, oy, "家园箱子", "物品", 0)
+    draw_panel_shell(c, ox, oy, "工造箱子", "物品", 0)
     chest_x, chest_y = ox + 12, oy + 29
     bevel_rect(c, chest_x - 4, chest_y - 4, 170, 62, PAL.panel)
     draw_inventory_grid(c, chest_x, chest_y, 3, True)
@@ -403,7 +403,7 @@ def draw_fluid_row(c: Canvas, x: float, y: float, label: str, amount: str, color
 
 
 def draw_fluid_page(c: Canvas, ox: int, oy: int) -> None:
-    draw_panel_shell(c, ox, oy, "家园箱子", "流体", 1)
+    draw_panel_shell(c, ox, oy, "工造箱子", "流体", 1)
     x, y, w, h = ox + 8, oy + 31, 170, 184
     bevel_rect(c, x, y, w, h, PAL.panel_lighter)
     c.text(x + 9, y + 9, "流体存储", PAL.ink, 8)
@@ -425,7 +425,7 @@ def cube_face(c: Canvas, pts: Sequence[tuple[float, float]], fill: tuple[int, in
 
 
 def draw_face_page(c: Canvas, ox: int, oy: int) -> None:
-    draw_panel_shell(c, ox, oy, "家园箱子", "面配置", 2)
+    draw_panel_shell(c, ox, oy, "工造箱子", "面配置", 2)
     x, y, w = ox + 8, oy + 30, 170
     bevel_rect(c, x, y, w, 116, PAL.panel_lighter)
     c.text(x + 9, y + 9, "面配置", PAL.ink, 8)
@@ -474,7 +474,7 @@ def draw_settings_card(c: Canvas, x: float, y: float, w: float, h: float, title:
 
 
 def draw_settings_page(c: Canvas, ox: int, oy: int) -> None:
-    draw_panel_shell(c, ox, oy, "家园箱子", "设置", 3)
+    draw_panel_shell(c, ox, oy, "工造箱子", "设置", 3)
     x, w = ox + 8, 170
     y = oy + 29
     draw_settings_card(c, x, y, w, 34, "可视化节点", "编辑连线与过滤", "graph")
@@ -509,7 +509,7 @@ def draw_settings_page(c: Canvas, ox: int, oy: int) -> None:
 
 def draw_components_preview() -> Image.Image:
     c = Canvas(760, 370, SCALE, (244, 250, 255, 255))
-    c.text(20, 18, f"Pocket Homestead Chest UI Components {VERSION}", PAL.ink, 10)
+    c.text(20, 18, f"Foldworks Chest UI Components {VERSION}", PAL.ink, 10)
     c.text(20, 35, "蓝白统一风格组件预览：低装饰、像素边框、清晰槽位", PAL.muted, 7)
 
     x, y = 26, 62
@@ -579,7 +579,7 @@ def draw_chest_preview() -> Image.Image:
     width = margin * 2 + PANEL_W * 4 + gap * 3
     height = margin * 2 + label_h + PANEL_H
     c = Canvas(width, height, SCALE, (244, 250, 255, 255))
-    c.text(margin, 16, f"Pocket Homestead Chest UI Preview {VERSION}", PAL.ink, 10)
+    c.text(margin, 16, f"Foldworks Chest UI Preview {VERSION}", PAL.ink, 10)
     c.text_right(width - margin, 16, "deterministic PNG preview, not wired into game", PAL.muted, 7)
 
     pages = [

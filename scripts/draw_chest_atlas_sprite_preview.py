@@ -6,9 +6,9 @@ from PIL import Image, ImageDraw, ImageFont
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ATLAS = ROOT / "src" / "main" / "resources" / "assets" / "pockethomestead" / "textures" / "gui" / "chest.png"
+ATLAS = ROOT / "src" / "main" / "resources" / "assets" / "foldworks" / "textures" / "gui" / "chest.png"
 OUT = ROOT / "docs" / "client-ui" / "previews" / "chest-atlas-sprites-v1.png"
-FONT_PATH = ROOT / "src" / "main" / "resources" / "assets" / "pockethomestead" / "font" / "notosanssc-regular.ttf"
+FONT_PATH = ROOT / "src" / "main" / "resources" / "assets" / "foldworks" / "font" / "notosanssc-regular.ttf"
 
 LOGICAL = 256
 DISPLAY_SCALE = 4

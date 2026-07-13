@@ -1,0 +1,124 @@
+{
+  "itemGroup.foldworks": "Foldworks",
+
+  "item.foldworks.foldworks_tablet": "Works Terminal",
+  "item.foldworks.storage_upgrade": "Storage Upgrade",
+  "item.foldworks.fluid_upgrade": "Fluid Upgrade",
+  "item.foldworks.network_upgrade": "Network Upgrade",
+  "item.foldworks.energy_transfer_upgrade": "Energy Upgrade",
+  "item.foldworks.stress_upgrade": "Stress Upgrade",
+  "item.foldworks.suite_upgrade": "Suite Upgrade",
+  "item.foldworks.foldworks_chest": "Dimensional Depot",
+
+  "block.foldworks.foldworks_chest": "Dimensional Depot",
+
+  "container.foldworks.foldworks_chest": "Dimensional Depot",
+
+  "foldworks.ui.title": "Foldworks",
+  "foldworks.ui.nav.tablet_chest": "Terminal Storage",
+  "foldworks.ui.nav.create": "Create",
+  "foldworks.ui.nav.manage": "Manage",
+  "foldworks.ui.zoom_in": "Zoom in (Ctrl +)",
+  "foldworks.ui.zoom_out": "Zoom out (Ctrl −)",
+  "foldworks.ui.close": "Close",
+
+  "foldworks.space.create.title": "Create Production Space",
+  "foldworks.space.create.subtitle": "Choose terrain, size and world rules",
+
+  "foldworks.space.terrain": "Terrain",
+  "foldworks.space.terrain.superflat": "Flat",
+  "foldworks.space.terrain.natural": "Natural",
+
+  "foldworks.space.amplitude_enable": "Enable terrain relief tuning (use carefully)",
+  "foldworks.space.amplitude.warning": "This changes natural terrain and may be unstable; it is off by default.",
+  "foldworks.space.amplitude": "Terrain relief (flat ←→ steep)",
+
+  "foldworks.space.size": "Size",
+  "foldworks.space.size.width": "Width X",
+  "foldworks.space.size.depth": "Length Z",
+  "foldworks.space.size.placeholder": "Config limit",
+  "foldworks.space.size.invalid": "Size is outside the configured limit",
+
+  "foldworks.space.dimension": "Inherit Dimension",
+  "foldworks.space.dimension.random": "Random",
+
+  "foldworks.space.biome": "Biome",
+  "foldworks.space.biome.random": "Random",
+  "foldworks.space.biome.inherited": "(Infinite world inherits the dimension's biomes)",
+  "foldworks.space.biome.pick_dim_first": "Select an inherit dimension first",
+
+  "foldworks.space.infinite": "Infinite world (clone dimension)",
+  "foldworks.space.infinite_tag": "Infinite",
+
+  "foldworks.space.mob_spawning": "Mob Spawning",
+  "foldworks.space.structures": "Structures",
+
+  "foldworks.space.create_and_enter": "Create & Enter",
+  "foldworks.space.creating": "Creating...",
+  "foldworks.space.cancel": "Cancel",
+
+  "foldworks.space.delete.confirm_title": "Confirm Delete",
+  "foldworks.space.delete.confirm_body": "Delete \"%s\"? This cannot be undone",
+  "foldworks.space.delete.confirm_ok": "Delete",
+
+  "foldworks.permission.title": "Permissions",
+  "foldworks.permission.private": "Private",
+  "foldworks.permission.public": "Public",
+  "foldworks.permission.whitelist": "Allowlist",
+  "foldworks.permission.blacklist": "Blocklist",
+  "foldworks.permission.add": "Add",
+  "foldworks.permission.empty": "List is empty",
+  "foldworks.permission.name_hint": "Player name",
+  "foldworks.permission.no_list_hint": "This mode needs no list",
+  "foldworks.permission.player_not_found": "Player not found: %s",
+  "foldworks.permission.denied": "You do not have permission to do this",
+
+  "foldworks.tablet.bound": "Works Terminal bound to %s",
+  "foldworks.tablet.bound_tooltip": "Bound depot: %s",
+  "foldworks.tablet.bound_location": "%s @ %s, %s, %s",
+
+  "foldworks.space.list.title": "Production Spaces",
+  "foldworks.space.list.in_space": "You are inside a production space",
+  "foldworks.space.list.choose": "Choose a production space to enter",
+  "foldworks.space.list.no_spaces": "No production spaces yet",
+  "foldworks.space.list.create_first": "Create your first production space",
+  "foldworks.space.list.current": "Current",
+  "foldworks.space.list.enter": "Enter",
+  "foldworks.space.list.new": "New",
+  "foldworks.space.list.new_space": "New Space",
+  "foldworks.space.list.exit": "Exit",
+  "foldworks.space.list.close": "Close",
+
+  "commands.foldworks.requires_player": "This command can only be executed by a player",
+  "commands.foldworks.create.invalid_terrain": "Terrain must be superflat, flat, or natural",
+  "commands.foldworks.create.success": "Created space %s (%s), preparing to enter",
+  "commands.foldworks.list.empty": "No accessible spaces",
+  "commands.foldworks.list.entry": "%s %s %s %s %s",
+  "commands.foldworks.enter.not_found": "Cannot find an accessible space",
+  "commands.foldworks.enter.success": "Entered space %s",
+  "commands.foldworks.exit.success": "Left the production space",
+  "commands.foldworks.delete.not_found": "Space not found",
+  "commands.foldworks.delete.success": "Deleted space %s",
+  "commands.foldworks.delete.not_owner": "Only the owner can delete this space",
+
+  "foldworks.chest.id_label": "ID:",
+  "foldworks.chest.id_hint": "Chest ID",
+  "foldworks.chest.rate_label": "R:",
+  "foldworks.chest.transfer_on": "Trans: ON",
+  "foldworks.chest.transfer_off": "Trans: OFF",
+  "foldworks.chest.void_on": "Void: ON",
+  "foldworks.chest.void_off": "Void: OFF",
+  "foldworks.chest.energy": "Energy",
+  "foldworks.chest.stress": "Stress",
+  "foldworks.chest.side_config": "Side Config",
+
+  "foldworks.team.delete.not_empty": "Transfer graph under this team is not empty. Remove all nodes and edges before deleting.",
+  "foldworks.team.invite.received": "%s invited you to join team \"%s\"",
+  "foldworks.team.invite.accepted": "Joined team \"%s\"",
+  "foldworks.team.invite.declined": "Declined the invite to team \"%s\"",
+  "foldworks.team.invite.accepted_notice": "%s accepted the invite to team \"%s\"",
+  "foldworks.team.invite.declined_notice": "%s declined the invite to team \"%s\"",
+
+  "foldworks.space.create.limit_exceeded": "Space count limit reached (%s)",
+  "foldworks.space.create.insufficient_exp": "Insufficient experience, requires %s XP"
+}

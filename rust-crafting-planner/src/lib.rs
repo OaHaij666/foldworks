@@ -1,9 +1,10 @@
-//! Pocket Homestead — Rust 合成规划器（稀疏数组优化版）
+//! Foldworks — Rust 合成规划器（稀疏数组优化版）
 //!
 //! 通过 JNI 导出，Java 侧通过 DirectByteBuffer 通信。
 //! 核心优化：inventory 和 tools 使用稀疏数组（index = item_id），O(1) 查找。
 
 use std::collections::{HashMap, HashSet};
+use std::sync::{Mutex, OnceLock};
 
 // ── 常量 ──────────────────────────────────────────────────────────────────
 
@@ -44,7 +45,19 @@ struct PlanResult {
 // ── 持久化 Session ──────────────────────────────────────────────────────────
 
 // 服务端单线程，所有 JNI 调用在 Server thread 串行执行，无需锁。
-static mut SESSION: Option<PlannerSession> = None;
+static SESSION: OnceLock<Mutex<Option<PlannerSession>>> = OnceLock::new();
+
+fn session() -> &'static Mutex<Option<PlannerSession>> {
+    SESSION.get_or_init(|| Mutex::new(None))
+}
+
+fn checked_buffer_len(requested: jni::sys::jint, actual_capacity: usize) -> Option<usize> {
+    if requested <= 0 {
+        return None;
+    }
+    let requested = requested as usize;
+    (requested <= actual_capacity).then_some(requested)
+}
 
 struct PlannerSession {
     db: RecipeDatabase,
@@ -328,8 +341,10 @@ impl PlannerSession {
         for r in &self.results {
             self.output_buf.push(r.order_index);
             self.output_buf.extend_from_slice(&r.tool_id.to_le_bytes());
-            self.output_buf.extend_from_slice(&r.output_id.to_le_bytes());
-            self.output_buf.extend_from_slice(&r.time_ticks.to_le_bytes());
+            self.output_buf
+                .extend_from_slice(&r.output_id.to_le_bytes());
+            self.output_buf
+                .extend_from_slice(&r.time_ticks.to_le_bytes());
             self.output_buf.push(if r.is_target_output { 1 } else { 0 });
         }
         &self.output_buf
@@ -423,14 +438,17 @@ fn parse_sync_recipes(buf: &[u8]) -> Option<RecipeDatabase> {
         });
     }
 
-    Some(RecipeDatabase { output_index, recipes })
+    Some(RecipeDatabase {
+        output_index,
+        recipes,
+    })
 }
 
 // ── JNI 导出 ──────────────────────────────────────────────────────────────
 
 /// JNI: syncRecipes — 初始化或刷新配方数据库
 #[no_mangle]
-pub extern "system" fn Java_com_pockethomestead_suite_NativeCraftingPlanner_syncRecipes<'local>(
+pub extern "system" fn Java_com_foldworks_suite_NativeCraftingPlanner_syncRecipes<'local>(
     env: jni::JNIEnv<'local>,
     _class: jni::objects::JClass<'local>,
     input: jni::objects::JByteBuffer<'local>,
@@ -440,12 +458,20 @@ pub extern "system" fn Java_com_pockethomestead_suite_NativeCraftingPlanner_sync
         Ok(ptr) => ptr,
         Err(_) => return 0,
     };
+    let input_capacity = match env.get_direct_buffer_capacity(&input) {
+        Ok(capacity) => capacity,
+        Err(_) => return 0,
+    };
 
-    if input_ptr.is_null() || input_len <= 0 {
+    let input_len = match checked_buffer_len(input_len, input_capacity) {
+        Some(length) => length,
+        None => return 0,
+    };
+    if input_ptr.is_null() {
         return 0;
     }
 
-    let input_buf = unsafe { std::slice::from_raw_parts(input_ptr, input_len as usize) };
+    let input_buf = unsafe { std::slice::from_raw_parts(input_ptr, input_len) };
 
     let db = match parse_sync_recipes(input_buf) {
         Some(db) => db,
@@ -454,16 +480,18 @@ pub extern "system" fn Java_com_pockethomestead_suite_NativeCraftingPlanner_sync
 
     let session = PlannerSession::new(db);
 
-    unsafe {
-        SESSION = Some(session);
-    }
+    let mut guard = match session().lock() {
+        Ok(guard) => guard,
+        Err(_) => return 0,
+    };
+    *guard = Some(session);
 
     1
 }
 
 /// JNI: updateStateAndPlan — 更新状态 + 规划 + 返回结果
 #[no_mangle]
-pub extern "system" fn Java_com_pockethomestead_suite_NativeCraftingPlanner_updateStateAndPlan<'local>(
+pub extern "system" fn Java_com_foldworks_suite_NativeCraftingPlanner_updateStateAndPlan<'local>(
     env: jni::JNIEnv<'local>,
     _class: jni::objects::JClass<'local>,
     input: jni::objects::JByteBuffer<'local>,
@@ -471,9 +499,12 @@ pub extern "system" fn Java_com_pockethomestead_suite_NativeCraftingPlanner_upda
     output: jni::objects::JByteBuffer<'local>,
     output_capacity: jni::sys::jint,
 ) -> jni::sys::jint {
-    let session = unsafe { SESSION.as_mut() };
-    let session = match session {
-        Some(s) => s,
+    let mut guard = match session().lock() {
+        Ok(guard) => guard,
+        Err(_) => return 0,
+    };
+    let session = match guard.as_mut() {
+        Some(value) => value,
         None => return 0,
     };
 
@@ -485,12 +516,28 @@ pub extern "system" fn Java_com_pockethomestead_suite_NativeCraftingPlanner_upda
         Ok(ptr) => ptr,
         Err(_) => return 0,
     };
+    let input_capacity = match env.get_direct_buffer_capacity(&input) {
+        Ok(capacity) => capacity,
+        Err(_) => return 0,
+    };
+    let actual_output_capacity = match env.get_direct_buffer_capacity(&output) {
+        Ok(capacity) => capacity,
+        Err(_) => return 0,
+    };
 
-    if input_ptr.is_null() || output_ptr.is_null() || input_len <= 0 || output_capacity <= 0 {
+    let input_len = match checked_buffer_len(input_len, input_capacity) {
+        Some(length) => length,
+        None => return 0,
+    };
+    let output_capacity = match checked_buffer_len(output_capacity, actual_output_capacity) {
+        Some(length) => length,
+        None => return 0,
+    };
+    if input_ptr.is_null() || output_ptr.is_null() {
         return 0;
     }
 
-    let input_buf = unsafe { std::slice::from_raw_parts(input_ptr, input_len as usize) };
+    let input_buf = unsafe { std::slice::from_raw_parts(input_ptr, input_len) };
 
     if !session.update_state(input_buf) {
         return 0;
@@ -499,7 +546,7 @@ pub extern "system" fn Java_com_pockethomestead_suite_NativeCraftingPlanner_upda
     session.plan();
     let result_bytes = session.encode_results();
 
-    let write_len = result_bytes.len().min(output_capacity as usize);
+    let write_len = result_bytes.len().min(output_capacity);
     if write_len > 0 {
         unsafe {
             std::ptr::copy_nonoverlapping(result_bytes.as_ptr(), output_ptr, write_len);
@@ -515,11 +562,26 @@ pub extern "system" fn Java_com_pockethomestead_suite_NativeCraftingPlanner_upda
 mod tests {
     use super::*;
 
-    fn build_sync_input(items: &[&str], recipes: &[(&str, u8, &str, u16, Vec<Vec<&str>>)]) -> Vec<u8> {
+    #[test]
+    fn checked_buffer_len_rejects_invalid_lengths() {
+        assert_eq!(checked_buffer_len(-1, 16), None);
+        assert_eq!(checked_buffer_len(0, 16), None);
+        assert_eq!(checked_buffer_len(17, 16), None);
+        assert_eq!(checked_buffer_len(16, 16), Some(16));
+    }
+
+    fn build_sync_input(
+        items: &[&str],
+        recipes: &[(&str, u8, &str, u16, Vec<Vec<&str>>)],
+    ) -> Vec<u8> {
         let mut buf = Vec::new();
         write_u8(&mut buf, 0x01);
 
-        let name_to_id: HashMap<&str, u16> = items.iter().enumerate().map(|(i, &n)| (n, i as u16)).collect();
+        let name_to_id: HashMap<&str, u16> = items
+            .iter()
+            .enumerate()
+            .map(|(i, &n)| (n, i as u16))
+            .collect();
 
         write_u16(&mut buf, items.len() as u16);
         for name in items {
@@ -593,7 +655,11 @@ mod tests {
         let recipes = &[("stick", 4, "crafting_table", 20, vec![vec!["planks"]])];
         let sync_buf = build_sync_input(items, recipes);
 
-        let name_to_id: HashMap<&str, u16> = items.iter().enumerate().map(|(i, &n)| (n, i as u16)).collect();
+        let name_to_id: HashMap<&str, u16> = items
+            .iter()
+            .enumerate()
+            .map(|(i, &n)| (n, i as u16))
+            .collect();
         let plan_buf = build_plan_input(
             10,
             &[("planks", 64)],
@@ -616,7 +682,11 @@ mod tests {
         ];
         let sync_buf = build_sync_input(items, recipes);
 
-        let name_to_id: HashMap<&str, u16> = items.iter().enumerate().map(|(i, &n)| (n, i as u16)).collect();
+        let name_to_id: HashMap<&str, u16> = items
+            .iter()
+            .enumerate()
+            .map(|(i, &n)| (n, i as u16))
+            .collect();
         let plan_buf = build_plan_input(
             10,
             &[("log", 64)],
@@ -635,14 +705,12 @@ mod tests {
         let recipes: &[(&str, u8, &str, u16, Vec<Vec<&str>>)] = &[];
         let sync_buf = build_sync_input(items, recipes);
 
-        let name_to_id: HashMap<&str, u16> = items.iter().enumerate().map(|(i, &n)| (n, i as u16)).collect();
-        let plan_buf = build_plan_input(
-            10,
-            &[],
-            &[],
-            &[("something", 1, 0, 0)],
-            &name_to_id,
-        );
+        let name_to_id: HashMap<&str, u16> = items
+            .iter()
+            .enumerate()
+            .map(|(i, &n)| (n, i as u16))
+            .collect();
+        let plan_buf = build_plan_input(10, &[], &[], &[("something", 1, 0, 0)], &name_to_id);
 
         let results = run_plan(&sync_buf, &plan_buf);
         assert!(results.is_empty());
@@ -654,7 +722,11 @@ mod tests {
         let recipes = &[("stick", 4, "crafting_table", 20, vec![vec!["planks"]])];
         let sync_buf = build_sync_input(items, recipes);
 
-        let name_to_id: HashMap<&str, u16> = items.iter().enumerate().map(|(i, &n)| (n, i as u16)).collect();
+        let name_to_id: HashMap<&str, u16> = items
+            .iter()
+            .enumerate()
+            .map(|(i, &n)| (n, i as u16))
+            .collect();
         let plan_buf = build_plan_input(
             10,
             &[("planks", 10)],

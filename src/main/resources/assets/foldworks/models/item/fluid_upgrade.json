@@ -1,0 +1,6 @@
+{
+  "parent": "foldworks:item/upgrade_card",
+  "textures": {
+    "layer0": "foldworks:item/fluid_upgrade"
+  }
+}

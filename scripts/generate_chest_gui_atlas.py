@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "src" / "main" / "resources" / "assets" / "pockethomestead" / "textures" / "gui" / "chest.png"
+OUT = ROOT / "src" / "main" / "resources" / "assets" / "foldworks" / "textures" / "gui" / "chest.png"
 MCMETA = OUT.with_suffix(OUT.suffix + ".mcmeta")
 
 # Java keeps using a 256x256 logical atlas. The generated PNG is larger so

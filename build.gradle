@@ -75,9 +75,23 @@ configurations {
     runtimeClasspath.extendsFrom localRuntime
 }
 
+def skipCreateRuntime = providers.gradleProperty("skipCreateRuntime").map { it.toBoolean() }.orElse(false)
+def createDevJars = files(
+        "libs/create-dev/create-1.21.1-6.0.10-devpatched.jar",
+        "libs/create-dev/ponder-neoforge-1.0.82+mc1.21.1.jar",
+        "libs/create-dev/Registrate-MC1.21-1.3.0+67.jar",
+        "libs/create-dev/flywheel-neoforge-1.21.1-1.0.6.jar"
+)
+def hasCreateDevJars = createDevJars.files.every { it.isFile() }
+
 dependencies {
-    implementation("dev.galacticraft:dynamicdimensions-neoforge:${dynamicdimensions_version}") {
-        exclude group: "lol.bai", module: "badpackets"
+    def localDynamicDimensionsJar = providers.gradleProperty("localDynamicDimensionsJar")
+    if (localDynamicDimensionsJar.isPresent()) {
+        implementation files(localDynamicDimensionsJar.get())
+    } else {
+        implementation("dev.galacticraft:dynamicdimensions-neoforge:${dynamicdimensions_version}") {
+            exclude group: "lol.bai", module: "badpackets"
+        }
     }
 
     // badpackets 是 DynamicDimensions 的运行时依赖，用于在客户端-服务端之间同步动态维度注册信息。
@@ -86,16 +100,35 @@ dependencies {
     runtimeOnly files("libs/badpackets-neo-0.8.2.jar")
 
     // Create 是可选兼容：编译期只引用 API，打包不内置；runClient 默认使用 patched jar 方便开发启动。
-    def createDevJars = files(
-            "libs/create-dev/create-1.21.1-6.0.10-devpatched.jar",
-            "libs/create-dev/ponder-neoforge-1.0.82+mc1.21.1.jar",
-            "libs/create-dev/Registrate-MC1.21-1.3.0+67.jar",
-            "libs/create-dev/flywheel-neoforge-1.21.1-1.0.6.jar"
-    )
-    compileOnly createDevJars
-    if (!providers.gradleProperty("skipCreateRuntime").map { it.toBoolean() }.orElse(false).get()) {
+    if (hasCreateDevJars) {
+        compileOnly createDevJars
+    }
+    if (hasCreateDevJars && !skipCreateRuntime.get()) {
         localRuntime createDevJars
     }
+
+    testImplementation platform("org.junit:junit-bom:5.11.4")
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+tasks.named("test", Test).configure {
+    useJUnitPlatform()
+}
+
+if (skipCreateRuntime.get() || !hasCreateDevJars) {
+    sourceSets.main.java.exclude(
+            "com/foldworks/compat/create/CreateFoldworksChestBlock.java",
+            "com/foldworks/compat/create/CreateFoldworksChestBlockEntity.java",
+            "com/foldworks/compat/create/CreateMovementCompat.java",
+            "com/foldworks/compat/create/CreateMovementRegistries.java",
+            "com/foldworks/compat/create/FoldworksChestMovementBehaviour.java",
+            "com/foldworks/compat/create/FoldworksMountedFluidStorage.java",
+            "com/foldworks/compat/create/FoldworksMountedFluidStorageType.java",
+            "com/foldworks/compat/create/FoldworksMountedItemStorage.java",
+            "com/foldworks/compat/create/FoldworksMountedItemStorageType.java",
+            "com/foldworks/compat/create/client/CreateChestShaftRenderer.java"
+    )
 }
 
 var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {

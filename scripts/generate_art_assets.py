@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "src/main/resources/assets/pockethomestead"
+ASSETS = ROOT / "src/main/resources/assets/foldworks"
 BLOCK = ASSETS / "textures/block"
 ITEM = ASSETS / "textures/item"
 MODEL_BLOCK = ASSETS / "models/block"
@@ -796,16 +796,16 @@ def plane_element(name: str, frm, to, side: str, texture: str):
 
 def generate_chest_model() -> dict:
     return {
-        "credit": "Pocket Homestead - brass mechanical side-configurable chest",
+        "credit": "Foldworks - brass mechanical side-configurable chest",
         "textures": {
-            "side": "pockethomestead:block/chest_face_side",
-            "cap": "pockethomestead:block/chest_face_cap",
-            "item_port": "pockethomestead:block/chest_item_port",
-            "fluid_window": "pockethomestead:block/chest_fluid_window",
-            "energy_core": "pockethomestead:block/chest_energy_core",
-            "bearing_ring": "pockethomestead:block/chest_bearing_ring",
-            "bearing_shaft": "pockethomestead:block/chest_bearing_shaft",
-            "particle": "pockethomestead:block/chest_face_side",
+            "side": "foldworks:block/chest_face_side",
+            "cap": "foldworks:block/chest_face_cap",
+            "item_port": "foldworks:block/chest_item_port",
+            "fluid_window": "foldworks:block/chest_fluid_window",
+            "energy_core": "foldworks:block/chest_energy_core",
+            "bearing_ring": "foldworks:block/chest_bearing_ring",
+            "bearing_shaft": "foldworks:block/chest_bearing_shaft",
+            "particle": "foldworks:block/chest_face_side",
         },
         "elements": [
             {
@@ -862,7 +862,7 @@ def write_mcmeta() -> None:
             json.dumps({"animation": {"frametime": 7, "frames": [0, 1, 2, 3]}}, indent=2) + "\n",
             encoding="utf-8",
         )
-    (ITEM / "homestead_tablet.png.mcmeta").write_text(
+    (ITEM / "foldworks_tablet.png.mcmeta").write_text(
         json.dumps({"animation": {"frametime": 7, "frames": list(range(8))}}, indent=2) + "\n",
         encoding="utf-8",
     )
@@ -896,7 +896,7 @@ def make_preview(paths: list[Path]) -> None:
         checker.alpha_composite(preview)
         sheet.alpha_composite(checker, (x, y))
         draw.text((x, y + preview.height + 5), path.name, fill=(230, 230, 220, 255), font=font)
-    save(sheet, PREVIEW / "pockethomestead_art_sheet.png")
+    save(sheet, PREVIEW / "foldworks_art_sheet.png")
 
 
 def main() -> None:
@@ -918,13 +918,13 @@ def main() -> None:
         ITEM / "energy_transfer_upgrade.png": generate_energy_upgrade(),
         ITEM / "stress_upgrade.png": generate_stress_upgrade(),
         ITEM / "suite_upgrade.png": generate_suite_upgrade(),
-        ITEM / "homestead_tablet.png": generate_tablet(),
+        ITEM / "foldworks_tablet.png": generate_tablet(),
     }
     for path, image in outputs.items():
         save(image, path)
     write_mcmeta()
     MODEL_BLOCK.mkdir(parents=True, exist_ok=True)
-    (MODEL_BLOCK / "homestead_chest.json").write_text(
+    (MODEL_BLOCK / "foldworks_chest.json").write_text(
         json.dumps(generate_chest_model(), indent=2) + "\n",
         encoding="utf-8",
     )
